@@ -1,0 +1,6 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+	<style>
+		.s0 { fill: #ff0000 } 
+	</style>
+	<path id="traps" class="s0" d="m381 317l18-9 16-8 14-8 13-8 9-5 7-4 9-7 13-8v18l-1 16-3 12-1 10-1 9zm221-23v9l2 10 2 12 19-1 12-1 14-1 33-4 17-1-46-23-22-12-13-8-8-5-12-9v17z"/>
+</svg>

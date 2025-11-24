@@ -1,0 +1,36 @@
+name: gymguide_app
+description: A new Flutter project.
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.2
+  google_fonts: ^6.1.0
+  flutter_svg: ^2.0.7
+  supabase_flutter: ^2.0.0
+  video_player: ^2.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^5.0.0
+
+flutter:
+
+  uses-material-design: true
+
+  # ------ ASSETS ------
+  assets:
+
+    - assets/svg/male/front/
+    - assets/svg/male/back/
+    - assets/svg/female/front/
+    - assets/svg/female/back/
