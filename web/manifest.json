@@ -1,6 +1,6 @@
 {
-    "name": "gymguide_app",
-    "short_name": "gymguide_app",
+    "name": "GymGuide",
+    "short_name": "GymGuide",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -1,3 +1,46 @@
+buildscript {
+    ext.kotlin_version = '1.8.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.3.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+// Define global variables for plugins that rely on them
+ext {
+    compileSdkVersion = 34
+    minSdkVersion = 23
+    targetSdkVersion = 34
+    ndkVersion = "25.1.8937393"
+    flutterSdkPath = null
+}
+
+// Add Flutter SDK path resolution for legacy plugins
+def localPropertiesFile = rootProject.file("local.properties")
+def localProperties = new Properties()
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+ext.flutterSdkPath = localProperties.getProperty('flutter.sdk')
+
+// Create flutter extension for backward compatibility
+ext.flutter = [
+    compileSdkVersion: ext.compileSdkVersion,
+    minSdkVersion: ext.minSdkVersion,
+    targetSdkVersion: ext.targetSdkVersion,
+    ndkVersion: ext.ndkVersion,
+    versionCode: 1,
+    versionName: "1.0.0"
+]
+
 allprojects {
     repositories {
         google()

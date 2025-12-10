@@ -1,0 +1,150 @@
+// Add these methods to meal_plan_page.dart and progress_page.dart
+
+// For MealPlanPage - add before _buildDayCard method (around line 1026)
+Widget _buildDesktopLayout() {
+  final bgColor = _isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F7FA);
+
+  return Scaffold(
+    backgroundColor: bgColor,
+    body: Column(
+      children: [
+        RedHeader(
+          title: 'Fri : Day 26',
+          subtitle: 'Your Meal Plan',
+          onToggleTheme: widget.toggleTheme,
+          isDarkMode: widget.isDarkMode,
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bannerWidth = constraints.maxWidth * 0.4;
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(24),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: _buildPlannerContent(isDarkMode),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  Container(
+                    width: bannerWidth,
+                    padding: const EdgeInsets.only(top: 24, right: 24, bottom: 24),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Banner Area\n40% Width',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _isDarkMode ? Colors.white54 : Colors.black54,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// For ProgressPage - add before build method ends (around line 968)
+Widget _buildDesktopLayout() {
+  const red = Color(0xFFFF0000);
+  final bgColor = isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5);
+
+  return Scaffold(
+    backgroundColor: bgColor,
+    body: Column(
+      children: [
+        RedHeader(
+          title: 'Progress',
+          subtitle: 'Week 3 of 8 • Plan: Lose belly fat',
+          onToggleTheme: toggleTheme,
+          isDarkMode: isDarkMode,
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bannerWidth = constraints.maxWidth * 0.4;
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            children: [
+                              _OverallPlanCard(isDarkMode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _ThisWeekStats(is Dark Mode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _WeeklyTrendChart(isDarkMode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _StreakCard(isDarkMode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _WeeklyMetricsEntryCard(isDarkMode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _BodyMetricsCard(isDarkMode: isDarkMode),
+                              const SizedBox(height: 16),
+                              _NutritionProgressCard(isDarkMode: isDarkMode),
+                              const SizedBox(height: 20),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  Container(
+                    width: bannerWidth,
+                    padding: const EdgeInsets.only(top: 24, right: 24, bottom: 24),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Banner Area\n40% Width',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: isDarkMode ? Colors.white54 : Colors.black54,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+}

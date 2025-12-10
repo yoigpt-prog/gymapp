@@ -1,89 +1,182 @@
 import 'package:flutter/material.dart';
+import '../widgets/red_header.dart';
+import 'legal/privacy_policy_page.dart';
+import 'legal/terms_of_service_page.dart';
+import 'legal/disclaimer_page.dart';
+import 'legal/copyright_page.dart';
 
-class MorePage extends StatefulWidget {
+import 'legal/age_requirement_page.dart';
+import 'legal/subscription_terms_page.dart';
+import 'legal/data_export_page.dart';
+import 'legal/delete_account_page.dart';
+
+
+
+class SettingsPage extends StatefulWidget {
   final VoidCallback toggleTheme;
   final bool isDarkMode;
 
-  const MorePage({
+  const SettingsPage({
     Key? key,
     required this.toggleTheme,
     required this.isDarkMode,
   }) : super(key: key);
 
   @override
-  State<MorePage> createState() => _MorePageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _MorePageState extends State<MorePage> {
+class _SettingsPageState extends State<SettingsPage> {
   bool notificationsOn = true;
 
   // Colors used in the design
   final Color _red = const Color(0xFFFF0000);
   final Color _lightGreyBg = const Color(0xFFF5F5F5);
 
+  // Scroll controller for hiding header
+  final ScrollController _scrollController = ScrollController();
+  bool _showHeader = true;
+  double _lastScrollOffset = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final currentScrollOffset = _scrollController.offset;
+    
+    if (currentScrollOffset > _lastScrollOffset && currentScrollOffset > 50) {
+      if (_showHeader) {
+        setState(() => _showHeader = false);
+      }
+    } else if (currentScrollOffset < _lastScrollOffset) {
+      if (!_showHeader) {
+        setState(() => _showHeader = true);
+      }
+    }
+    
+    _lastScrollOffset = currentScrollOffset;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _lightGreyBg,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: 24),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 16),
-                    _buildActivePlanSection(),
-                    _buildAccountSection(),
-                    _buildLegalSection(),
-                    _buildSubscriptionSection(),
-                    _buildDangerZoneSection(),
-                  ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth > 800;
+        final backgroundColor = widget.isDarkMode ? const Color(0xFF121212) : (isDesktop ? const Color(0xFFF5F7FA) : _lightGreyBg);
+        
+        return Scaffold(
+          backgroundColor: backgroundColor,
+          body: Column(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: _showHeader ? null : 0,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _showHeader ? 1.0 : 0.0,
+                  child: RedHeader(
+                    title: 'Settings',
+                    subtitle: 'Manage your preferences',
+                    onToggleTheme: widget.toggleTheme,
+                    isDarkMode: widget.isDarkMode,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
+              Expanded(
+                child: isDesktop 
+                  ? _buildDesktopLayout() 
+                  : _buildMobileLayout(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          _buildGeneralSection(),
+          _buildPersonalDataSection(),
+
+          _buildLegalSection(),
+          _buildHealthSafetySection(),
+          _buildSubscriptionSection(),
+          _buildAccountSection(),
+        ],
       ),
     );
   }
 
-  // ---------------- HEADER ----------------
+  Widget _buildDesktopLayout() {
+    return Scrollbar(
+      thumbVisibility: true,
+      controller: _scrollController,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1200),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'App Preferences',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 24,
+                  runSpacing: 24,
+                  children: [
+                    SizedBox(width: 400, child: _buildGeneralSection()),
+                    SizedBox(width: 400, child: _buildPersonalDataSection()),
 
-  Widget _buildHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-      decoration: BoxDecoration(
-        color: _red,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(24),
-          bottomRight: Radius.circular(24),
+                    SizedBox(width: 400, child: _buildSubscriptionSection()),
+                  ],
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  'Legal & Support',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 24,
+                  runSpacing: 24,
+                  children: [
+                    SizedBox(width: 400, child: _buildLegalSection()),
+                    SizedBox(width: 400, child: _buildHealthSafetySection()),
+                    SizedBox(width: 400, child: _buildAccountSection()),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Settings',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Manage your account settings',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 15,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -91,16 +184,22 @@ class _MorePageState extends State<MorePage> {
   // ---------------- SECTIONS ----------------
 
   Widget _buildCard({required Widget child}) {
+    final cardColor = widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
+    
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(vertical: 8), 
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
+        border: Border.all(
+          color: widget.isDarkMode ? Colors.white12 : Colors.black12,
+          width: 1,
+        ),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black12,
+            color: widget.isDarkMode ? Colors.black26 : Colors.black.withOpacity(0.05),
             blurRadius: 8,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -109,60 +208,30 @@ class _MorePageState extends State<MorePage> {
   }
 
   Widget _buildSectionTitle(String title) {
+    final titleColor = widget.isDarkMode ? Colors.white60 : Colors.grey;
+    
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Text(
         title.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,
-          color: Colors.grey,
+          color: titleColor,
           letterSpacing: 0.5,
         ),
       ),
     );
   }
 
-  // ---- Active Plan ----
+  // ---- General ----
 
-  Widget _buildActivePlanSection() {
+  Widget _buildGeneralSection() {
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('My Active Plans'),
-          _buildMenuItem(
-            iconEmoji: '💪',
-            label: 'Current Workout Plan',
-            description: 'Full Body Strength Training',
-            trailing: IconButton(
-              onPressed: () => _confirmDeletePlan('workout'),
-              icon: const Icon(Icons.close, color: Colors.red),
-              tooltip: 'Delete plan',
-            ),
-            onTap: () {
-              _showMessage('Opening workout plan details…');
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---- Account ----
-
-  Widget _buildAccountSection() {
-    return _buildCard(
-      child: Column(
-        children: [
-          _buildMenuItem(
-            iconEmoji: '👤',
-            label: 'My Account',
-            description: 'View and edit your profile',
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: ACCOUNT'),
-          ),
-          const Divider(height: 1),
+          _buildSectionTitle('General'),
           _buildMenuItem(
             iconEmoji: '🔔',
             label: 'Notifications',
@@ -197,6 +266,39 @@ class _MorePageState extends State<MorePage> {
     );
   }
 
+  // ---- Personal Data ----
+
+  Widget _buildPersonalDataSection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle('Personal Data'),
+          _buildMenuItem(
+            iconEmoji: '📥',
+            label: 'Download My Data',
+            description: 'Export your personal data',
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DataExportPage())),
+          ),
+          const Divider(height: 1),
+          _buildMenuItem(
+            iconEmoji: '🗑️',
+            label: 'Delete Account',
+            description: 'Permanently delete your data',
+            isDanger: true,
+            trailing: const Icon(Icons.chevron_right, color: Color(0xFFFF0000)),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DeleteAccountPage())),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- AI Transparency ----
+
+
+
   // ---- Legal & Privacy ----
 
   Widget _buildLegalSection() {
@@ -210,7 +312,7 @@ class _MorePageState extends State<MorePage> {
             label: 'EULA',
             description: 'End User License Agreement',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: EULA'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const TermsOfServicePage())),
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -218,15 +320,27 @@ class _MorePageState extends State<MorePage> {
             label: 'Privacy Policy',
             description: 'How we protect your data',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: PRIVACY POLICY'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PrivacyPolicyPage())),
           ),
-          const Divider(height: 1),
+        ],
+      ),
+    );
+  }
+
+  // ---- Health & Safety ----
+
+  Widget _buildHealthSafetySection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle('Health & Safety'),
           _buildMenuItem(
             iconEmoji: '⚠️',
             label: 'Disclaimer',
             description: 'Legal information',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: DISCLAIMER'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DisclaimerPage())),
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -234,7 +348,15 @@ class _MorePageState extends State<MorePage> {
             label: 'Copyright',
             description: 'Intellectual property info',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: COPYRIGHT'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CopyrightPage())),
+          ),
+          const Divider(height: 1),
+          _buildMenuItem(
+            iconEmoji: '🔞',
+            label: 'Age Requirement',
+            description: 'Minimum age to use this app',
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AgeRequirementPage())),
           ),
         ],
       ),
@@ -254,28 +376,36 @@ class _MorePageState extends State<MorePage> {
             label: 'Manage Subscription',
             description: 'Cancel trial or subscription',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Open: SUBSCRIPTION'),
+            onTap: () => _showMessage('Subscription management coming soon'),
+          ),
+          const Divider(height: 1),
+          _buildMenuItem(
+            iconEmoji: '📋',
+            label: 'Subscription Terms',
+            description: 'View terms and conditions',
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SubscriptionTermsPage())),
           ),
         ],
       ),
     );
   }
 
-  // ---- Danger Zone ----
+  // ---- Account ----
 
-  Widget _buildDangerZoneSection() {
+  Widget _buildAccountSection() {
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('Danger Zone'),
+          _buildSectionTitle('Account'),
           _buildMenuItem(
-            iconEmoji: '🗑️',
-            label: 'Delete Account',
-            description: 'Permanently delete your data',
+            iconEmoji: '🚪',
+            label: 'Sign Out',
+            description: 'Log out of your account',
             isDanger: true,
-            trailing: const Icon(Icons.chevron_right, color: Colors.red),
-            onTap: _confirmDeleteAccount,
+            trailing: const Icon(Icons.chevron_right, color: Color(0xFFFF0000)),
+            onTap: _confirmSignOut,
           ),
         ],
       ),
@@ -292,12 +422,15 @@ class _MorePageState extends State<MorePage> {
     bool isDanger = false,
     VoidCallback? onTap,
   }) {
-    final Color labelColor = isDanger ? _red : const Color(0xFF1A1A1A);
+    final Color labelColor = isDanger 
+        ? const Color(0xFFFF0000) 
+        : (widget.isDarkMode ? Colors.white : const Color(0xFF1A1A1A));
+    final Color descriptionColor = widget.isDarkMode ? Colors.white60 : Colors.grey;
 
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
             Container(
@@ -329,9 +462,9 @@ class _MorePageState extends State<MorePage> {
                   const SizedBox(height: 2),
                   Text(
                     description,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Colors.grey,
+                      color: descriptionColor,
                     ),
                   ),
                 ],
@@ -356,18 +489,13 @@ class _MorePageState extends State<MorePage> {
     );
   }
 
-  void _confirmDeletePlan(String planType) async {
-    final planName = planType == 'workout'
-        ? 'Full Body Strength Training'
-        : 'Your plan';
-
-    final first = await showDialog<bool>(
+  void _confirmSignOut() async {
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Plan?'),
-        content: Text(
-          'Are you sure you want to delete:\n\n$planName\n\n'
-          'This action cannot be undone.',
+        title: const Text('Sign Out'),
+        content: const Text(
+          'Are you sure you want to sign out of your account?',
         ),
         actions: [
           TextButton(
@@ -376,98 +504,15 @@ class _MorePageState extends State<MorePage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Sign Out', style: TextStyle(color: Color(0xFFFF0000))),
           ),
         ],
       ),
     );
 
-    if (first != true) return;
-
-    final second = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Final Confirmation'),
-        content: const Text(
-          'This is your last chance!\n\n'
-          'Click DELETE to permanently remove this plan.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Keep Plan'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (second == true) {
-      _showMessage('Plan deleted successfully!');
-      // TODO: call your backend to delete the plan
-    } else {
-      _showMessage('Deletion cancelled. Your plan is safe!');
-    }
-  }
-
-  void _confirmDeleteAccount() async {
-    final first = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'Are you sure you want to delete your account?\n\n'
-          'This will permanently delete:\n'
-          '• All workout data\n'
-          '• Meal plans\n'
-          '• Progress history\n'
-          '• Account settings\n\n'
-          'This action CANNOT be undone!',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (first != true) return;
-
-    final second = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Final Warning'),
-        content: const Text(
-          'This is your LAST CHANCE to cancel!\n\n'
-          'Click DELETE to permanently delete your account.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Keep Account'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (second == true) {
-      _showMessage('Account deletion initiated. Your account will be deleted within 24 hours.');
-      // TODO: call your backend to delete account
-    } else {
-      _showMessage('Account deletion cancelled. Your account is safe!');
+    if (confirm == true) {
+      _showMessage('Signing out...');
+      // TODO: call your backend to sign out
     }
   }
 }

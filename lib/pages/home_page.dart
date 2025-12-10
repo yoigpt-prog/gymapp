@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import '../widgets/red_header.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -23,171 +24,995 @@ class _HomePageState extends State<HomePage> {
   String? _highlightedMuscle; // e.g. 'abs'
   String? _selectedMuscle; // For detail view
 
-  final List<ExerciseDetail> _exercises = []; // Removed mock data
+  // Pagination state
+  final int _pageSize = 20;
+  List<ExerciseDetail> _exercises = [];
+  bool _isLoading = false;
+  bool _hasMore = true;
+  int _currentPage = 0;
+  
+  // Video Autoplay state
+  int? _playingIndex;
+
+  // Filter state
+  bool _filterFavorites = false;
+  Set<String> _selectedDifficulties = {};
+  Set<String> _selectedWorkoutTypes = {};
+  Set<String> _selectedEquipment = {};
+
+  // Search state
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Scroll controller for hiding header
+  final ScrollController _scrollController = ScrollController();
+  bool _showHeader = true;
+  double _lastScrollOffset = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _debugCheckData();
+  }
+
+  Future<void> _debugCheckData() async {
+    try {
+      // Fetch a sample of exercises to see what the data looks like
+      final response = await Supabase.instance.client
+          .from('exercises')
+          .select('group_path, gender')
+          .limit(20);
+      
+      debugPrint('--- SUPABASE DEBUG DATA ---');
+      if (response.isEmpty) {
+        debugPrint('No exercises found in DB at all!');
+      } else {
+        debugPrint('Found ${response.length} sample rows:');
+        for (var row in response) {
+          debugPrint('group_path: "${row['group_path']}", gender: "${row['gender']}"');
+        }
+      }
+      debugPrint('---------------------------');
+    } catch (e) {
+      debugPrint('Error checking DB data: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    _handleHeaderVisibility();
+    _handlePagination();
+    _handleVideoAutoplay();
+  }
+
+  void _handleHeaderVisibility() {
+    final currentScrollOffset = _scrollController.offset;
+    if (currentScrollOffset > _lastScrollOffset && currentScrollOffset > 50) {
+      if (_showHeader) setState(() => _showHeader = false);
+    } else if (currentScrollOffset < _lastScrollOffset) {
+      if (!_showHeader) setState(() => _showHeader = true);
+    }
+    _lastScrollOffset = currentScrollOffset;
+  }
+
+  void _handlePagination() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 500) {
+      _loadMoreExercises();
+    }
+  }
+
+  void _handleVideoAutoplay() {
+    if (_selectedMuscle == null || _exercises.isEmpty) return;
+
+    // Estimate item height (Card + margin)
+    const double itemHeight = 550.0;
+    
+    final scrollOffset = _scrollController.offset;
+    final viewportHeight = _scrollController.position.viewportDimension;
+    final centerOffset = scrollOffset + viewportHeight / 2;
+
+    // Calculate index based on offset
+    double listStartOffset = 150.0; 
+    
+    int newPlayingIndex = ((centerOffset - listStartOffset) / itemHeight).floor();
+    
+    if (newPlayingIndex < 0) newPlayingIndex = 0;
+    if (newPlayingIndex >= _exercises.length) newPlayingIndex = _exercises.length - 1;
+
+    if (_playingIndex != newPlayingIndex) {
+      setState(() {
+        _playingIndex = newPlayingIndex;
+      });
+    }
+  }
+
+  Future<void> _loadMoreExercises() async {
+    if (_isLoading || !_hasMore || _selectedMuscle == null) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Handle potential casing mismatch in DB (e.g. 'chest' vs 'Chest')
+      final muscle = _selectedMuscle!;
+      final capitalizedMuscle = muscle[0].toUpperCase() + muscle.substring(1);
+      
+      // Use 'in' filter to match either lowercase or capitalized
+      var query = Supabase.instance.client
+          .from('exercises')
+          .select()
+          .inFilter('group_path', [muscle, capitalizedMuscle]);
+
+      // Apply filters
+      final capitalizedGender = _gender[0].toUpperCase() + _gender.substring(1);
+      query = query.eq('gender', capitalizedGender);
+
+      if (_selectedWorkoutTypes.isNotEmpty) {
+        query = query.inFilter('exercise_type', _selectedWorkoutTypes.toList());
+      }
+      if (_selectedEquipment.isNotEmpty) {
+        query = query.inFilter('equipment', _selectedEquipment.toList());
+      }
+      if (_selectedDifficulties.isNotEmpty) {
+        query = query.inFilter('difficulty_level', _selectedDifficulties.toList());
+      }
+
+      // Apply comprehensive search query across multiple fields
+      if (_searchQuery.isNotEmpty) {
+        query = query.or(
+          'exercise_name.ilike.%$_searchQuery%,'
+          'group_path.ilike.%$_searchQuery%,'
+          'target_muscle.ilike.%$_searchQuery%,'
+          'equipment.ilike.%$_searchQuery%,'
+          'synergist.ilike.%$_searchQuery%,'
+          'exercise_type.ilike.%$_searchQuery%'
+        );
+      }
+
+      final data = await query
+          .order('exercise_name', ascending: true)
+          .range(_currentPage * _pageSize, (_currentPage + 1) * _pageSize - 1);
+
+      final newExercises = (data as List).map((json) => ExerciseDetail.fromJson(json)).toList();
+
+      setState(() {
+        _exercises.addAll(newExercises);
+        _currentPage++;
+        _hasMore = newExercises.length == _pageSize;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading exercises: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _resetExercises() {
+    setState(() {
+      _exercises.clear();
+      _currentPage = 0;
+      _hasMore = true;
+      _isLoading = false;
+    });
+    _loadMoreExercises();
+  }
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > 800) {
+          return _buildDesktopLayout();
+        }
+        return _buildMobileLayout();
+      },
+    );
+  }
+
+  Widget _buildMobileLayout() {
     final isDark = widget.isDarkMode;
     final textColor = isDark ? Colors.white : Colors.black87;
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
+      body: Column(
+        children: [
+          // Header (Animated)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            height: _showHeader ? null : 0,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: _showHeader ? 1.0 : 0.0,
+              child: RedHeader(
+                title: Supabase.instance.client.auth.currentUser?.userMetadata?['full_name'] ?? 'Guest',
+                subtitle: 'Welcome back',
+                onToggleTheme: widget.toggleTheme,
+                isDarkMode: widget.isDarkMode,
+              ),
+            ),
+          ),
+          
+          Expanded(
+            child: _selectedMuscle == null
+                ? Column(
+                    children: [
+                      _buildMobileSearchAndFilters(isDark, textColor),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            child: SizedBox(
+                              width: 1080,
+                              height: 1920,
+                              child: Transform.scale(
+                                scale: 1.08,
+                                child: MuscleMap(
+                                  gender: _gender,
+                                  side: _side,
+                                  highlightedMuscle: _highlightedMuscle,
+                                  isDarkMode: isDark,
+                                  onTapMuscle: (m) {
+                                    setState(() {
+                                      if (_highlightedMuscle == m) {
+                                        _selectedMuscle = m;
+                                        _resetExercises(); // Load exercises for selected muscle
+                                      } else {
+                                        _highlightedMuscle = m;
+                                      }
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : CustomScrollView(
+                    controller: _scrollController,
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _buildMobileSearchAndFilters(isDark, textColor),
+                      ),
+                      
+                      // Exercise List Header
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            children: [
+                              IconButton(
+                                icon: Icon(Icons.arrow_back, color: textColor),
+                                onPressed: () => setState(() {
+                                  _selectedMuscle = null;
+                                  _exercises.clear();
+                                }),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: textColor,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      
+                      // Exercise List
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            if (index >= _exercises.length) {
+                              return _isLoading
+                                  ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                                  : const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: ExerciseDetailCard(
+                                exercise: _exercises[index],
+                                isDarkMode: isDark,
+                                shouldPlay: index == _playingIndex,
+                              ),
+                            );
+                          },
+                          childCount: _exercises.length + (_isLoading ? 1 : 0),
+                        ),
+                      ),
+                      
+                      if (_exercises.isEmpty && !_isLoading)
+                         SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Center(
+                              child: Text(
+                                'No exercises found.',
+                                style: TextStyle(color: textColor),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileSearchAndFilters(bool isDark, Color textColor) {
     final subTextColor = isDark ? Colors.white70 : Colors.black54;
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200;
 
-    return SafeArea(
-      child: Container(
-        color: isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
-        child: Column(
-          children: [
-            // Top red header
-            Container(
-              height: 80,
-              color: Colors.red,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'USER Name',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Welcome back',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Search bar
+          Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Icon(Icons.search, color: subTextColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Search workouts, muscle...',
+                    style: TextStyle(color: subTextColor),
                   ),
-                  Row(
-                    children: [
-                      const SizedBox(width: 8),
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor: Colors.blueAccent,
-                        child: ClipOval(
-                          child: Container(color: Colors.white), // placeholder avatar
-                        ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Filters
+          Row(
+            children: [
+              _buildToggleChip(
+                label: 'Male',
+                isSelected: _gender == 'male',
+                onTap: () {
+                  setState(() => _gender = 'male');
+                  if (_selectedMuscle != null) _resetExercises();
+                },
+                isDark: isDark,
+              ),
+              const SizedBox(width: 8),
+              _buildToggleChip(
+                label: 'Female',
+                isSelected: _gender == 'female',
+                onTap: () {
+                  setState(() => _gender = 'female');
+                  if (_selectedMuscle != null) _resetExercises();
+                },
+                isDark: isDark,
+              ),
+              const SizedBox(width: 16),
+              _buildToggleChip(
+                label: 'Front',
+                isSelected: _side == 'front',
+                onTap: () => setState(() => _side = 'front'),
+                isDark: isDark,
+              ),
+              const SizedBox(width: 4),
+              _buildToggleChip(
+                label: 'Back',
+                isSelected: _side == 'back',
+                onTap: () => setState(() => _side = 'back'),
+                isDark: isDark,
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _showFilterModal(context),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.tune, size: 22, color: textColor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+  final isDark = widget.isDarkMode;
+  final bgColor = isDark ? const Color(0xFF121212) : const Color(0xFFF5F7FA);
+
+  return Container(
+    color: bgColor,
+    child: Column(
+      children: [
+        // Custom Desktop Header
+        RedHeader(
+          title: 'GymGuide',
+          onToggleTheme: widget.toggleTheme,
+          isDarkMode: widget.isDarkMode,
+          searchController: _searchController,
+          onSearch: (query) {
+            setState(() {
+              _searchQuery = query;
+              if (_selectedMuscle != null) {
+                _resetExercises();
+              }
+            });
+          },
+        ),
+        
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Calculate responsive panel widths (20% with min/max constraints)
+              final availableWidth = constraints.maxWidth;
+              final panelWidth = (availableWidth * 0.20).clamp(200.0, 280.0);
+              final spacing = 12.0;
+              
+              return Stack(
+                children: [
+                  // Layer 1: Scrollable Content (Center) with Scrollbar at Screen Edge
+                  Positioned.fill(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.all(spacing),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Spacer for Filters
+                          SizedBox(width: panelWidth),
+                          SizedBox(width: spacing),
+                          // Actual Scrollable Center Content
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                border: Border.all(
+                                  color: isDark ? Colors.white : Colors.black,
+                                  width: 1.0,
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: _buildDesktopMuscleMap(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: spacing),
+                          // Spacer for Banner
+                          SizedBox(width: panelWidth),
+                        ],
                       ),
-                    ],
+                    ),
+                  ),
+
+                  // Layer 2: Fixed Sidebars (Filters & Banner)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.all(spacing),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Fixed Filters
+                          SizedBox(
+                            width: panelWidth,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                border: Border.all(
+                                  color: isDark ? Colors.white : Colors.black,
+                                  width: 1.0,
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: _buildDesktopFilterPanel(),
+                            ),
+                          ),
+                          SizedBox(width: spacing),
+                          // Spacer for Center (allows clicks to pass through)
+                          const Expanded(child: SizedBox()),
+                          SizedBox(width: spacing),
+                          // Fixed Banner
+                          SizedBox(
+                            width: panelWidth,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                border: Border.all(
+                                  color: isDark ? Colors.white : Colors.black,
+                                  width: 1.0,
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: _buildDesktopRightPanel(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
+  Widget _buildDesktopFilterPanel() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Filters',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+                ),
               ),
             ),
-
-            // Search bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Container(
-                height: 44,
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(24),
+            const SizedBox(height: 12),
+            
+            // Gender Toggles
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _buildToggleChip(
+                  label: 'Male',
+                  isSelected: _gender == 'male',
+                  onTap: () {
+                    setState(() => _gender = 'male');
+                    if (_selectedMuscle != null) _resetExercises();
+                  },
+                  isDark: widget.isDarkMode,
+                  compact: true,
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                _buildToggleChip(
+                  label: 'Female',
+                  isSelected: _gender == 'female',
+                  onTap: () {
+                    setState(() => _gender = 'female');
+                    if (_selectedMuscle != null) _resetExercises();
+                  },
+                  isDark: widget.isDarkMode,
+                  compact: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            _buildFavoriteFilter(null, compact: true),
+            const SizedBox(height: 12),
+            _buildFilterSection('DIFFICULTY', [
+              'Beginner',
+              'Intermediate',
+              'Advanced'
+            ], _selectedDifficulties, null, compact: true),
+            const SizedBox(height: 12),
+            _buildFilterSection('WORKOUT TYPE', [
+              'Strength',
+              'Stretching',
+              'Cardio'
+            ], _selectedWorkoutTypes, null, compact: true),
+            const SizedBox(height: 12),
+            _buildFilterSection('EQUIPMENT', [
+              'Assisted', 'Band', 'Barbell', 'Battling Rope', 'Body weight',
+              'Bosu ball', 'Cable', 'Dumbbell', 'EZ Barbell', 'Kettlebell',
+              'Leverage machine', 'Medicine Ball', 'Olympic barbell',
+              'Pilates Machine', 'Power Sled', 'Resistance Band', 'Roll',
+              'Rollball', 'Rope', 'Sled machine', 'Smith machine',
+              'Stability ball', 'Stick', 'Suspension', 'Trap bar',
+              'Vibrate Plate', 'Weighted', 'Wheel roller',
+            ], _selectedEquipment, null, compact: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopMuscleMap() {
+    final isDark = widget.isDarkMode;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
+    if (_selectedMuscle != null) {
+      return _buildDesktopExerciseList();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select Muscles',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final screenHeight = MediaQuery.of(context).size.height;
+              // Use 60% of viewport height, minus header and padding
+              final muscleMapHeight = (screenHeight - 200).clamp(300.0, 800.0);
+              return SizedBox(
+                height: muscleMapHeight,
                 child: Row(
                   children: [
-                    Icon(Icons.search, color: subTextColor),
-                    const SizedBox(width: 8),
                     Expanded(
+                      child: MuscleMap(
+                        gender: _gender,
+                        side: 'front',
+                        highlightedMuscle: _highlightedMuscle,
+                        isDarkMode: isDark,
+                        onTapMuscle: (m) => _onMuscleTap(m),
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: MuscleMap(
+                        gender: _gender,
+                        side: 'back',
+                        highlightedMuscle: _highlightedMuscle,
+                        isDarkMode: isDark,
+                        onTapMuscle: (m) => _onMuscleTap(m),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopExerciseList() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.arrow_back, color: widget.isDarkMode ? Colors.white : Colors.black87),
+                onPressed: () {
+                  setState(() {
+                    _selectedMuscle = null;
+                    _exercises.clear();
+                  });
+                },
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _exercises.isEmpty && !_isLoading
+            ? Center(child: Text('No exercises found.', style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black)))
+            : ListView.builder(
+                padding: const EdgeInsets.all(0), // Reduced from 24 to 0 to reduce gap
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _exercises.length + (_isLoading ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index >= _exercises.length) {
+                    return _isLoading
+                        ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                        : const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: ExerciseDetailCard(
+                      exercise: _exercises[index],
+                      isDarkMode: widget.isDarkMode,
+                      shouldPlay: false,
+                    ),
+                  );
+                },
+              ),
+      ],
+    );
+  }
+
+  void _onMuscleTap(String m) {
+  setState(() {
+    if (_highlightedMuscle == m) {
+      // Proceed with muscle selection directly
+      _selectedMuscle = m;
+      _resetExercises();
+    } else {
+      _highlightedMuscle = m;
+    }
+  }); 
+}
+
+  void _showGoogleSignInDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.transparent, // No dark overlay
+      builder: (BuildContext context) {
+        return Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 80, right: 40),
+            child: Material(
+              elevation: 8,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                width: 400,
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: widget.isDarkMode ? const Color(0xFF404040) : const Color(0xFFE0E0E0),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header with Google logo and close button
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          // Google Logo
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Center(
+                              child: Text(
+                                'G',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  foreground: Paint()
+                                    ..shader = const LinearGradient(
+                                      colors: [
+                                        Color(0xFF4285F4),
+                                        Color(0xFFEA4335),
+                                        Color(0xFFFBBC05),
+                                        Color(0xFF34A853),
+                                      ],
+                                    ).createShader(const Rect.fromLTWH(0, 0, 24, 24)),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Title
+                          Expanded(
+                            child: Text(
+                              'Sign in to GymGuide with Google',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w400,
+                                color: widget.isDarkMode ? Colors.white : const Color(0xFF202124),
+                              ),
+                            ),
+                          ),
+                          // Close button
+                          IconButton(
+                            icon: Icon(
+                              Icons.close,
+                              size: 20,
+                              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF5F6368),
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    const Divider(height: 1),
+                    
+                    // Profile Section
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          // User Avatar placeholder
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8F0FE),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                'U',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color(0xFF1A73E8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // User Info placeholder
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Your Account',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: widget.isDarkMode ? Colors.white : const Color(0xFF202124),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Sign in with Google',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: widget.isDarkMode ? Colors.white70 : const Color(0xFF5F6368),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Continue Button
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 40,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            try {
+                              await Supabase.instance.client.auth.signInWithOAuth(
+                                OAuthProvider.google,
+                                redirectTo: 'io.supabase.gymguideapp://login-callback/',
+                              );
+                              if (context.mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error signing in: $e')),
+                                );
+                              }
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1A73E8),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          child: const Text(
+                            'Continue',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Disclaimer
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                       child: Text(
-                        'Search workouts, muscle...',
-                        style: TextStyle(color: subTextColor),
+                        'To continue, Google will share your name, email address, and profile picture with this site.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: widget.isDarkMode ? Colors.white60 : const Color(0xFF5F6368),
+                          height: 1.5,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
 
-            // Gender + front / back + filter
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Row(
-                children: [
-                  _buildToggleChip(
-                    label: 'Male',
-                    isSelected: _gender == 'male',
-                    onTap: () => setState(() => _gender = 'male'),
-                    isDark: isDark,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildToggleChip(
-                    label: 'Female',
-                    isSelected: _gender == 'female',
-                    onTap: () => setState(() => _gender = 'female'),
-                    isDark: isDark,
-                  ),
-                  const SizedBox(width: 16),
-                  _buildToggleChip(
-                    label: 'Front',
-                    isSelected: _side == 'front',
-                    onTap: () => setState(() => _side = 'front'),
-                    isDark: isDark,
-                  ),
-                  const SizedBox(width: 4),
-                  _buildToggleChip(
-                    label: 'Back',
-                    isSelected: _side == 'back',
-                    onTap: () => setState(() => _side = 'back'),
-                    isDark: isDark,
-                  ),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => _showFilterModal(context),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.tune, size: 22, color: textColor),
-                    ),
-                  ),
-                ],
+  Widget _buildDesktopRightPanel() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          padding: const EdgeInsets.all(12),
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight > 0 ? constraints.maxHeight - 24 : 0,
+              ),
+              child: Center(
+                child: Image.asset(
+                  'assets/banner/adbanner.png',
+                  fit: BoxFit.contain,
+                  width: constraints.maxWidth - 24, // Account for padding
+                ),
               ),
             ),
-
-            const SizedBox(height: 12),
-
-            // Muscle map
-            // Muscle map or Exercise List
-            Expanded(
-              child: _selectedMuscle != null
-                  ? _buildExerciseList(isDark, textColor, cardColor)
-                  : Center(
-                      child: MuscleMap(
-                        gender: _gender,
-                        side: _side,
-                        highlightedMuscle: _highlightedMuscle,
-                        isDarkMode: isDark,
-                        onTapMuscle: (m) {
-                          setState(() {
-                            if (_highlightedMuscle == m) {
-                              // If already highlighted, select it and show details
-                              _selectedMuscle = m;
-                            } else {
-                              // First tap highlights
-                              _highlightedMuscle = m;
-                            }
-                          });
-                        },
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -196,20 +1021,25 @@ class _HomePageState extends State<HomePage> {
     required bool isSelected,
     required VoidCallback onTap,
     required bool isDark,
+    bool compact = false,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.red : (isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200),
+          color: isSelected ? const Color(0xFFFF0000) : (isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200),
           borderRadius: BorderRadius.circular(24),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
-            fontWeight: FontWeight.w500,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: compact ? 11 : 14,
+              color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -222,84 +1052,121 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.5,
-          maxChildSize: 0.9,
-          builder: (context, scrollController) {
-            return Container(
-              decoration: BoxDecoration(
-                color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 12),
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(2),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.7,
+              minChildSize: 0.5,
+              maxChildSize: 0.9,
+              builder: (context, scrollController) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12),
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 24),
+                      Expanded(
+                        child: ListView(
+                          controller: scrollController,
+                          children: [
+                            _buildFavoriteFilter(setModalState),
+                            const SizedBox(height: 24),
+                            _buildFilterSection('DIFFICULTY', [
+                              'Beginner', 'Intermediate', 'Advanced'
+                            ], _selectedDifficulties, setModalState),
+                            const SizedBox(height: 24),
+                            _buildFilterSection('WORKOUT TYPE', [
+                              'Strength', 'Stretching', 'Cardio'
+                            ], _selectedWorkoutTypes, setModalState),
+                            const SizedBox(height: 24),
+                            _buildFilterSection('EQUIPMENT', [
+                              'Assisted', 'Band', 'Barbell', 'Battling Rope', 'Body weight',
+                              'Bosu ball', 'Cable', 'Dumbbell', 'EZ Barbell', 'Kettlebell',
+                              'Leverage machine', 'Medicine Ball', 'Olympic barbell',
+                              'Pilates Machine', 'Power Sled', 'Resistance Band', 'Roll',
+                              'Rollball', 'Rope', 'Sled machine', 'Smith machine',
+                              'Stability ball', 'Stick', 'Suspension', 'Trap bar',
+                              'Vibrate Plate', 'Weighted', 'Wheel roller',
+                            ], _selectedEquipment, setModalState),
+                            const SizedBox(height: 100),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                          border: Border(
+                            top: BorderSide(
+                              color: widget.isDarkMode ? Colors.white24 : Colors.black12,
+                              width: 0.3,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  setModalState(() {
+                                    _filterFavorites = false;
+                                    _selectedDifficulties.clear();
+                                    _selectedWorkoutTypes.clear();
+                                    _selectedEquipment.clear();
+                                  });
+                                  setState(() {});
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFFFF0000),
+                                  side: const BorderSide(color: Color(0xFFFF0000)),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: const Text('Reset', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  setState(() {});
+                                  Navigator.pop(context);
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFF0000),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: const Text('Dismiss', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 24),
-                  Expanded(
-                    child: ListView(
-                      controller: scrollController,
-                      children: [
-                        _buildFilterSection('DIFFICULTY', [
-                          'Beginner',
-                          'Intermediate',
-                          'Advanced'
-                        ]),
-                        const SizedBox(height: 24),
-                        _buildFilterSection('WORKOUT TYPE', [
-                          'Strength',
-                          'Stretching',
-                          'Cardio'
-                        ]),
-                        const SizedBox(height: 24),
-                        _buildFilterSection('EQUIPMENT', [
-                          'Assisted',
-                          'Band',
-                          'Barbell',
-                          'Battling Rope',
-                          'Body weight',
-                          'Bosu ball',
-                          'Cable',
-                          'Dumbbell',
-                          'EZ Barbell',
-                          'Kettlebell',
-                          'Leverage machine',
-                          'Medicine Ball',
-                          'Olympic barbell',
-                          'Pilates Machine',
-                          'Power Sled',
-                          'Resistance Band',
-                          'Roll',
-                          'Rollball',
-                          'Rope',
-                          'Sled machine',
-                          'Smith machine',
-                          'Stability ball',
-                          'Stick',
-                          'Suspension',
-                          'Trap bar',
-                          'Vibrate Plate',
-                          'Weighted',
-                          'Wheel roller',
-                        ]),
-                        const SizedBox(height: 40),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
@@ -307,120 +1174,146 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildFilterSection(String title, List<String> options) {
+  Widget _buildFavoriteFilter(StateSetter? setModalState, {bool compact = false}) {
+    void updateState(VoidCallback fn) {
+      if (setModalState != null) {
+        setModalState(fn);
+        setState(() {});
+      } else {
+        setState(fn);
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
-            letterSpacing: 1.0,
+        if (!compact) ...[
+          Text(
+            'FAVORITE',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
+              letterSpacing: 1.0,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: options.map((option) {
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFFE2E8F0),
-                  width: 1,
-                ),
+          const SizedBox(height: 12),
+        ] else ...[
+          // Compact mode with header
+          Text(
+            'FAVORITE',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        GestureDetector(
+          onTap: () {
+            updateState(() {
+              _filterFavorites = !_filterFavorites;
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
+            decoration: BoxDecoration(
+              color: _filterFavorites ? const Color(0xFFFF0000) : (widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _filterFavorites ? const Color(0xFFFF0000) : const Color(0xFFE2E8F0),
+                width: compact ? 1.0 : 0.3,
               ),
-              child: Text(
-                option,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF2D3748),
-                ),
+            ),
+            child: Text(
+              'Show Favorites Only',
+              style: TextStyle(
+                fontSize: compact ? 11 : 14,
+                fontWeight: FontWeight.w600,
+                color: _filterFavorites ? Colors.white : (widget.isDarkMode ? Colors.white : const Color(0xFF2D3748)),
               ),
-            );
-          }).toList(),
+            ),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildExerciseList(bool isDark, Color textColor, Color cardColor) {
-    final future = Supabase.instance.client
-        .from('exercises')
-        .select()
-        .eq('group_path', _selectedMuscle!)
-        .order('exercise_name', ascending: true);
+  Widget _buildFilterSection(String title, List<String> options, Set<String> selectedSet, StateSetter? setModalState, {bool compact = false}) {
+    void updateState(VoidCallback fn) {
+      if (setModalState != null) {
+        setModalState(fn);
+        setState(() {});
+      } else {
+        setState(fn);
+      }
+    }
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Back button header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              IconButton(
-                icon: Icon(Icons.arrow_back, color: textColor),
-                onPressed: () => setState(() => _selectedMuscle = null),
-              ),
-              Expanded(
-                child: Text(
-                  '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
+        if (!compact) ...[
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
+              letterSpacing: 1.0,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ] else ...[
+          // Compact mode with header
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Wrap(
+          spacing: compact ? 6 : 10,
+          runSpacing: compact ? 6 : 10,
+          children: options.map((option) {
+            final isSelected = selectedSet.contains(option);
+            return GestureDetector(
+              onTap: () {
+                updateState(() {
+                  if (isSelected) {
+                    selectedSet.remove(option);
+                  } else {
+                    selectedSet.add(option);
+                  }
+                });
+              },
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? const Color(0xFFFF0000) : (widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFFFF0000) : const Color(0xFFE2E8F0),
+                    width: compact ? 1.0 : 0.3,
                   ),
-                  overflow: TextOverflow.ellipsis,
+                ),
+                child: Text(
+                  option,
+                  style: TextStyle(
+                    fontSize: compact ? 11 : 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : (widget.isDarkMode ? Colors.white : const Color(0xFF2D3748)),
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: FutureBuilder<List<Map<String, dynamic>>>(
-            future: future,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(
-                  child: Text(
-                    'Error loading exercises: ${snapshot.error}',
-                    style: TextStyle(color: textColor),
-                  ),
-                );
-              }
-              final data = snapshot.data;
-              if (data == null || data.isEmpty) {
-                return Center(
-                  child: Text(
-                    'No exercises found for this muscle.',
-                    style: TextStyle(color: textColor),
-                  ),
-                );
-              }
-
-              final exercises = data.map((json) => ExerciseDetail.fromJson(json)).toList();
-
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: exercises.length,
-                itemBuilder: (context, index) {
-                  return ExerciseDetailCard(
-                    exercise: exercises[index],
-                    isDarkMode: isDark,
-                  );
-                },
-              );
-            },
-          ),
+            );
+          }).toList(),
         ),
       ],
     );
@@ -435,6 +1328,9 @@ class ExerciseDetail {
   final String synergists;
   final String difficulty;
   final List<String> steps;
+  final String? gender;
+  final String? exerciseType;
+  final String? equipment;
 
   ExerciseDetail({
     required this.name,
@@ -444,6 +1340,9 @@ class ExerciseDetail {
     required this.synergists,
     required this.difficulty,
     required this.steps,
+    this.gender,
+    this.exerciseType,
+    this.equipment,
   });
 
   factory ExerciseDetail.fromJson(Map<String, dynamic> json) {
@@ -473,22 +1372,35 @@ class ExerciseDetail {
       synergists: getString('synergist', defaultVal: getString('synergists', defaultVal: getString('syntects', defaultVal: 'Various'))),
       difficulty: getString('difficulty_level', defaultVal: getString('difficulty', defaultVal: 'Intermediate')),
       steps: instructions,
+      gender: getString('gender'),
+      exerciseType: getString('exercise_type'),
+      equipment: getString('equipment'),
     );
   }
 }
 
-class ExerciseDetailCard extends StatelessWidget {
+class ExerciseDetailCard extends StatefulWidget {
   final ExerciseDetail exercise;
   final bool isDarkMode;
+  final bool shouldPlay; // Added for autoplay support
 
   const ExerciseDetailCard({
     Key? key,
     required this.exercise,
     required this.isDarkMode,
+    this.shouldPlay = false,
   }) : super(key: key);
 
   @override
+  State<ExerciseDetailCard> createState() => _ExerciseDetailCardState();
+}
+
+class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
+  bool _isFavorite = false;
+
+  @override
   Widget build(BuildContext context) {
+    final isDarkMode = widget.isDarkMode;
     final cardBg = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
     final subTextColor = isDarkMode ? Colors.white70 : Colors.black54;
@@ -497,12 +1409,16 @@ class ExerciseDetailCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 24),
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+        border: Border.all(
+          color: isDarkMode ? Colors.white : Colors.black,
+          width: 1.0,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+            spreadRadius: 0,
           ),
         ],
       ),
@@ -513,25 +1429,41 @@ class ExerciseDetailCard extends StatelessWidget {
           // Red Header
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            color: Colors.red,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            color: const Color(0xFFFF0000),
             child: Row(
               children: [
-                const Icon(Icons.arrow_back_ios, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
                 Expanded(
-                  child: Center(
-                    child: Text(
-                      exercise.name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  child: Text(
+                    widget.exercise.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
                     ),
+                    textAlign: TextAlign.left,
                   ),
                 ),
-                const SizedBox(width: 26), // Balance the back icon
+                IconButton(
+                  icon: Icon(
+                    _isFavorite ? Icons.favorite : Icons.favorite_border,
+                    color: Colors.white,
+                    size: 48,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isFavorite = !_isFavorite;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(_isFavorite ? 'Added to favorites' : 'Removed from favorites'),
+                        duration: const Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
               ],
             ),
           ),
@@ -540,79 +1472,97 @@ class ExerciseDetailCard extends StatelessWidget {
           Container(
             width: double.infinity,
             color: isDarkMode ? Colors.black26 : Colors.grey.shade100,
-            child: exercise.imagePath.isNotEmpty
-                ? _buildMediaPreview(exercise.imagePath, isDarkMode)
+            child: widget.exercise.imagePath.isNotEmpty
+                ? _buildMediaPreview(widget.exercise.imagePath, isDarkMode)
                 : SizedBox(
                     height: 200,
                     child: Center(
                       child: Icon(
                         Icons.fitness_center,
                         size: 64,
-                        color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
+                        color: isDarkMode ? Colors.white24 : Colors.black12,
                       ),
                     ),
                   ),
           ),
 
-          // Instructions
+          // Details
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             child: Column(
-              children: exercise.steps.asMap().entries.map((entry) {
-                final index = entry.key + 1;
-                final step = entry.value;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Metadata Table
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: isDarkMode ? Colors.white24 : Colors.black12,
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
                     children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '$index',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          step,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: textColor,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
+                      if (widget.exercise.target.isNotEmpty) 
+                        _buildInfoRow('Target muscle:', widget.exercise.target, textColor, subTextColor),
+                      if (widget.exercise.synergists.isNotEmpty) 
+                        _buildInfoRow('Synergists:', widget.exercise.synergists, textColor, subTextColor),
+                      if (widget.exercise.difficulty.isNotEmpty) 
+                        _buildInfoRow('Difficulty:', widget.exercise.difficulty, textColor, subTextColor),
                     ],
                   ),
-                );
-              }).toList(),
-            ),
-          ),
+                ),
+                
+                const SizedBox(height: 16),
 
-          const Divider(height: 1),
-
-          // Metadata
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                _buildMetaRow('Target', exercise.target, textColor),
-                const SizedBox(height: 8),
-                _buildMetaRow('Synergist', exercise.synergists, textColor),
-                const SizedBox(height: 8),
-                _buildMetaRow('Difficulty', exercise.difficulty, textColor),
+                // Instructions
+                if (widget.exercise.steps.isNotEmpty) ...[
+                  Text(
+                    'Instructions',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...widget.exercise.steps.asMap().entries.map((entry) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFFF0000),
+                              shape: BoxShape.circle,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '${entry.key + 1}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              entry.value,
+                              style: TextStyle(
+                                color: subTextColor,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
               ],
             ),
           ),
@@ -621,30 +1571,53 @@ class ExerciseDetailCard extends StatelessWidget {
     );
   }
 
-  Widget _buildMetaRow(String label, String value, Color textColor) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.red, // Changed to red
-            ),
-          ),
+  Widget _buildInfoRow(String label, String value, Color textColor, Color subTextColor) {
+    final borderColor = widget.isDarkMode ? Colors.white24 : Colors.black12;
+    
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: borderColor, width: 1),
         ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              color: textColor,
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Label cell
+            Container(
+              width: 120,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: borderColor, width: 1),
+                ),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFFF0000),
+                ),
+              ),
             ),
-          ),
+            // Value cell
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: textColor,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -774,7 +1747,7 @@ class MuscleMap extends StatelessWidget {
             'shoulders',
             'triceps',
             'forarms',
-            'hips&glutes',
+            'hipsandglutes',
             'hamstrings',
             'calves'
           ];
@@ -809,7 +1782,7 @@ class MuscleMap extends StatelessWidget {
             MuscleRegion(id: 'triceps', left: 0.71, top: 0.26, width: 0.14, height: 0.12, label: 'Tri'),
             MuscleRegion(id: 'forarms', left: 0.06, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'),
             MuscleRegion(id: 'forarms', left: 0.76, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'),
-            MuscleRegion(id: 'hips&glutes', left: 0.30, top: 0.48, width: 0.40, height: 0.14, label: 'Glutes'),
+            MuscleRegion(id: 'hipsandglutes', left: 0.30, top: 0.48, width: 0.40, height: 0.14, label: 'Glutes'),
             MuscleRegion(id: 'hamstrings', left: 0.30, top: 0.62, width: 0.40, height: 0.16, label: 'Hams'),
             MuscleRegion(id: 'calves', left: 0.30, top: 0.78, width: 0.40, height: 0.14, label: 'Calves'),
           ];
@@ -828,12 +1801,12 @@ class MuscleMap extends StatelessWidget {
               final double dx = localPosition.dx / size.width;
               final double dy = localPosition.dy / size.height;
 
-              print('Tap at: $dx, $dy (Size: $size)');
+
 
               for (final region in regions) {
                 if (dx >= region.left && dx <= region.left + region.width &&
                     dy >= region.top && dy <= region.top + region.height) {
-                  print('Hit region: ${region.id}');
+
                   onTapMuscle(region.id);
                   break;
                 }
@@ -860,7 +1833,7 @@ class MuscleMap extends StatelessWidget {
                           '$basePath/$muscle.svg',
                           fit: BoxFit.contain,
                           colorFilter: ColorFilter.mode(
-                            Colors.redAccent.withOpacity(0.85),
+                            const Color(0xFFFF0000).withOpacity(0.85),
                             BlendMode.srcIn,
                           ),
                         ),
@@ -941,4 +1914,3 @@ class HitBoxPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-

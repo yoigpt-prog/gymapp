@@ -5,13 +5,16 @@ import 'pages/meal_plan_page.dart';
 import 'pages/progress_page.dart';
 import 'package:gymguide_app/pages/more_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'pages/auth_page.dart';
+import 'pages/onboarding_page.dart';
+import 'pages/main_scaffold.dart'; // New import
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url: 'https://wewztpamzhrzbbgyutyf.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indld3p0cGFtemhyemJiZ3l1dHlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MTE5MzAsImV4cCI6MjA3OTM4NzkzMH0.PfmIQFT6QFZFAc_sseoaSqFNKbE_F1dua3J4G1SKkws',
+    url: 'https://your-project-url.supabase.co',
+    anonKey: 'YOUR_SUPABASE_ANON_KEY_HERE',
   );
 
   runApp(const GymGuideApp());
@@ -53,85 +56,98 @@ class _GymGuideAppState extends State<GymGuideApp> {
         toggleTheme: _toggleTheme,
         isDarkMode: _themeMode == ThemeMode.dark,
       ),
+      // home: const AuthWrapper(), // Disabled for now
     );
   }
 }
 
-class MainScaffold extends StatefulWidget {
-  final VoidCallback toggleTheme;
-  final bool isDarkMode;
-
-  const MainScaffold({
-    Key? key,
-    required this.toggleTheme,
-    required this.isDarkMode,
-  }) : super(key: key);
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({Key? key}) : super(key: key);
 
   @override
-  State<MainScaffold> createState() => _MainScaffoldState();
+  State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _MainScaffoldState extends State<MainScaffold> {
-  int _currentIndex = 0;
-
-  late final List<Widget> _pages;
+class _AuthWrapperState extends State<AuthWrapper> {
+  bool _isLoading = true;
+  bool _isAuthenticated = false;
+  bool _hasName = false;
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      HomePage(
-        toggleTheme: widget.toggleTheme,
-        isDarkMode: widget.isDarkMode,
-      ),
-      const WorkoutPage(),
-      const MealPlanPage(),
-      const ProgressPage(),
-      MorePage(
-        toggleTheme: widget.toggleTheme,
-        isDarkMode: widget.isDarkMode,
-      ),
-    ];
+
+    _checkAuthState();
+    
+    // Listen for auth state changes
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+
+      _checkAuthState();
+    });
   }
 
-  @override
-  void didUpdateWidget(MainScaffold oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Re-initialize pages if theme props change (simple way to propagate)
-    if (oldWidget.isDarkMode != widget.isDarkMode) {
-      _pages[0] = HomePage(
-        toggleTheme: widget.toggleTheme,
-        isDarkMode: widget.isDarkMode,
-      );
-      _pages[4] = MorePage(
-        toggleTheme: widget.toggleTheme,
-        isDarkMode: widget.isDarkMode,
-      );
+  Future<void> _checkAuthState() async {
+
+    // FOR DEBUGGING: Force Onboarding state
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      setState(() {
+        _isAuthenticated = true;
+        _hasName = false;
+        _isLoading = false;
+      });
+
+      return;
     }
+
+    /* 
+    // Original logic
+    final session = Supabase.instance.client.auth.currentSession;
+    
+    if (session != null) {
+      // Check if user has a name in metadata
+      final user = Supabase.instance.client.auth.currentUser;
+      final name = user?.userMetadata?['full_name'];
+      
+      setState(() {
+        _isAuthenticated = true;
+        _hasName = name != null && name.toString().isNotEmpty;
+        _isLoading = false;
+      });
+    } else {
+      setState(() {
+        _isAuthenticated = false;
+        _hasName = false;
+        _isLoading = false;
+      });
+    }
+    */
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.red, // Active item color
-        unselectedItemColor: widget.isDarkMode ? Colors.white70 : Colors.grey,
-        backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-        onTap: (index) => setState(() => _currentIndex = index),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Workout'),
-          BottomNavigationBarItem(icon: Icon(Icons.restaurant), label: 'Meal Plan'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Progress'),
-          BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
-        ],
-      ),
+
+    
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: Colors.red)),
+      );
+    }
+
+    if (!_isAuthenticated) {
+      return const AuthPage();
+    }
+
+    if (!_hasName) {
+      return const OnboardingPage();
+    }
+
+    // Pass theme callback down the tree - finding the ancestor state
+    final appState = context.findAncestorStateOfType<_GymGuideAppState>();
+    return MainScaffold(
+      toggleTheme: appState?._toggleTheme ?? () {},
+      isDarkMode: appState?._themeMode == ThemeMode.dark,
     );
   }
 }
+

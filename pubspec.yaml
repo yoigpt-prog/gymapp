@@ -16,6 +16,11 @@ dependencies:
   flutter_svg: ^2.0.7
   supabase_flutter: ^2.0.0
   video_player: ^2.8.1
+  font_awesome_flutter: ^10.9.0
+  shared_preferences: ^2.5.3
+  http: ^1.6.0
+  flutter_dotenv: ^6.0.0
+  image_picker: ^1.0.7
 
 dev_dependencies:
   flutter_test:
@@ -34,3 +39,7 @@ flutter:
     - assets/svg/male/back/
     - assets/svg/female/front/
     - assets/svg/female/back/
+    - assets/svg/logo/
+    - assets/svg/socialmedia/
+    - assets/banner/
+    - assets/quizimg.png

@@ -1,0 +1,937 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'meal_plan_modal.dart';
+import 'edit_meal_modal.dart';
+import 'custom_plan_quiz.dart';
+import 'main_scaffold.dart';
+
+class MealPlanPage extends StatefulWidget {
+  const MealPlanPage({super.key});
+
+  @override
+  State<MealPlanPage> createState() => _MealPlanPageState();
+}
+
+class _MealPlanPageState extends State<MealPlanPage> {
+  bool _isDarkMode = false;
+  Map<String, dynamic>? _generatedPlan;
+  bool _isLoadingPlan = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGeneratedPlan();
+  }
+
+  Future<void> _loadGeneratedPlan() async {
+    // AI PLAN LOADING DISABLED
+    setState(() {
+      _generatedPlan = null;
+      _isLoadingPlan = false;
+    });
+  }
+
+  // Original _hasPlan and _isLoading are removed as per the instruction's implied change
+  // _checkPlanStatus and _createPlan methods are also removed as they are no longer needed
+  // with the new _generatedPlan logic.
+
+  final List<Meal> _meals = [
+    Meal(
+      id: 1,
+      type: 'BREAKFAST',
+      icon: '🥣',
+      name: 'Oatmeal with banana & almonds',
+      calories: 410,
+      eaten: false,
+      ingredients: [
+        MealIngredient('Rolled oats', '½ cup (40g)', 150),
+        MealIngredient('Low-fat milk', '1 cup (240ml)', 100),
+        MealIngredient('Banana', '1 medium (120g)', 100),
+        MealIngredient('Almonds', '6 pieces (10g)', 60),
+      ],
+    ),
+    Meal(
+      id: 2,
+      type: 'MORNING SNACK',
+      icon: '🍎',
+      name: 'Greek yogurt & honey',
+      calories: 150,
+      eaten: false,
+      ingredients: [
+        MealIngredient('Greek yogurt (low-fat)', '½ cup (100g)', 80),
+        MealIngredient('Honey', '1 tsp (7g)', 25),
+        MealIngredient('Blueberries', '½ cup (75g)', 45),
+      ],
+    ),
+    Meal(
+      id: 3,
+      type: 'LUNCH',
+      icon: '🥙',
+      name: 'Grilled chicken salad',
+      calories: 535,
+      eaten: true,
+      ingredients: [
+        MealIngredient('Grilled chicken breast', '150g', 250),
+        MealIngredient('Mixed greens', '2 cups', 20),
+        MealIngredient('Cherry tomatoes', '1 cup', 30),
+        MealIngredient('Cucumber', '½ cup', 15),
+        MealIngredient('Feta cheese', '30g', 80),
+        MealIngredient('Olive oil', '1 tbsp (10g)', 120),
+        MealIngredient('Balsamic vinegar', '1 tbsp', 20),
+      ],
+    ),
+    Meal(
+      id: 4,
+      type: 'AFTERNOON SNACK',
+      icon: '🥜',
+      name: 'Apple with peanut butter',
+      calories: 200,
+      eaten: false,
+      ingredients: [
+        MealIngredient('Apple', '1 medium', 95),
+        MealIngredient('Peanut butter', '1 tbsp', 105),
+      ],
+    ),
+    Meal(
+      id: 5,
+      type: 'DINNER',
+      icon: '🍗',
+      name: 'Baked salmon with vegetables',
+      calories: 600,
+      eaten: false,
+      ingredients: [
+        MealIngredient('Salmon fillet', '200g', 350),
+        MealIngredient('Broccoli', '1 cup', 55),
+        MealIngredient('Sweet potato', '1 medium', 130),
+        MealIngredient('Olive oil', '½ tbsp', 60),
+        MealIngredient('Lemon', '1 wedge', 5),
+      ],
+    ),
+  ];
+
+  int get _totalMeals => _meals.length;
+  int get _eatenMeals => _meals.where((m) => m.eaten).length;
+  int get _totalCalories =>
+      _meals.fold<int>(0, (sum, meal) => sum + meal.calories);
+
+  @override
+  Widget build(BuildContext context) {
+    _isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: _isLoadingPlan
+          ? const Center(child: CircularProgressIndicator())
+          : _buildPlannerView(_isDarkMode),
+    );
+  }
+
+  Future<void> _createPlan() async {
+    // Navigate to quiz
+    final completed = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CustomPlanQuizPage(quizType: 'meal'),
+      ),
+    );
+    
+    if (completed is Map && completed['completed'] == true) {
+      _loadGeneratedPlan();
+    } else if (completed is Map && completed.containsKey('navIndex')) {
+      // Handle navigation
+      final mainState = context.findAncestorStateOfType<MainScaffoldState>();
+      mainState?.changeTab(completed['navIndex']);
+    }
+  }
+
+  Widget _buildPlannerView(bool isDarkMode) {
+    final progress =
+        _totalMeals == 0 ? 0.0 : _eatenMeals / _totalMeals.toDouble();
+
+    return SafeArea(
+      child: Column(
+        children: [
+          _buildHeader(),
+          const SizedBox(height: 16),
+          _buildPlanSection(isDarkMode),
+          const SizedBox(height: 16),
+          // Nutrition Summary Card
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isDarkMode ? Colors.white : Colors.black,
+                width: 0.3,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                  spreadRadius: 0,
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                // Macros row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildMacroItem('$_totalCalories', 'Calories', isDarkMode),
+                    _buildMacroItem('120g', 'Protein', isDarkMode),
+                    _buildMacroItem('190g', 'Carbs', isDarkMode),
+                    _buildMacroItem('70g', 'Fat', isDarkMode),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                // Progress section
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Today\'s Progress',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDarkMode ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      '$_eatenMeals/$_totalMeals meals',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDarkMode ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Progress bar
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: isDarkMode ? const Color(0xFF2A2A2A) : Colors.grey.shade200,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+                    minHeight: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Existing meal list
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              itemCount: _meals.length,
+              itemBuilder: (context, index) {
+                return _buildMealCard(_meals[index], isDarkMode);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSetupView(bool isDarkMode) {
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF0000),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '🥗',
+                  style: TextStyle(fontSize: 64),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Start Your Nutrition Journey',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '30-Day Meal Plan Challenge',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Fuel your body with our expertly designed\nmeal program!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                
+                // Features
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      _buildFeatureRow('🎯', 'Structured 30-day meal plan'),
+                      const SizedBox(height: 16),
+                      _buildFeatureRow('📊', 'Track daily calories & macros'),
+                      const SizedBox(height: 16),
+                      _buildFeatureRow('🥗', 'Delicious & healthy recipes'),
+                      const SizedBox(height: 16),
+                      _buildFeatureRow('🔥', 'Achieve your weight goals'),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 32),
+                
+                // Start button
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _createPlan,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFFFF0000),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Start Your Meal Plan',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeatureRow(String emoji, String text) {
+    return Row(
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 24)),
+        const SizedBox(width: 12),
+        Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------- UI SECTIONS ----------
+
+  Widget _buildHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 24, 12, 24),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFFF0000), Color(0xFFFF0000)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            'Fri : Day 26',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Your Meal Plan',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsCard(double progress, bool isDarkMode) {
+    final cardColor = isDarkMode ? const Color(0xFF2A2A2A) : Colors.white;
+    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final subTextColor = isDarkMode ? Colors.white70 : Colors.black54;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          // Macros row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _macroItem(
+                value: '$_totalCalories',
+                label: 'Calories',
+                textColor: textColor,
+                subTextColor: subTextColor,
+              ),
+              _macroItem(
+                value: '120g',
+                label: 'Protein',
+                textColor: textColor,
+                subTextColor: subTextColor,
+              ),
+              _macroItem(
+                value: '190g',
+                label: 'Carbs',
+                textColor: textColor,
+                subTextColor: subTextColor,
+              ),
+              _macroItem(
+                value: '70g',
+                label: 'Fat',
+                textColor: textColor,
+                subTextColor: subTextColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Progress
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Today's Progress",
+                style: TextStyle(
+                  fontSize: 14,
+                  color: textColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                '$_eatenMeals/$_totalMeals meals',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: subTextColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              height: 8,
+              color: const Color(0xFFF0F0F0),
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: progress.clamp(0.0, 1.0),
+                child: Container(
+                  color: const Color(0xFFFF0000),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMacroItem(String value, String label, bool isDarkMode) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFFFF0000),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: isDarkMode ? Colors.white70 : Colors.black54,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGeneratedPlanView() {
+    final plan = _generatedPlan!['meal_plan'];
+    final meals = plan['meals'] as List;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Your Personalized Meal Plan',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: _isDarkMode ? Colors.white : Colors.black,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Targets: ${plan['calories']} kcal | P: ${plan['protein']} | C: ${plan['carbs']} | F: ${plan['fats']}',
+          style: TextStyle(
+            fontSize: 14,
+            color: _isDarkMode ? Colors.white70 : Colors.grey[700],
+          ),
+        ),
+        const SizedBox(height: 16),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: meals.length,
+          itemBuilder: (context, index) {
+            final meal = meals[index];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              color: _isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: _isDarkMode ? Colors.white24 : Colors.black12,
+                  width: 0.5,
+                ),
+              ),
+              child: ListTile(
+                title: Text(
+                  meal['name'],
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: _isDarkMode ? Colors.white : Colors.black,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      meal['description'],
+                      style: TextStyle(
+                        color: _isDarkMode ? Colors.white70 : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${meal['calories']} kcal',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFFFF0000),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _macroItem({
+    required String value,
+    required String label,
+    required Color textColor,
+    required Color subTextColor,
+  }) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFFFF0000),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: subTextColor,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMealCard(Meal meal, bool isDarkMode) {
+    final cardColor = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
+    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final subTextColor = isDarkMode ? Colors.white70 : Colors.black54;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDarkMode ? Colors.white : Colors.black,
+          width: 0.3,
+        ),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+            spreadRadius: 0,
+            color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    meal.icon,
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    meal.type,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: subTextColor,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Text(
+                    '${meal.calories} kcal',
+                    style: const TextStyle(
+                      color: const Color(0xFFFF0000),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => EditMealModal(
+                          meal: meal,
+                          onSave: (updatedMeal) {
+                            setState(() {
+                              final index = _meals.indexWhere((m) => m.id == updatedMeal.id);
+                              if (index != -1) {
+                                _meals[index] = updatedMeal;
+                              }
+                            });
+                          },
+                        ),
+                      );
+                    },
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 18,
+                      color: subTextColor,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            meal.name,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Ingredients
+          Column(
+            children: meal.ingredients
+                .map(
+                  (ing) => Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Color(0xFFF0F0F0),
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          ing.name,
+                          style: TextStyle(color: subTextColor),
+                        ),
+                        Row(
+                          children: [
+                            Text(
+                              ing.amount,
+                              style: TextStyle(
+                                color: isDarkMode ? Colors.white38 : Colors.black38,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '${ing.calories} kcal',
+                              style: const TextStyle(
+                                color: const Color(0xFFFF0000),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 12),
+          // Mark as eaten button
+          GestureDetector(
+            onTap: () => _toggleEaten(meal),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: meal.eaten ? const Color(0xFFFF0000) : cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFFF0000), width: 2),
+              ),
+              child: Center(
+                child: Text(
+                  meal.eaten ? '✓ Eaten' : 'Mark as Eaten',
+                  style: TextStyle(
+                    color: meal.eaten ? Colors.white : const Color(0xFFFF0000),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleEaten(Meal meal) {
+    setState(() {
+      meal.eaten = !meal.eaten;
+    });
+  }
+
+  Widget _buildPlanSection(bool isDarkMode) {
+    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDarkMode ? Colors.white : Colors.black,
+          width: 0.3,
+        ),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+            spreadRadius: 0,
+            color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Your Plan',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => const MealPlanModal(),
+                  );
+                },
+                child: const Text(
+                  'View All',
+                  style: TextStyle(
+                    color: const Color(0xFFFF0000),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildDayCard('Wed', true, false, isDarkMode),
+              _buildDayCard('Thu', true, false, isDarkMode),
+              _buildDayCard('Fri', false, true, isDarkMode),
+              _buildDayCard('Sat', false, false, isDarkMode),
+              _buildDayCard('Sun', false, false, isDarkMode),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDayCard(String day, bool completed, bool isToday, bool isDarkMode) {
+    return Container(
+      width: 50,
+      height: 60,
+      decoration: BoxDecoration(
+        color: isToday 
+            ? const Color(0xFFFF0000) 
+            : (isDarkMode ? const Color(0xFF2D2D2D) : const Color(0xFFF5F5F5)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            day,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: isToday 
+                  ? Colors.white 
+                  : (isDarkMode ? Colors.white : Colors.black87),
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (completed)
+            const Icon(
+              Icons.check,
+              color: Color(0xFF4CAF50),
+              size: 18,
+            )
+          else if (isToday)
+             const Text(
+              'Today',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+             )
+          else
+             const SizedBox(height: 18), // Placeholder to keep alignment
+        ],
+      ),
+    );
+  }
+}
+
+// ---------- DATA MODELS ----------
+
+class Meal {
+  final int id;
+  final String type;
+  final String icon;
+  final String name;
+  int calories;
+  bool eaten;
+  final List<MealIngredient> ingredients;
+
+  Meal({
+    required this.id,
+    required this.type,
+    required this.icon,
+    required this.name,
+    required this.calories,
+    this.eaten = false,
+    required this.ingredients,
+  });
+}
+
+class MealIngredient {
+  final String name;
+  final String amount;
+  final int calories;
+
+  MealIngredient(this.name, this.amount, this.calories);
+}

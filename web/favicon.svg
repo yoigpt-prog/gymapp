@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <defs>
+    <linearGradient id="gymGuideGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF3131;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#CC0000;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Circle with Gradient -->
+  <circle cx="250" cy="250" r="235" fill="url(#gymGuideGradient)"/>
+  
+  <!-- White G Letter -->
+  <g transform="translate(140, 150)">
+    <path fill="#ffffff" d="M 115,5 C 55,5 5,55 5,115 C 5,175 55,225 115,225 C 155,225 190,205 210,175 L 170,145 C 160,160 140,170 115,170 C 85,170 60,145 60,115 C 60,85 85,60 115,60 C 135,60 150,70 160,85 L 200,55 C 180,25 150,5 115,5 Z M 115,90 L 115,140 L 175,140 L 175,120 C 175,100 155,90 135,90 Z"/>
+  </g>
+  
+  <!-- Optional subtle shadow effect -->
+  <circle cx="250" cy="250" r="235" fill="none" stroke="#000000" stroke-width="2" opacity="0.1"/>
+</svg>
