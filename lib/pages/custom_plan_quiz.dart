@@ -56,7 +56,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   double progressPercent = 0;
   String progressStatus = 'Initializing...';
   int currentStep = 1;
-  String selectedPlan = 'trial';
+  String selectedPlan = 'weekly';
   bool isTrialEnabled = true;
 
   // Animations
@@ -152,7 +152,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
-      backgroundColor: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
+      backgroundColor: isDarkMode ? const Color(0xFF121212) : Colors.white,
       body: SafeArea(
         child: Column(
           children: [
@@ -169,7 +169,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                 child: KeyedSubtree(
                   key: ValueKey<int>(currentScreen),
                   child: Container(
-                    color: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF8F8F8),
+                    color: isDarkMode ? const Color(0xFF121212) : Colors.white,
                     padding: const EdgeInsets.all(20),
                     child: _buildCurrentScreen(isDarkMode),
                   ),
@@ -586,7 +586,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                 : (isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF8F8F8)),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? const Color(0xFF4CAF50) : Colors.transparent,
+              color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
               width: 2,
             ),
           ),
@@ -1457,150 +1457,171 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     String weeklyPrice = isTrialEnabled ? '\$2.99' : '\$1.99';
     String weeklyDescription = isTrialEnabled ? '/ week - 3-Day Free Trial Included' : '/ week';
     
-    return Column(
-      children: [
-        const SizedBox(height: 20),
-        // Image/Icon
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF8E1),
-            shape: BoxShape.circle,
-          ),
-          child: const Text(
-            '🏋️',
-            style: TextStyle(fontSize: 60),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          'Unlock Premium Access',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Features
-        _buildFeatureItem('📋 Personalized Workout Plans'),
-        _buildFeatureItem('🍽️ Custom Meal Plans'),
-        _buildFeatureItem('🔄 Unlimited Access to All Features'),
-        
-        const SizedBox(height: 30),
-        
-        // Plan Options - Scrollable
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                // Yearly Plan
-                _buildPlanOptionNew(
-                  title: 'Yearly Plan',
-                  price: '\$29.00',
-                  period: '/ year',
-                  badge: 'SAVE 85%',
-                  isSelected: selectedPlan == 'yearly',
-                  onTap: () => setState(() => selectedPlan = 'yearly'),
-                  isDarkMode: isDarkMode,
-                ),
-                const SizedBox(height: 15),
-                
-                // Weekly Plan
-                _buildPlanOptionNew(
-                  title: 'Weekly Plan',
-                  price: weeklyPrice,
-                  period: weeklyDescription,
-                  badge: null,
-                  isSelected: selectedPlan == 'weekly',
-                  onTap: () => setState(() => selectedPlan = 'weekly'),
-                  isDarkMode: isDarkMode,
-                ),
-                const SizedBox(height: 20),
-                
-                // Free Trial Toggle
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                  decoration: BoxDecoration(
-                    color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(
-                      color: isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0),
-                      width: 1,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenHeight = constraints.maxHeight;
+        final isSmallScreen = screenHeight < 700;
+        final isVerySmallScreen = screenHeight < 600;
+
+        // Dynamic sizing
+        final double iconSize = isVerySmallScreen ? 40 : (isSmallScreen ? 50 : 60);
+        final double iconPadding = isVerySmallScreen ? 10 : (isSmallScreen ? 15 : 20);
+        final double titleSize = isVerySmallScreen ? 18 : (isSmallScreen ? 20 : 24);
+        final double featureSpacing = isVerySmallScreen ? 8 : 12;
+        final double sectionSpacing = isVerySmallScreen ? 15 : (isSmallScreen ? 20 : 30);
+        final double planSpacing = isVerySmallScreen ? 10 : 15;
+        final double buttonVerticalPadding = isVerySmallScreen ? 14 : 18;
+
+        return Column(
+          children: [
+            SizedBox(height: isVerySmallScreen ? 10 : 20),
+            // Image/Icon
+            Container(
+              padding: EdgeInsets.all(iconPadding),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '🏋️',
+                style: TextStyle(fontSize: iconSize),
+              ),
+            ),
+            SizedBox(height: isVerySmallScreen ? 10 : 20),
+            Text(
+              'Unlock Premium Access',
+              style: TextStyle(
+                fontSize: titleSize,
+                fontWeight: FontWeight.bold,
+                color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+              ),
+            ),
+            SizedBox(height: isVerySmallScreen ? 10 : 20),
+            
+            // Features
+            _buildFeatureItem('📋 Personalized Workout Plans', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
+            _buildFeatureItem('🍽️ Custom Meal Plans', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
+            _buildFeatureItem('🔄 Unlimited Access to All Features', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
+            
+            SizedBox(height: sectionSpacing),
+            
+            // Plan Options - Scrollable
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Yearly Plan
+                    _buildPlanOptionNew(
+                      title: 'Yearly Plan',
+                      price: '\$29.00',
+                      period: '/ year',
+                      badge: 'SAVE 85%',
+                      isSelected: selectedPlan == 'yearly',
+                      onTap: () => setState(() => selectedPlan = 'yearly'),
+                      isDarkMode: isDarkMode,
+                      padding: isVerySmallScreen ? 15 : 20,
+                      compact: isVerySmallScreen,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Free Trial Enabled',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                    SizedBox(height: planSpacing),
+                    
+                    // Weekly Plan
+                    _buildPlanOptionNew(
+                      title: 'Weekly Plan',
+                      price: weeklyPrice,
+                      period: weeklyDescription,
+                      badge: null,
+                      isSelected: selectedPlan == 'weekly',
+                      onTap: () => setState(() => selectedPlan = 'weekly'),
+                      isDarkMode: isDarkMode,
+                      padding: isVerySmallScreen ? 15 : 20,
+                      compact: isVerySmallScreen,
+                    ),
+                    SizedBox(height: isVerySmallScreen ? 15 : 20),
+                    
+                    // Free Trial Toggle
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: isVerySmallScreen ? 10 : 15),
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(
+                          color: isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0),
+                          width: 1,
                         ),
                       ),
-                      Switch(
-                        value: isTrialEnabled,
-                        onChanged: (value) {
-                          setState(() {
-                            isTrialEnabled = value;
-                          });
-                        },
-                        activeColor: const Color(0xFF4CAF50),
-                        activeTrackColor: const Color(0xFF81C784),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Free Trial Enabled',
+                            style: TextStyle(
+                              fontSize: isVerySmallScreen ? 14 : 16,
+                              fontWeight: FontWeight.w600,
+                              color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                            ),
+                          ),
+                          Switch(
+                            value: isTrialEnabled,
+                            onChanged: (value) {
+                              setState(() {
+                                isTrialEnabled = value;
+                              });
+                            },
+                            activeColor: const Color(0xFFFF0000),
+                            activeTrackColor: const Color(0xFFFF9999),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            SizedBox(height: isVerySmallScreen ? 10 : 20),
+            // Action Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _onStartFreeTrial,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF0000),
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(vertical: buttonVerticalPadding),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 5,
+                  shadowColor: const Color(0xFFFF0000).withOpacity(0.4),
+                ),
+                child: Text(
+                  isTrialEnabled ? 'Start Free Trial >' : 'Subscribe Now >',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-        
-        const SizedBox(height: 20),
-        // Action Button
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _onStartFreeTrial,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0066FF),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              elevation: 5,
-              shadowColor: const Color(0xFF0066FF).withOpacity(0.4),
-            ),
-            child: Text(
-              isTrialEnabled ? 'Start Free Trial >' : 'Subscribe Now >',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildFeatureItem(String text) {
+  Widget _buildFeatureItem(String text, {double fontSize = 15, double padding = 12}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: padding),
       child: Row(
         children: [
           const SizedBox(width: 12),
           Text(
             text,
-            style: const TextStyle(
-              fontSize: 15,
+            style: TextStyle(
+              fontSize: fontSize,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF1A1A1A),
+              color: const Color(0xFF1A1A1A),
             ),
           ),
         ],
@@ -1616,21 +1637,23 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required bool isSelected,
     required VoidCallback onTap,
     required bool isDarkMode,
+    double padding = 20,
+    bool compact = false,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(padding),
         decoration: BoxDecoration(
           color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
-            color: isSelected ? const Color(0xFF0066FF) : (isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0)),
-            width: isSelected ? 2 : 1,
+            color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0)),
+            width: 1,
           ),
           boxShadow: isSelected ? [
             BoxShadow(
-              color: const Color(0xFF0066FF).withOpacity(0.2),
+              color: const Color(0xFFFF0000).withOpacity(0.2),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -1648,7 +1671,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: compact ? 15 : 16,
                           fontWeight: FontWeight.w600,
                           color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
                         ),
@@ -1673,7 +1696,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                       ],
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: compact ? 2 : 4),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.baseline,
                     textBaseline: TextBaseline.alphabetic,
@@ -1681,7 +1704,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                       Text(
                         price,
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: compact ? 18 : 20,
                           fontWeight: FontWeight.bold,
                           color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
                         ),
@@ -1691,7 +1714,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         child: Text(
                           period,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: compact ? 12 : 13,
                             color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -1707,9 +1730,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
               height: 24,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isSelected ? const Color(0xFF0066FF) : Colors.transparent,
+                color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
                 border: Border.all(
-                  color: isSelected ? const Color(0xFF0066FF) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
+                  color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
                   width: 2,
                 ),
               ),

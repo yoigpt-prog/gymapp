@@ -1253,13 +1253,6 @@ class _WorkoutPageState extends State<WorkoutPage> {
             color: isDarkMode ? Colors.white : Colors.black,
             width: 3,
           ),
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: const Color(0xFFFF0000).withOpacity(0.3),
-              blurRadius: 8,
-              spreadRadius: 2,
-            ),
-          ] : null,
         ),
         padding: const EdgeInsets.all(4),
         child: Column(
@@ -1306,8 +1299,13 @@ class _WorkoutPageState extends State<WorkoutPage> {
   // Helper method to get the selected day number (1-14)
   int _getSelectedDayNumber() {
     final now = DateTime.now();
-    final planStartDate = now.subtract(Duration(days: now.weekday - 1));
-    final difference = _selectedDay.difference(planStartDate).inDays;
+    // Normalize to midnight to avoid time drift issues causing off-by-one errors
+    final currentMonday = now.subtract(Duration(days: now.weekday - 1));
+    final planStartDate = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
+    
+    final selectedDate = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+    
+    final difference = selectedDate.difference(planStartDate).inDays;
     return (difference % 14) + 1;
   }
   

@@ -542,7 +542,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
                 ),
               ),
               Text(
-                '$eaten/5 meals', // Assuming 5 meals standard
+                '$eaten/$total meals', // Dynamic meal count
                 style: TextStyle(
                   fontSize: 14,
                   color: isDarkMode ? Colors.white54 : Colors.grey[600],
@@ -550,8 +550,16 @@ class _MealPlanPageState extends State<MealPlanPage> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildMealTimeline(eaten, isDarkMode),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: total > 0 ? eaten / total : 0.0,
+              backgroundColor: isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF0F0F0),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+              minHeight: 6,
+            ),
+          ),
         ],
       ),
     );
@@ -619,46 +627,6 @@ class _MealPlanPageState extends State<MealPlanPage> {
     );
   }
 
-  Widget _buildMealTimeline(int eatenCount, bool isDarkMode) {
-    // Simplistic timeline: 5 dots with lines
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: List.generate(5, (index) {
-        final label = ['Breakfast', 'Morning\nSnack', 'Lunch', 'Afternoon\nSnack', 'Dinner'][index];
-        final isCompleted = index < eatenCount;
-        
-        return Expanded(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(child: Container(height: 2, color: index == 0 ? Colors.transparent : Colors.grey[300])),
-                  Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: isCompleted ? Colors.red : Colors.grey[300],
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  Expanded(child: Container(height: 2, color: index == 4 ? Colors.transparent : Colors.grey[300])),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isDarkMode ? Colors.white54 : Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-        );
-      }),
-    );
-  }
 
   Widget _buildMealCard(Meal meal, bool isDarkMode, {bool isMobile = true}) {
     final cardColor = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
@@ -901,7 +869,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: meal.eaten 
-                    ? (isDarkMode ? Colors.white12 : Colors.grey[200])
+                    ? const Color(0xFF4CAF50)
                     : const Color(0xFFFF0000),
                 foregroundColor: meal.eaten 
                     ? (isDarkMode ? Colors.white : Colors.black87)
@@ -912,13 +880,37 @@ class _MealPlanPageState extends State<MealPlanPage> {
                 ),
                 elevation: 0,
               ),
-              child: Text(
-                meal.eaten ? 'Mark as Not Eaten' : 'Mark as Eaten',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return ScaleTransition(scale: animation, child: child);
+              },
+              child: meal.eaten
+                  ? Row(
+                      key: const ValueKey('eaten'),
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.check_circle, color: Colors.white),
+                        SizedBox(width: 8),
+                        Text(
+                          'Eaten',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'Mark as Eaten',
+                      key: ValueKey('not_eaten'),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+            ),
             ),
           ),
         ],
@@ -983,13 +975,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
             color: isDarkMode ? Colors.white : Colors.black,
             width: 3,
           ),
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: const Color(0xFFFF0000).withOpacity(0.3),
-              blurRadius: 8,
-              spreadRadius: 2,
-            ),
-          ] : null,
+          boxShadow: isSelected ? null : null,
         ),
         padding: const EdgeInsets.all(4),
         child: Column(
@@ -1036,8 +1022,13 @@ class _MealPlanPageState extends State<MealPlanPage> {
   // Helper method to get the selected day number (1-14)
   int _getSelectedDayNumber() {
     final now = DateTime.now();
-    final planStartDate = now.subtract(Duration(days: now.weekday - 1));
-    final difference = _selectedDay.difference(planStartDate).inDays;
+    // Normalize to midnight to avoid time drift issues
+    final currentMonday = now.subtract(Duration(days: now.weekday - 1));
+    final planStartDate = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
+    
+    final selectedDate = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+    
+    final difference = selectedDate.difference(planStartDate).inDays;
     return (difference % 14) + 1;
   }
   
