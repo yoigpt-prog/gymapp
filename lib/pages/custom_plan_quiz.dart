@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'workout_page.dart';
 import 'meal_plan_page.dart';
@@ -32,17 +34,17 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   String targetWeightUnit = 'kg';
   String planDuration = '';
   String experience = '';
-  List<String> bodyAreas = [];
+  List<String> bodyAreas = ['Full Body'];
   String workoutLocation = '';
-  List<String> equipment = [];
+  List<String> equipment = ['All'];
   String trainingDays = '';
   String sessionDuration = '';
   String workoutTime = '';
-  List<String> injuries = [];
-  List<String> healthConditions = [];
-  String dietType = '';
+  List<String> injuries = ['None'];
+  List<String> healthConditions = ['None'];
+  String dietType = 'No Preference';
   String excludeFoods = '';
-  List<String> allergies = [];
+  List<String> allergies = ['None'];
   String mealsPerDay = '';
   String macroBalance = '';
   String sleepHours = '';
@@ -74,6 +76,32 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     _bounceAnimation = Tween<double>(begin: 0, end: -20).animate(
       CurvedAnimation(parent: _bounceController, curve: Curves.easeInOut),
     );
+
+    // Set default units based on locale
+    try {
+      if (!kIsWeb) {
+        final String locale = Platform.localeName;
+        if (locale.toUpperCase().contains('US')) {
+          heightUnit = 'ft';
+          weightUnit = 'lbs';
+          targetWeightUnit = 'lbs';
+        } else {
+          heightUnit = 'cm';
+          weightUnit = 'kg';
+          targetWeightUnit = 'kg';
+        }
+      } else {
+         // Web default (Metric)
+         heightUnit = 'cm';
+         weightUnit = 'kg';
+         targetWeightUnit = 'kg';
+      }
+    } catch (e) {
+      // Fallback to Metric if locale check fails
+      heightUnit = 'cm';
+      weightUnit = 'kg';
+      targetWeightUnit = 'kg';
+    }
   }
 
   @override
@@ -140,6 +168,10 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     await prefs.setBool('has_meal_plan', true);
     // Save plan duration for progress tracking
     await prefs.setString('plan_duration', planDuration);
+    
+    // Save unit preferences
+    await prefs.setString('weight_unit', weightUnit); // 'kg' or 'lbs'
+    await prefs.setString('height_unit', heightUnit); // 'cm' or 'ft'
     
     if (mounted) {
       // Pop with success result so MainScaffold knows quiz was completed
@@ -608,12 +640,14 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     : null,
               ),
               const SizedBox(width: 12),
-              Text(
-                text,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+              Expanded(
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                  ),
                 ),
               ),
             ],
@@ -718,28 +752,64 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required List<String> selectedValues,
     required ValueChanged<String> onToggle,
     required bool isDarkMode,
+    int columns = 1,
   }) {
+    // Force single column on small screens to prevent overflow
+    if (MediaQuery.of(context).size.width < 600) {
+      columns = 1;
+    }
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
       onContinue: () => nextScreen(questionNumber + 1),
       isDarkMode: isDarkMode,
-      content: ListView.builder(
-        itemCount: options.length + 1,
-        itemBuilder: (context, index) {
-          if (index == options.length) {
-            return _buildContinueButton(() => nextScreen(questionNumber + 1));
-          }
-          final option = options[index];
-          return _buildOption(
-            text: option,
-            isSelected: selectedValues.contains(option),
-            onTap: () => onToggle(option),
-            index: index,
-            isRadio: false,
-            isDarkMode: isDarkMode,
-          );
-        },
+      content: CustomScrollView(
+        slivers: [
+          if (columns > 1)
+            SliverGrid(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                childAspectRatio: 3.5, // Adjusted for better fit
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 0,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final option = options[index];
+                  return _buildOption(
+                    text: option,
+                    isSelected: selectedValues.contains(option),
+                    onTap: () => onToggle(option),
+                    index: index,
+                    isRadio: false,
+                    isDarkMode: isDarkMode,
+                  );
+                },
+                childCount: options.length,
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final option = options[index];
+                  return _buildOption(
+                    text: option,
+                    isSelected: selectedValues.contains(option),
+                    onTap: () => onToggle(option),
+                    index: index,
+                    isRadio: false,
+                    isDarkMode: isDarkMode,
+                  );
+                },
+                childCount: options.length,
+              ),
+            ),
+            
+          SliverToBoxAdapter(
+            child: _buildContinueButton(() => nextScreen(questionNumber + 1)),
+          ),
+        ],
       ),
     );
   }
@@ -918,8 +988,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildActivityLevelScreen(bool isDarkMode) {
     return _buildSelectionScreen(
       questionNumber: 7,
-      title: "What is your activity level?",
-      options: ['Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active'],
+      title: "What best describes your daily activity level (outside of workouts)?",
+      options: [
+        'Sedentary (mostly sitting, office work)',
+        'Light (some walking or light movement)',
+        'Moderate (active job or frequent movement)',
+        'Very Active (physical labor or athlete)'
+      ],
       selectedValue: activityLevel,
       onSelect: (val) => setState(() => activityLevel = val),
       isDarkMode: isDarkMode,
@@ -930,7 +1005,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildSelectionScreen(
       questionNumber: 8,
       title: "What's your main fitness goal?",
-      options: ['Lose Fat', 'Lose belly fat', 'Build Muscle Mass', 'Improve Kegel Strength', 'Improve flexibility and mobility', 'Fix posture or back pain', 'Lift and round your butt', 'Maintain Weight'],
+      options: ['Lose Weight / Fat Loss', 'Build Muscle', 'Get Stronger', 'Improve Fitness (Cardio)', 'Improve Flexibility & Mobility', 'Maintain Weight'],
       selectedValue: mainGoal,
       onSelect: (val) => setState(() => mainGoal = val),
       isDarkMode: isDarkMode,
@@ -1003,6 +1078,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValues: equipment,
       onToggle: (val) => toggleOption(equipment, val),
       isDarkMode: isDarkMode,
+      columns: 2,
     );
   }
 
@@ -1010,7 +1086,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildSelectionScreen(
       questionNumber: 15,
       title: "How many days per week can you train?",
-      options: ['1', '2', '3', '4', '5', '6', '7'],
+      options: ['1 day', '2 days', '3 days', '4 days', '5 days', '6 days', '7 days'],
       selectedValue: trainingDays,
       onSelect: (val) => setState(() => trainingDays = val),
       isDarkMode: isDarkMode,
@@ -1021,7 +1097,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildSelectionScreen(
       questionNumber: 16,
       title: "How much time do you have per session?",
-      options: ['10 min', '20 min', '30 min', '45 min', '60 min', '90 min'],
+      options: ['15 min', '20 min', '30 min', '45 min', '60 min', '90 min'],
       selectedValue: sessionDuration,
       onSelect: (val) => setState(() => sessionDuration = val),
       isDarkMode: isDarkMode,
@@ -1120,7 +1196,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildSelectionScreen(
       questionNumber: 23,
       title: "How many meals do you prefer per day?",
-      options: ['2', '3', '4', '5'],
+      options: ['2 meals', '3 meals', '4 meals', '5 meals'],
       selectedValue: mealsPerDay,
       onSelect: (val) => setState(() => mealsPerDay = val),
       isDarkMode: isDarkMode,

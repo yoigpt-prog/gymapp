@@ -155,10 +155,22 @@ class _WorkoutPageState extends State<WorkoutPage> {
   // Fetch all exercises once and cache them
   Future<void> _initializeExercises() async {
     try {
-      final response = await Supabase.instance.client
+      // Get user gender from shared preferences
+      final prefs = await SharedPreferences.getInstance();
+      final String gender = prefs.getString('profile_gender') ?? 'Male';
+      
+      var query = Supabase.instance.client
           .from('exercises')
-          .select()
-          .select();
+          .select('is_male, is_female, group_path, exercise_name, target_muscle, synergists, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
+          
+      // Apply gender filter
+      if (gender == 'Male') {
+        query = query.eq('is_male', true);
+      } else if (gender == 'Female') {
+        query = query.eq('is_female', true);
+      }
+      
+      final response = await query;
       
       _allExercisesCache = (response as List)
           .map((json) => ExerciseDetail.fromJson(json))

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/red_header.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class BmiCalculatorPage extends StatefulWidget {
@@ -22,6 +23,26 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
   String _unit = 'Metric'; // Metric or Imperial
   double? _bmi;
   String _bmiCategory = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnitPreference();
+  }
+
+  Future<void> _loadUnitPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final weightUnit = prefs.getString('weight_unit');
+    if (weightUnit == 'lbs') {
+      setState(() {
+        _unit = 'Imperial';
+      });
+    } else {
+      setState(() {
+        _unit = 'Metric';
+      });
+    }
+  }
 
   void _calculateBmi() {
     final double? height = double.tryParse(_heightController.text);

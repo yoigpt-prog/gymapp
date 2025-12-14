@@ -49,9 +49,7 @@ class ProgressPage extends StatelessWidget {
                   _ThisWeekStats(isDarkMode: isDarkMode),
                   const SizedBox(height: 16),
 
-                  // 4. Streak Card
-                  _StreakCard(isDarkMode: isDarkMode),
-                  const SizedBox(height: 16),
+
 
                   // 5. Weekly Metrics Entry
                   _WeeklyMetricsEntryCard(isDarkMode: isDarkMode),
@@ -258,6 +256,46 @@ class _OverallPlanCardState extends State<_OverallPlanCard> {
 // ---------------------------------------------------------------------------
 // 3. This Week Stats - Comprehensive Weekly Overview
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 3. This Week Stats - Data-Driven Dashboard
+// ---------------------------------------------------------------------------
+
+class UserProfile {
+  final double weightKg;
+  final double heightCm;
+  final int age;
+  final String gender;
+  final double activityMultiplier; // 1.2 sedentary, 1.375 light, 1.55 moderate, 1.725 active
+  final String goal; // 'Lose Weight', 'Maintain', 'Gain'
+
+  const UserProfile({
+    required this.weightKg,
+    required this.heightCm,
+    required this.age,
+    required this.gender,
+    required this.activityMultiplier,
+    required this.goal,
+  });
+
+  double get bmr {
+    // Mifflin-St Jeor Equation
+    double base = (10 * weightKg) + (6.25 * heightCm) - (5 * age);
+    return gender == 'Male' ? base + 5 : base - 161;
+  }
+
+  double get tdee => bmr * activityMultiplier;
+}
+
+// Mock User Data
+const mockUser = UserProfile(
+  weightKg: 82.5,
+  heightCm: 180.0,
+  age: 28,
+  gender: 'Male',
+  activityMultiplier: 1.45, // Light-Moderate
+  goal: 'Lose Weight',
+);
+
 class _ThisWeekStats extends StatefulWidget {
   final bool isDarkMode;
   const _ThisWeekStats({required this.isDarkMode});
@@ -269,9 +307,63 @@ class _ThisWeekStats extends StatefulWidget {
 class _ThisWeekStatsState extends State<_ThisWeekStats> {
   int _selectedTab = 0; // 0 = This Week, 1 = Overall
 
+  // Simulation Data (Weekly)
+  // In a real app, these would come from your database or state management
+  final int _workoutsCompleted = 4;
+  final int _workoutsPlanned = 5;
+  final int _mealsLogged = 17;
+  final int _mealsTotal = 21;
+  
+  // Weekly Macros (Actual)
+  final int _proteinCurrent = 112 * 7; // Mocked weekly accumulation
+  final int _carbsCurrent = 180 * 7;
+  final int _fatCurrent = 45 * 7;
+  
+  // Targets (Daily * 7)
+  final int _proteinTarget = 150 * 7;
+  final int _carbsTarget = 250 * 7;
+  final int _fatTarget = 65 * 7;
+
+  // Workouts Burn (Actual/Estimated)
+  final int _workoutBurn = 1850; 
+
+  // Net Calories Logic
+  // Intake = (P*4 + C*4 + F*9)
+  int get _weeklyIntake => (_proteinCurrent * 4) + (_carbsCurrent * 4) + (_fatCurrent * 9);
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width <= 800;
+    
+    // 1. Calculate Basal Metrics
+    final double dailyBMR = mockUser.bmr;
+    final double weeklyBMR = dailyBMR * 7;
+    
+    // 2. Breakdown Calculations (Weekly)
+    // Sleep: ~8 hours/day at 0.95 BMR (metabolic drop during sleep)
+    final double sleepBurn = (dailyBMR / 24) * 8 * 0.95 * 7;
+    
+    // Breathing/Recovery (Resting Awake): ~16 hours/day (Remainder of BMR)
+    final double breathingBurn = (dailyBMR / 24) * 16 * 1.05 * 7; // Slight bump for awake BMR
+    
+    // Activity (NEAT): TDEE - BMR (The movement part)
+    // We use the multiplier to estimate non-exercise activity
+    final double dailyActivityBurn = (mockUser.tdee - dailyBMR);
+    final double activityBurn = dailyActivityBurn * 7;
+
+    // Total Burned
+    final int totalBurned = (_workoutBurn + activityBurn + sleepBurn + breathingBurn).toInt();
+    
+    // Net Calories
+    final int netCalories = _weeklyIntake - totalBurned;
+    final bool isDeficit = netCalories < 0;
+
+    // Plan Adherence Calculation (Simple weighted average)
+    final double workoutAdherence = (_workoutsCompleted / _workoutsPlanned).clamp(0.0, 1.0);
+    final double mealAdherence = (_mealsLogged / _mealsTotal).clamp(0.0, 1.0);
+    final double macroAdherence = 0.85; // Mocked consistency
+    final double totalAdherence = (workoutAdherence * 0.4) + (mealAdherence * 0.4) + (macroAdherence * 0.2);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -292,18 +384,38 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with tabs
+          // -----------------------------------------------------------------
+          // 1. Header
+          // -----------------------------------------------------------------
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Weekly Overview',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: widget.isDarkMode ? Colors.white : Colors.black,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Weekly Overview',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: widget.isDarkMode ? Colors.white : Colors.black,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Based on your body, plan, and activity',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: widget.isDarkMode ? Colors.white54 : Colors.grey,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
                 decoration: BoxDecoration(
                   color: widget.isDarkMode ? Colors.white10 : const Color(0xFFF0F0F0),
@@ -318,100 +430,257 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
               ),
             ],
           ),
+          const SizedBox(height: 24),
+          
+          // -----------------------------------------------------------------
+          // 2. Macros Section
+          // -----------------------------------------------------------------
+          Text(
+            'Macros (Weekly Totals)',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // We show daily averages in caption, but totals in bar
+          _buildMacroRow('Protein', _proteinCurrent, _proteinTarget, 'g', const Color(0xFFFF0000)),
+          const SizedBox(height: 12),
+          _buildMacroRow('Carbs', _carbsCurrent, _carbsTarget, 'g', Colors.orange),
+          const SizedBox(height: 12),
+          _buildMacroRow('Fat', _fatCurrent, _fatTarget, 'g', Colors.purple),
+          
+          const SizedBox(height: 24),
+          const Divider(height: 1),
+          const SizedBox(height: 24),
+          
+          // -----------------------------------------------------------------
+          // 3. Calories Burned Breakdown
+          // -----------------------------------------------------------------
+          Text(
+            'Calories Burned (Estimated)',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // 4 Stacked Rows
+          _buildBurnRow(
+            icon: Icons.fitness_center,
+            label: 'Workouts',
+            value: _workoutBurn,
+            color: const Color(0xFFFF0000),
+            note: 'Actual logged',
+          ),
+          const SizedBox(height: 12),
+          _buildBurnRow(
+            icon: Icons.directions_walk,
+            label: 'Daily Activity',
+            value: activityBurn.toInt(),
+            color: Colors.blue,
+            note: 'Steps & movement',
+          ),
+          const SizedBox(height: 12),
+          _buildBurnRow(
+            icon: Icons.bedtime,
+            label: 'Sleep',
+            value: sleepBurn.toInt(),
+            color: Colors.indigo,
+            note: 'BMR est. (8h)',
+          ),
+          const SizedBox(height: 12),
+          _buildBurnRow(
+            icon: Icons.air,
+            label: 'Breathing / Recovery',
+            value: breathingBurn.toInt(),
+            color: Colors.teal,
+            note: 'BMR est. (16h)',
+          ),
+          
           const SizedBox(height: 20),
           
-          // Macros Section
-          Text(
-            'Macros',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: widget.isDarkMode ? Colors.white70 : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildMacroRow('Protein', 112, 150, 'g', const Color(0xFFFF0000)),
-          const SizedBox(height: 10),
-          _buildMacroRow('Carbs', 180, 250, 'g', Colors.orange),
-          const SizedBox(height: 10),
-          _buildMacroRow('Fat', 45, 65, 'g', Colors.purple),
-          
-          const Divider(height: 32),
-          
-          // Calories Burned Section
-          Text(
-            'Calories Burned',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: widget.isDarkMode ? Colors.white70 : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildCalorieCard(
-                  icon: Icons.fitness_center,
-                  label: 'Workouts',
-                  value: '1,850',
-                  subLabel: '4 sessions',
-                  color: const Color(0xFFFF0000),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildCalorieCard(
-                  icon: Icons.directions_walk,
-                  label: 'Activity',
-                  value: '2,100',
-                  subLabel: 'Daily activity',
-                  color: Colors.blue,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          // -----------------------------------------------------------------
+          // 4. Total Burned & Net Calories
+          // -----------------------------------------------------------------
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : const Color(0xFFFFF5F5),
-              borderRadius: BorderRadius.circular(12),
+              color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: const Color(0xFFFF0000).withOpacity(0.2),
+                color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade200,
               ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
               children: [
+                // Total Burned
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(Icons.local_fire_department, color: const Color(0xFFFF0000), size: 20),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.local_fire_department, color: const Color(0xFFFF0000), size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Total Burned',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                    color: widget.isDarkMode ? Colors.white : Colors.black87,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Personalized estimate',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Total Burned',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '$totalBurned kcal',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFFF0000),
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                Text(
-                  '3,950 kcal',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFFFF0000),
-                  ),
+                
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1),
+                ),
+                
+                // Net Calories
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(
+                            isDeficit ? Icons.trending_down : Icons.trending_up,
+                            color: isDeficit ? Colors.green : Colors.red,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Net Calories',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: widget.isDarkMode ? Colors.white : Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isDeficit ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '${netCalories > 0 ? '+' : ''}$netCalories kcal (${isDeficit ? 'deficit' : 'surplus'})',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isDeficit ? Colors.green : Colors.red,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           
-          const Divider(height: 32),
-          
-          // Weekly Goals Section
+          const SizedBox(height: 24),
+          const Divider(height: 1),
+          const SizedBox(height: 24),
+
+          // -----------------------------------------------------------------
+          // 6. Plan Adherence
+          // -----------------------------------------------------------------
+          Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+             children: [
+               Text(
+                 'Plan Adherence',
+                 style: TextStyle(
+                   fontSize: 14,
+                   fontWeight: FontWeight.w600,
+                   color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                 ),
+               ),
+               Text(
+                 '${(totalAdherence * 100).toInt()}%',
+                 style: TextStyle(
+                   fontSize: 14,
+                   fontWeight: FontWeight.bold,
+                   color: widget.isDarkMode ? Colors.white : Colors.black,
+                 ),
+               ),
+             ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: totalAdherence,
+              backgroundColor: widget.isDarkMode ? Colors.white10 : Colors.grey[200],
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+              minHeight: 8,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'How closely you followed your plan this week',
+            style: TextStyle(
+              fontSize: 11,
+              color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // -----------------------------------------------------------------
+          // 7. Weekly Goals (Refined)
+          // -----------------------------------------------------------------
           Text(
             'Weekly Goals',
             style: TextStyle(
@@ -421,11 +690,11 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
             ),
           ),
           const SizedBox(height: 12),
-          _buildGoalRow(Icons.fitness_center, 'Complete 5 workouts', 4, 5),
-          const SizedBox(height: 8),
-          _buildGoalRow(Icons.restaurant, 'Log all meals', 17, 21),
-          const SizedBox(height: 8),
-          _buildGoalRow(Icons.local_fire_department, 'Burn 4,000 kcal', 3950, 4000),
+          _buildGoalRow(Icons.fitness_center, 'Complete 5 workouts', _workoutsCompleted, _workoutsPlanned, 'planned'),
+          const SizedBox(height: 12),
+          _buildGoalRow(Icons.restaurant, 'Log all meals', _mealsLogged, _mealsTotal, 'meals'),
+          const SizedBox(height: 12),
+          _buildGoalRow(Icons.local_fire_department, 'Burn 4,000 kcal', totalBurned, 4000, 'kcal'),
         ],
       ),
     );
@@ -453,9 +722,14 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
     );
   }
 
+  // Updated Macro Row with dynamic "left/over" and daily avg caption
   Widget _buildMacroRow(String name, int intake, int goal, String unit, Color color) {
     final remaining = goal - intake;
     final progress = intake / goal;
+    final isOver = remaining < 0;
+    
+    // Daily average for caption
+    final int dailyAvg = (intake / 7).round();
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -505,9 +779,9 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
                     style: TextStyle(color: widget.isDarkMode ? Colors.white38 : Colors.grey[400]),
                   ),
                   TextSpan(
-                    text: '${remaining}$unit left',
+                    text: isOver ? '${remaining.abs()}$unit over' : '${remaining}$unit left',
                     style: TextStyle(
-                      color: color,
+                      color: isOver ? Colors.red : color,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -522,14 +796,80 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
           child: LinearProgressIndicator(
             value: progress.clamp(0.0, 1.0),
             backgroundColor: widget.isDarkMode ? Colors.white10 : Colors.grey[200],
-            valueColor: AlwaysStoppedAnimation<Color>(color),
+            valueColor: AlwaysStoppedAnimation<Color>(isOver ? Colors.red : color),
             minHeight: 6,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            'Daily avg: $dailyAvg$unit',
+            style: TextStyle(
+              fontSize: 10,
+              color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+            ),
           ),
         ),
       ],
     );
   }
 
+  // New Burn Breakdown Row
+  Widget _buildBurnRow({
+    required IconData icon,
+    required String label,
+    required int value,
+    required Color color,
+    required String note,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+              Text(
+                note,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Text(
+          '$value kcal',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: widget.isDarkMode ? Colors.white : Colors.black,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Not used anymore
   Widget _buildCalorieCard({
     required IconData icon,
     required String label,
@@ -537,50 +877,10 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
     required String subLabel,
     required Color color,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : const Color(0xFFF8F9FA),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: widget.isDarkMode ? Colors.white54 : Colors.grey,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '$value kcal',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white : Colors.black,
-            ),
-          ),
-          Text(
-            subLabel,
-            style: TextStyle(
-              fontSize: 11,
-              color: widget.isDarkMode ? Colors.white38 : Colors.grey,
-            ),
-          ),
-        ],
-      ),
-    );
+    return Container(); 
   }
 
-  Widget _buildGoalRow(IconData icon, String goal, int current, int target) {
+  Widget _buildGoalRow(IconData icon, String goal, int current, int target, String unitSuffix) {
     final progress = current / target;
     final isComplete = current >= target;
     
@@ -630,18 +930,31 @@ class _ThisWeekStatsState extends State<_ThisWeekStats> {
           ),
         ),
         const SizedBox(width: 10),
-        Text(
-          '$current/$target',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isComplete ? const Color(0xFFFF0000) : (widget.isDarkMode ? Colors.white54 : Colors.grey),
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              '$current / $target',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isComplete ? const Color(0xFFFF0000) : (widget.isDarkMode ? Colors.white54 : Colors.grey),
+              ),
+            ),
+            Text(
+              unitSuffix,
+              style: TextStyle(
+                fontSize: 9,
+                color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // 4. Weekly Trend Chart

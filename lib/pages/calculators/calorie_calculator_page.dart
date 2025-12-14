@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/red_header.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class CalorieCalculatorPage extends StatefulWidget {
@@ -23,6 +24,27 @@ class _CalorieCalculatorPageState extends State<CalorieCalculatorPage> {
   String _gender = 'Male';
   String _activityLevel = 'Sedentary';
   double? _calories;
+  String _unit = 'Metric'; // Metric or Imperial
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnitPreference();
+  }
+
+  Future<void> _loadUnitPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final weightUnit = prefs.getString('weight_unit');
+    if (weightUnit == 'lbs') {
+      setState(() {
+        _unit = 'Imperial';
+      });
+    } else {
+      setState(() {
+        _unit = 'Metric';
+      });
+    }
+  }
 
   final Map<String, double> _activityMultipliers = {
     'Sedentary': 1.2,
@@ -38,12 +60,22 @@ class _CalorieCalculatorPageState extends State<CalorieCalculatorPage> {
     final double? weight = double.tryParse(_weightController.text);
 
     if (age != null && height != null && weight != null) {
+      double convWeight = weight;
+      double convHeight = height;
+
+      if (_unit == 'Imperial') {
+         // Convert lbs to kg
+         convWeight = weight * 0.453592;
+         // Convert inches to cm
+         convHeight = height * 2.54;
+      }
+
       // Mifflin-St Jeor Equation
       double bmr;
       if (_gender == 'Male') {
-        bmr = (10 * weight) + (6.25 * height) - (5 * age) + 5;
+        bmr = (10 * convWeight) + (6.25 * convHeight) - (5 * age) + 5;
       } else {
-        bmr = (10 * weight) + (6.25 * height) - (5 * age) - 161;
+        bmr = (10 * convWeight) + (6.25 * convHeight) - (5 * age) - 161;
       }
 
       setState(() {
@@ -95,9 +127,9 @@ class _CalorieCalculatorPageState extends State<CalorieCalculatorPage> {
               // Inputs
               _buildInput('Age', _ageController, 'e.g. 25', textColor),
               const SizedBox(height: 16),
-              _buildInput('Height (cm)', _heightController, 'e.g. 175', textColor),
+              _buildInput(_unit == 'Metric' ? 'Height (cm)' : 'Height (inches)', _heightController, _unit == 'Metric' ? 'e.g. 175' : 'e.g. 69', textColor),
               const SizedBox(height: 16),
-              _buildInput('Weight (kg)', _weightController, 'e.g. 70', textColor),
+              _buildInput(_unit == 'Metric' ? 'Weight (kg)' : 'Weight (lbs)', _weightController, _unit == 'Metric' ? 'e.g. 70' : 'e.g. 154', textColor),
               const SizedBox(height: 24),
 
               Text(

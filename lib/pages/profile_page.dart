@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
+// import 'dart:io'; // Removed for web compatibility
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../widgets/red_header.dart';
@@ -95,6 +95,24 @@ class _ProfilePageState extends State<ProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error picking image: $e')),
       );
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await Supabase.instance.client.auth.signOut();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logged out successfully')),
+        );
+        _loadUserData(); // Update UI to show Guest
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error signing out: $e')),
+        );
+      }
     }
   }
 
@@ -414,6 +432,27 @@ class _ProfilePageState extends State<ProfilePage> {
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AITransparencyPage())),
                   ),
                   const SizedBox(height: 24),
+                  
+                  // Logout Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _signOut,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF0000),
+                        side: const BorderSide(color: Color(0xFFFF0000)),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Log Out',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 48), // Bottom padding
                 ],
               ),
             ),
@@ -695,6 +734,17 @@ class _ProfilePageState extends State<ProfilePage> {
                 'Edit Profile',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: _signOut,
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey,
+              ),
+              child: const Text('Log Out'),
             ),
           ),
         ],
