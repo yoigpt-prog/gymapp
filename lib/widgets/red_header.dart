@@ -142,19 +142,45 @@ class RedHeader extends StatelessWidget {
         // Logo instead of title
         SvgPicture.asset(
           'assets/svg/logo/gymguideicon.svg',
-          height: 42,
+          height: 48,
         ),
         
         // Spacer
         const Spacer(),
         
+        // App Store Icons
+        _buildStoreIcon('assets/svg/logo/appleminiicon.svg', useOriginalColor: false),
+        const SizedBox(width: 8),
+        _buildStoreIcon('assets/svg/logo/playminiicon.svg', useOriginalColor: true),
+        const SizedBox(width: 12), // Spacing from right edge or next widget
+
         // Right widget (optional)
         if (rightWidget != null)
           Padding(
-            padding: const EdgeInsets.only(left: 12),
+            padding: const EdgeInsets.only(left: 0), 
             child: rightWidget!,
           ),
       ],
+    );
+  }
+
+  Widget _buildStoreIcon(String assetPath, {bool useOriginalColor = false}) {
+    return Container(
+      width: 48,
+      height: 48,
+      padding: const EdgeInsets.all(10), // Adjusted padding
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12), // Adjusted radius
+        // No border as per screenshot
+      ),
+      child: Center(
+        child: SvgPicture.asset(
+          assetPath,
+          color: useOriginalColor ? null : Colors.white, 
+          fit: BoxFit.contain,
+        ),
+      ),
     );
   }
 }

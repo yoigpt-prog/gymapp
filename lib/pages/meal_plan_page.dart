@@ -8,7 +8,10 @@ import 'custom_plan_quiz.dart';
 import 'main_scaffold.dart';
 import '../models/meal_model.dart';
 import '../services/supabase_service.dart';
+import '../services/plan_service.dart';
 import '../widgets/red_header.dart';
+
+import '../widgets/polygon_border.dart';
 
 class MealPlanPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -21,10 +24,10 @@ class MealPlanPage extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<MealPlanPage> createState() => _MealPlanPageState();
+  State<MealPlanPage> createState() => MealPlanPageState();
 }
 
-class _MealPlanPageState extends State<MealPlanPage> {
+class MealPlanPageState extends State<MealPlanPage> {
   // Use widget.isDarkMode or Theme brightness for dark mode check
   bool get isDarkMode => Theme.of(context).brightness == Brightness.dark;
   
@@ -48,6 +51,11 @@ class _MealPlanPageState extends State<MealPlanPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadMeals();
+  }
+  
+  // Public refresh method
+  Future<void> refresh() async {
+    await _loadMeals();
   }
 
   @override
@@ -73,93 +81,331 @@ class _MealPlanPageState extends State<MealPlanPage> {
     _lastScrollOffset = currentScrollOffset;
   }
 
-  Future<void> _loadMeals() async {
+  // Dynamic plan duration
+  int _planDurationWeeks = 2; // Default, will update from DB
+  DateTime? _planCreationDate; // Store the actual plan start date
+
+  // ---------------------------------------------------------------
+  // Cache helpers
+  // ---------------------------------------------------------------
+  static const String _cachePrefix = 'meal_plan_cache_';
+  final SupabaseService _cacheSupabaseService = SupabaseService();
+
+  String? _getCacheKey() {
+    final user = _cacheSupabaseService.client.auth.currentUser;
+    return user != null ? '$_cachePrefix${user.id}' : null;
+  }
+
+  Future<void> _savePlanToCache(Map<String, dynamic> data) async {
+    try {
+      final key = _getCacheKey();
+      if (key == null) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, jsonEncode(data));
+      print('DEBUG: [Cache] Meal plan cached with key $key');
+    } catch (e) {
+      print('DEBUG: [Cache] Failed to save cache: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> _loadPlanFromCache() async {
+    try {
+      final key = _getCacheKey();
+      if (key == null) return null;
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(key);
+      if (raw == null) return null;
+      print('DEBUG: [Cache] Loaded meal plan from cache key $key');
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      print('DEBUG: [Cache] Failed to load cache: $e');
+      return null;
+    }
+  }
+
+  // Restore organised meals from cache payload
+  void _applyCachedData(Map<String, dynamic> cached) {
+    try {
+      final rawDays = cached['days'] as Map<String, dynamic>?;
+      if (rawDays == null) return;
+      final Map<String, Map<String, Meal>> restored = {};
+      rawDays.forEach((dateKey, slotMap) {
+        final slots = slotMap as Map<String, dynamic>;
+        restored[dateKey] = {};
+        slots.forEach((slotName, mealJson) {
+          restored[dateKey]![slotName] =
+              Meal.fromJson(mealJson as Map<String, dynamic>);
+        });
+      });
+      if (cached['planDurationWeeks'] is int) {
+        _planDurationWeeks = cached['planDurationWeeks'] as int;
+      }
+      setState(() {
+        _mealsByDay = restored;
+        _isLoading = false;
+      });
+      print('DEBUG: [Cache] Applied cached data: ${restored.length} days');
+    } catch (e) {
+      print('DEBUG: [Cache] Failed to apply cached data: $e');
+    }
+  }
+
+  // Build cache payload from current state
+  Map<String, dynamic> _buildCachePayload() {
+    final Map<String, Map<String, dynamic>> days = {};
+    _mealsByDay.forEach((dateKey, slotMap) {
+      days[dateKey] = {};
+      slotMap.forEach((slotName, meal) {
+        days[dateKey]![slotName] = {
+          'id': meal.id,
+          'meal_type': meal.type,
+          'name': meal.name,
+          'image_url': meal.imageUrl,
+          'calories': meal.calories,
+          'protein_g': meal.protein,
+          'carbs_g': meal.carbs,
+          'fats_g': meal.fats,
+          'is_eaten': meal.eaten,
+          'plan_row_id': meal.planId,
+          'ingredients': meal.ingredients
+              .map((i) => {'name': i.name, 'amount': i.amount, 'calories': i.calories})
+              .toList(),
+        };
+      });
+    });
+    return {'days': days, 'planDurationWeeks': _planDurationWeeks};
+  }
+
+  // ---------------------------------------------------------------
+  // Load meals (with cache-first strategy)
+  // ---------------------------------------------------------------
+  Future<void> _loadMeals({int? week, int? day, bool clearData = false}) async {
     try {
       if (!mounted) return;
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
 
-      final allMeals = await _supabaseService.getMeals();
-      
-      if (!mounted) return;
-      
-      final Map<String, Map<String, Meal>> organizedMeals = {};
-      
-      // Seed the map with data for the current 2 weeks
-      final now = DateTime.now();
-      final planStartDate = now.subtract(Duration(days: now.weekday - 1));
-      
-      for (int i = 0; i < 14; i++) {
-        final date = planStartDate.add(Duration(days: i));
-        final dateKey = _getDateKey(date);
-        
-        organizedMeals[dateKey] = {};
-        for (final meal in allMeals) {
-          // Simplistic distribution
-          organizedMeals[dateKey]![meal.type] = meal;
+      // For a full fetch with no filters, try showing cached data instantly
+      bool usedCache = false;
+      if (week == null && day == null && !clearData) {
+        final cached = await _loadPlanFromCache();
+        if (cached != null && mounted) {
+          _applyCachedData(cached);
+          usedCache = true;
         }
       }
 
+      if (!usedCache) {
+        setState(() {
+          _isLoading = true;
+          _errorMessage = null;
+          if (clearData) _mealsByDay.clear();
+        });
+      }
+
+      print('DEBUG: [MealPlanPage] Loading meals (week: $week, day: $day)...');
+
+      // Pass the filters to the service
+      List<Map<String, dynamic>> userPlan = await _supabaseService.getUserMealPlan(week: week, day: day);
+      print('DEBUG: [MealPlanPage] Fetched ${userPlan.length} rows.');
+
+      // If empty and doing a full fetch, log it — generation only happens after quiz
+      if (userPlan.isEmpty && week == null && day == null) {
+        print('DEBUG: [MealPlanPage] No plan found. Complete the quiz to generate one.');
+      }
+
+      if (!mounted) return;
+      
+      // If fetching all (week==null), update duration
+      if (week == null && day == null) {
+          if (userPlan.isEmpty) {
+             print('DEBUG: [MealPlanPage] No generated plan found.');
+             setState(() => _isLoading = false);
+             return;
+          }
+          // DYNAMIC DURATION CALCULATION
+          // Use MAX day_number to determine weeks (e.g. Day 21 -> 3 weeks)
+          int maxDay = 0;
+          if (userPlan.isNotEmpty) {
+             final days = userPlan.map((m) => m['plan_global_day'] as int? ?? 0);
+             if (days.isNotEmpty) {
+                maxDay = days.reduce(max);
+             }
+          }
+          
+          // 2. Convert to weeks (ceil)
+          final totalWeeks = (maxDay / 7).ceil();
+          
+          // 3. Update state
+          _planDurationWeeks = totalWeeks > 0 ? totalWeeks : 2; // Default to 2 if 0
+          
+          print('DEBUG: [MealPlanPage] Dynamic Duration: Max Day $maxDay -> $totalWeeks weeks');
+           
+          // CAPTURE CREATION DATE from the first row if available
+          if (userPlan.isNotEmpty && userPlan.first['created_at'] != null) {
+              final createdAt = DateTime.parse(userPlan.first['created_at']);
+              _planCreationDate = DateTime(createdAt.year, createdAt.month, createdAt.day); // Normalize
+              print('DEBUG: [MealPlanPage] Plan creation date set to: $_planCreationDate');
+          }
+
+      }
+
+      final Map<String, Map<String, Meal>> organizedMeals = {};
+      
+      
+      // 2. Calculate Dates
+      // Use the actual plan creation date if available to ensure keys match UI logic
+      DateTime planStartDate;
+      if (_planCreationDate != null) {
+          planStartDate = _planCreationDate!;
+      } else {
+          final now = DateTime.now();
+          final currentMonday = now.subtract(Duration(days: now.weekday - 1));
+          planStartDate = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
+      }
+      
+      // 3. Group by Global Day
+      final Map<int, List<Map<String, dynamic>>> deepGrouped = {};
+      
+      // Debug first item to inspect structure
+      if (userPlan.isNotEmpty) {
+         print('DEBUG: [MealPlanPage] First row sample keys: ${userPlan.first.keys.toList()}');
+         print('DEBUG: [MealPlanPage] First row sample values: ${userPlan.first}');
+      }
+
+      for (var item in userPlan) {
+          // SAFE CAST: plan_global_day
+          // This should now be populated by the fixes in SupabaseService
+          final gDayRaw = item['plan_global_day'];
+          final int gDay;
+          if (gDayRaw is int) {
+             gDay = gDayRaw;
+          } else if (gDayRaw is String) {
+             gDay = int.tryParse(gDayRaw) ?? 1;
+          } else {
+             // Fallback logic if null: calculate from week/day
+             final w = item['plan_week'] as int? ?? 1;
+             final d = item['plan_day'] as int? ?? 1;
+             gDay = ((w - 1) * 7) + d;
+          }
+          
+          if (!deepGrouped.containsKey(gDay)) deepGrouped[gDay] = [];
+          deepGrouped[gDay]!.add(item);
+      }
+      
+      // 4. Map to UI Slots
+      deepGrouped.forEach((gDay, dayItems) {
+          // Sort meals in correct order: breakfast → lunch → snack → dinner
+          dayItems.sort((a, b) {
+              int score(String t) {
+                  t = t.toLowerCase();
+                  if (t.contains('breakfast')) return 1;
+                  if (t.contains('lunch'))     return 2;
+                  if (t.contains('snack'))     return 3;
+                  if (t.contains('dinner'))    return 4;
+                  return 5;
+              }
+              final sa = score(a['plan_meal_type'] as String? ?? '');
+              final sb = score(b['plan_meal_type'] as String? ?? '');
+              if (sa == sb) return 0;
+              return sa.compareTo(sb);
+          });
+
+          // Assign slots based on meal type from database
+          // Simply use the meal_type as-is to ensure all meals appear
+          for (var item in dayItems) {
+              final typeStr = (item['plan_meal_type'] as String? ?? '').toLowerCase();
+              
+              // Use the meal type directly from database
+              // This ensures all meals appear regardless of their type
+              String slotName = typeStr.toUpperCase();
+
+              final date = planStartDate.add(Duration(days: gDay - 1));
+              final dateKey = _getDateKey(date);
+              
+              if (!organizedMeals.containsKey(dateKey)) {
+                organizedMeals[dateKey] = {};
+              }
+
+              final meal = Meal.fromJson(item);
+              // Override mapped properties with plan specific ones
+              final targetCals = item['target_calories'];
+              if (targetCals != null) {
+                  if (targetCals is int) {
+                      meal.calories = targetCals;
+                  } else if (targetCals is num) {
+                      meal.calories = targetCals.toInt();
+                  } else if (targetCals is String) {
+                      meal.calories = int.tryParse(targetCals) ?? 0;
+                  }
+              }
+              // Ensure eaten status is pulled
+              // Meal.fromJson now handles 'is_eaten', but let's be explicitly sure
+              // item['is_eaten'] comes from SupabaseService join
+              
+              print('DEBUG: [MealPlanPage] Adding meal to $dateKey / $slotName: ${meal.name} (eaten: ${meal.eaten})');
+              organizedMeals[dateKey]![slotName] = meal;
+          }
+      });
+
+      print('DEBUG: [MealPlanPage] Organized ${organizedMeals.length} days with meals');
+      organizedMeals.forEach((date, meals) {
+          print('DEBUG: [MealPlanPage]   $date: ${meals.length} meals');
+      });
+
       setState(() {
-        _mealsByDay = organizedMeals;
+        if (week != null || day != null) {
+            // Merging specific day fetch: override existing keys
+            organizedMeals.forEach((key, value) {
+                _mealsByDay[key] = value;
+            });
+        } else {
+            // Full fetch: replace all
+            _mealsByDay = organizedMeals;
+        }
         _isLoading = false;
       });
-      
-      // Load eaten status from SharedPreferences
-      _loadEatenStatus();
+
+      // Persist to cache for fast next load (only on full fetches)
+      if (week == null && day == null && _mealsByDay.isNotEmpty) {
+        _savePlanToCache(_buildCachePayload());
+      }
       
     } catch (e) {
-      print('Error loading meals: $e');
+      print('ERROR loading meals: $e');
       if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
-        // Fallback to empty
-        // _mealsByDay = {}; // Keep previous data if error
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _loadEatenStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    setState(() {
-      _mealsByDay.forEach((dateKey, dayMeals) {
-        dayMeals.forEach((mealType, meal) {
-          final key = 'meal_eaten_${dateKey}_${meal.type}'; // Key by date and type/slot
-          final isEaten = prefs.getBool(key) ?? false;
-          
-          if (isEaten) {
-            final updatedMeal = Meal(
-              id: meal.id,
-              type: meal.type,
-              icon: meal.icon,
-              name: meal.name,
-              imageUrl: meal.imageUrl,
-              calories: meal.calories,
-              protein: meal.protein,
-              carbs: meal.carbs,
-              fats: meal.fats,
-              eaten: true,
-              ingredients: meal.ingredients,
-            );
-            dayMeals[mealType] = updatedMeal;
-          }
-        });
-      });
-    });
-  }
-
-  Future<void> _saveMealStatus(String dateKey, String mealType, bool isEaten) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'meal_eaten_${dateKey}_${mealType}';
-    await prefs.setBool(key, isEaten);
-  }
-
+  // Helper: Format Date Key
   String _getDateKey(DateTime date) {
-    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+  }
+
+  // Save Meal Status to DB
+  Future<void> _saveMealStatus(String dateKey, String mealType, bool newStatus) async {
+    try {
+      final meal = _mealsByDay[dateKey]?[mealType];
+      if (meal == null || meal.planId == null) {
+          print('ERROR: Cannot update status, missing meal or planId for $mealType');
+          return;
+      }
+
+      // Sync to DB
+      await _supabaseService.toggleMealStatus(meal.planId!, newStatus);
+      print('Status updated for plan row ${meal.planId}');
+
+    } catch (e) {
+      print('Error saving meal status: $e');
+    }
+  }
+
+  // Legacy/No-op as loading happens in main flow
+  Future<void> _loadEatenStatus() async {
+    // Eaten status is now loaded directly in _loadMeals via updated SupabaseService
+    // So this can be empty.
   }
 
   @override
@@ -185,7 +431,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
             duration: Duration.zero,
             opacity: _showHeader ? 1.0 : 0.0,
             child: RedHeader(
-              title: 'Fri : Day 26',
+              title: '${_getDayName(_selectedDay.weekday)} : Day ${_getSelectedDayNumber()}',
               subtitle: 'Your Meal Plan',
               onToggleTheme: widget.toggleTheme,
               isDarkMode: widget.isDarkMode,
@@ -204,14 +450,13 @@ class _MealPlanPageState extends State<MealPlanPage> {
     );
   }
 
-  // Grid view: 14-day selection
+  // Grid view: Dynamic Week Generation
   Widget _buildGridView(bool isDarkMode) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     
     return Column(
       children: [
-        // 14-Day Meal Plan Grid
         Container(
           padding: EdgeInsets.all(isSmallScreen ? 16 : 30),
           decoration: BoxDecoration(
@@ -222,18 +467,17 @@ class _MealPlanPageState extends State<MealPlanPage> {
               width: 3,
             ),
             boxShadow: [
-              BoxShadow(
-                color: isDarkMode ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
+               BoxShadow(
+                  color: isDarkMode ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.15),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+               )
             ],
           ),
           child: Column(
             children: [
-              // Title
               Text(
-                '14-Day Meal Plan',
+                '$_planDurationWeeks-Week Meal Plan',
                 style: TextStyle(
                   fontSize: isSmallScreen ? 22 : 28,
                   fontWeight: FontWeight.w700,
@@ -251,43 +495,34 @@ class _MealPlanPageState extends State<MealPlanPage> {
               
               SizedBox(height: isSmallScreen ? 16 : 30),
               
-              // Week 1
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Week 1',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFFF0000),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  _build14DayGrid(1, 7, isDarkMode),
-                ],
+              // Dynamic Weeks Generator
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _planDurationWeeks,
+                itemBuilder: (context, index) {
+                   final weekNum = index + 1;
+                   final startDay = (index * 7) + 1;
+                   final endDay = startDay + 6;
+                   
+                   return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                         Text(
+                            'Week $weekNum',
+                            style: const TextStyle(
+                               fontSize: 18,
+                               fontWeight: FontWeight.w700,
+                               color: Color(0xFFFF0000),
+                            ),
+                         ),
+                         const SizedBox(height: 15),
+                         _build14DayGrid(startDay, endDay, isDarkMode), // Reusing method name but works for 7 days
+                         const SizedBox(height: 30),
+                      ],
+                   );
+                },
               ),
-              
-              SizedBox(height: isSmallScreen ? 16 : 30),
-              
-              // Week 2
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Week 2',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFFF0000),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  _build14DayGrid(8, 14, isDarkMode),
-                ],
-              ),
-              
-              SizedBox(height: isSmallScreen ? 16 : 30),
               
               // Statistics Summary
               _buildStatsSummary(isDarkMode),
@@ -325,6 +560,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
             setState(() {
               _showingDayGrid = true;
             });
+            // _loadMeals(); // REMOVED: Rely on local state to avoid race condition with DB write
           },
           child: Container(
             width: double.infinity,
@@ -415,23 +651,26 @@ class _MealPlanPageState extends State<MealPlanPage> {
     final cardColor = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
     
-    // Calculate totals
+    // Calculate totals dynamically from the current day's meals
     final dateKey = _getDateKey(_selectedDay);
     final meals = _mealsByDay[dateKey]?.values.toList() ?? [];
     
-    // Target values (Mock targets - normally these would come from user profile/settings)
-    const targetCalories = 2038;
-    const targetProtein = 150;
-    const targetCarbs = 200;
-    const targetFat = 60;
+    int targetCalories = 0;
+    int targetProtein = 0;
+    int targetCarbs = 0;
+    int targetFat = 0;
     
-    // Actual values
     int currentCalories = 0;
     int currentProtein = 0;
     int currentCarbs = 0;
     int currentFat = 0;
     
     for (var m in meals) {
+      targetCalories += m.calories;
+      targetProtein += m.protein;
+      targetCarbs += m.carbs;
+      targetFat += m.fats;
+      
       if (m.eaten) {
         currentCalories += m.calories;
         currentProtein += m.protein;
@@ -440,7 +679,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
       }
     }
     
-    final remainingCalories = targetCalories - currentCalories;
+    final remainingCalories = (targetCalories - currentCalories).clamp(0, 99999);
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -470,7 +709,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
                 width: 180,
                 height: 180,
                 child: CircularProgressIndicator(
-                  value: currentCalories / targetCalories,
+                  value: targetCalories > 0 ? (currentCalories / targetCalories).clamp(0.0, 1.0) : 0.0,
                   strokeWidth: 12,
                   backgroundColor: isDarkMode ? Colors.white10 : Colors.grey.shade100,
                   valueColor: const AlwaysStoppedAnimation<Color>(Colors.green), // Or calculated color
@@ -567,7 +806,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
 
   Widget _buildMacroRow(String label, int current, int target, Color color, bool isDarkMode) {
     final remaining = target - current;
-    final progress = (current / target).clamp(0.0, 1.0);
+    final progress = target > 0 ? (current / target).clamp(0.0, 1.0) : 0.0;
     
     return Column(
       children: [
@@ -775,14 +1014,30 @@ class _MealPlanPageState extends State<MealPlanPage> {
                               backgroundColor: Colors.transparent,
                               builder: (context) => EditMealModal(
                                 meal: meal,
-                                onSave: (updatedMeal) {
-                                  setState(() {
-                                    // Update the meal in the state map
-                                    final dateKey = _getDateKey(_selectedDay);
-                                    if (_mealsByDay.containsKey(dateKey)) {
-                                      _mealsByDay[dateKey]![updatedMeal.type] = updatedMeal;
-                                    }
-                                  });
+                                onSave: (updatedMeal) async {
+                                  // Persist change
+                                  if (updatedMeal.planId != null) {
+                                      await _supabaseService.replaceMealInPlan(updatedMeal.planId!, updatedMeal);
+                                      // Refresh from DB to confirm IDs and new calories
+                                      // Calculate w/d from selected day
+                                      final diff = _selectedDay.difference(DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1))).inDays;
+                                      final gDay = diff + 1; // Approx
+                                      // Actually, easier to just reload the current view's data
+                                      // or let the optimistic local map update hold (but we need new meal_id for next edits)
+                                      
+                                      // Better to reload
+                                      // We need strict week/day.
+                                      // Let's rely on the fact that _loadMeals without args does a full refresh which is safer but slower?
+                                      // Or just update local state if we trust it.
+                                      // "When user edits... immediately recompute... and refresh UI"
+                                      
+                                      setState(() {
+                                        final dateKey = _getDateKey(_selectedDay);
+                                        if (_mealsByDay.containsKey(dateKey)) {
+                                          _mealsByDay[dateKey]![updatedMeal.type] = updatedMeal;
+                                        }
+                                      });
+                                  }
                                 },
                               ),
                             );
@@ -857,6 +1112,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
                     carbs: meal.carbs,
                     fats: meal.fats,
                     eaten: newStatus,
+                    planId: meal.planId, // Copied planId
                     ingredients: meal.ingredients,
                   );
                   
@@ -942,8 +1198,15 @@ class _MealPlanPageState extends State<MealPlanPage> {
   
   Widget _buildCircularDayIndicator(int dayNumber, bool isDarkMode) {
     // Calculate if this day is selected
-    final now = DateTime.now();
-    final planStartDate = now.subtract(Duration(days: now.weekday - 1));
+    // Calculate if this day is selected
+    DateTime planStartDate;
+    if (_planCreationDate != null) {
+        planStartDate = _planCreationDate!;
+    } else {
+        final now = DateTime.now();
+        planStartDate = now.subtract(Duration(days: now.weekday - 1));
+        planStartDate = DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
+    }
     final dayDate = planStartDate.add(Duration(days: dayNumber - 1));
     final isSelected = dayDate.day == _selectedDay.day && 
                       dayDate.month == _selectedDay.month && 
@@ -960,56 +1223,65 @@ class _MealPlanPageState extends State<MealPlanPage> {
     
     return GestureDetector(
       onTap: () {
+        // Calculate Week and Day
+        final globalDay = dayNumber;
+        final week = ((globalDay - 1) ~/ 7) + 1;
+        final day = ((globalDay - 1) % 7) + 1;
+        
+        print('Selected Day: $dayNumber -> Week $week, Day $day');
+        
         setState(() {
           _selectedDay = dayDate;
           _showingDayGrid = false; // Switch to detail view
         });
+        
+        // Fetch specific day's meals
+        _loadMeals(week: week, day: day, clearData: false); 
       },
       child: Container(
-        decoration: BoxDecoration(
+        decoration: ShapeDecoration(
           color: isCompleted 
             ? const Color(0xFF4CAF50) 
-            : (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF8F8F8)),
-          borderRadius: BorderRadius.circular(16), // Rounded square
-          border: Border.all(
-            color: isDarkMode ? Colors.white : Colors.black,
-            width: 3,
+            : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
+          shape: PolygonBorder(
+            sides: 16,
+            borderRadius: 5.0,
+            rotate: 11.25,
+            side: BorderSide(
+              color: isDarkMode ? Colors.white : Colors.black,
+              width: 2.5,
+            ),
           ),
-          boxShadow: isSelected ? null : null,
         ),
         padding: const EdgeInsets.all(4),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Flexible(
-              flex: 2,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$dayNumber',
-                  style: TextStyle(
-                    fontSize: 24, // Slightly reduced base size
-                    fontWeight: FontWeight.w700,
-                    color: isCompleted 
-                      ? Colors.white 
-                      : (isDarkMode ? Colors.white : const Color(0xFF333333)),
-                  ),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                'Day $dayNumber',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: isCompleted 
+                    ? Colors.white 
+                    : (isDarkMode ? Colors.white : const Color(0xFF333333)),
+                  letterSpacing: -0.5,
                 ),
               ),
             ),
-            const SizedBox(height: 2), // Reduced spacing
-            Flexible(
-              flex: 1,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$progressPercent%',
-                  style: TextStyle(
-                    fontSize: 12, // Reduced base size
-                    color: isCompleted 
-                      ? Colors.white 
-                      : (isDarkMode ? Colors.white54 : const Color(0xFF666666)),
-                  ),
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '$progressPercent%',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isCompleted 
+                    ? Colors.white 
+                    : const Color(0xFF4CAF50), // Green for percentage
                 ),
               ),
             ),
@@ -1019,17 +1291,34 @@ class _MealPlanPageState extends State<MealPlanPage> {
     );
   }
   
-  // Helper method to get the selected day number (1-14)
+  // Helper method to get the selected day number (Global)
   int _getSelectedDayNumber() {
-    final now = DateTime.now();
-    // Normalize to midnight to avoid time drift issues
-    final currentMonday = now.subtract(Duration(days: now.weekday - 1));
-    final planStartDate = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
+    DateTime planStartDate;
+    if (_planCreationDate != null) {
+        planStartDate = _planCreationDate!;
+    } else {
+        final now = DateTime.now();
+        planStartDate = now.subtract(Duration(days: now.weekday - 1));
+        planStartDate = DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
+    }
     
     final selectedDate = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
     
     final difference = selectedDate.difference(planStartDate).inDays;
-    return (difference % 14) + 1;
+    return difference + 1; // Global day index
+  }
+
+  String _getDayName(int weekday) {
+    switch (weekday) {
+      case 1: return 'Mon';
+      case 2: return 'Tue';
+      case 3: return 'Wed';
+      case 4: return 'Thu';
+      case 5: return 'Fri';
+      case 6: return 'Sat';
+      case 7: return 'Sun';
+      default: return '';
+    }
   }
   
   Widget _buildStatsSummary(bool isDarkMode) {
@@ -1096,8 +1385,14 @@ class _MealPlanPageState extends State<MealPlanPage> {
     int mealsLogged = 0;
     int totalExpectedMeals = 0;
     
-    final now = DateTime.now();
-    final planStartDate = now.subtract(Duration(days: now.weekday - 1));
+    DateTime planStartDate;
+    if (_planCreationDate != null) {
+        planStartDate = _planCreationDate!;
+    } else {
+        final now = DateTime.now();
+        planStartDate = now.subtract(Duration(days: now.weekday - 1));
+        planStartDate = DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
+    }
     
     for (int day = 1; day <= 14; day++) {
       final dayDate = planStartDate.add(Duration(days: day - 1));
@@ -1129,4 +1424,5 @@ class _MealPlanPageState extends State<MealPlanPage> {
       'overall': overallPercent,
     };
   }
+
 }

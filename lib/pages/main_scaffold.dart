@@ -40,6 +40,8 @@ class MainScaffoldState extends State<MainScaffold> {
   late int _currentIndex;
   final GlobalKey<WebFooterState> _footerKey = GlobalKey<WebFooterState>();
   late List<Widget> _pages; // Re-added missing declaration
+  final GlobalKey<WorkoutPageState> _workoutKey = GlobalKey<WorkoutPageState>();
+  final GlobalKey<MealPlanPageState> _mealPlanKey = GlobalKey<MealPlanPageState>();
 
   // Auth Timer State
   Timer? _authTimer;
@@ -48,6 +50,7 @@ class MainScaffoldState extends State<MainScaffold> {
   bool _isEmailVerified = true; 
   bool _isLoadingAuth = true;
   bool _hasInteracted = false; // New Interaction Flag
+  int _schedulingId = 0; // incremented on every cancel to invalidate stale async prompts
 
   @override
   void initState() {
@@ -64,10 +67,12 @@ class MainScaffoldState extends State<MainScaffold> {
         isDarkMode: widget.isDarkMode,
       ),
       WorkoutPage(
+        key: _workoutKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       MealPlanPage(
+        key: _mealPlanKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
@@ -121,12 +126,16 @@ class MainScaffoldState extends State<MainScaffold> {
             Navigator.of(context, rootNavigator: true).pop(); 
           }
         } else {
-          // If logged out, wait for interaction again? Or restart immediately if already interacted?
-          // User request implies "first enter count after first user click".
-          // If they were logged in and then logged out, they are "active", so maybe start timer?
-          // Let's stick to strict "if _hasInteracted" trigger.
-          if (_hasInteracted) {
-             _startAuthTimer();
+          // Some Supabase events (userUpdated, tokenRefreshed) can fire with a null
+          // session even when the user is still authenticated. Always recheck the
+          // live session before restarting the timer so we don't re-pop the modal
+          // in the middle of the OTP / set-password flow.
+          final liveSession = Supabase.instance.client.auth.currentSession;
+          if (liveSession == null && _hasInteracted) {
+            _startAuthTimer();
+          } else if (liveSession != null) {
+            // User is still authenticated – cancel any pending timer.
+            _cancelAuthTimer();
           }
         }
       }
@@ -163,15 +172,26 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void _startAuthTimer() {
-    _cancelAuthTimer(); 
+    // Don't schedule if user is already authenticated
+    if (Supabase.instance.client.auth.currentSession != null) return;
+    _cancelAuthTimer();
     _scheduleNextAuthPrompt();
   }
 
   Future<void> _scheduleNextAuthPrompt() async {
+    // Capture the current scheduling generation so stale async calls become no-ops
+    final myId = _schedulingId;
+
     final prefs = await SharedPreferences.getInstance();
+
+    // If _cancelAuthTimer was called while we were awaiting, bail out
+    if (!mounted || _schedulingId != myId) return;
+    // If user signed in while we were awaiting SharedPreferences, bail out
+    if (Supabase.instance.client.auth.currentSession != null) return;
+
     final lastDismissedStr = prefs.getString('authPromptDismissedAt');
     
-    int delaySeconds = 20; // Updated to 20s
+    int delaySeconds = 20;
     
     if (lastDismissedStr != null) {
       final lastDismissed = DateTime.parse(lastDismissedStr);
@@ -183,9 +203,11 @@ class MainScaffoldState extends State<MainScaffold> {
       }
     }
     
-    print('Scheduling Auth Prompt in $delaySeconds seconds (Last dismissed: $lastDismissedStr)'); 
+    print('Scheduling Auth Prompt in $delaySeconds seconds (Last dismissed: $lastDismissedStr)');
 
     _authTimer = Timer(Duration(seconds: delaySeconds), () {
+      // Don't stack a second modal if the quiz (or any other code) already has one open
+      if (AuthModal.isVisible) return;
       if (mounted && Supabase.instance.client.auth.currentSession == null) {
         _showAuthModal();
       }
@@ -193,25 +215,19 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void _cancelAuthTimer() {
+    _schedulingId++; // invalidates any in-flight _scheduleNextAuthPrompt calls
     _authTimer?.cancel();
     _authTimer = null;
   }
 
   Future<void> _showAuthModal() async {
     if (_isAuthModalOpen) return;
+    if (AuthModal.isVisible) return; // Already open from quiz or elsewhere
     if (!mounted) return;
 
     _isAuthModalOpen = true;
     
-    await showDialog(
-      context: context,
-      barrierDismissible: true, 
-      builder: (context) => const Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.zero,
-        child: AuthModal(),
-      ),
-    ).then((_) async {
+    await AuthModal.show(context).then((_) async {
        if (mounted) {
          _isAuthModalOpen = false;
          
@@ -241,12 +257,8 @@ class MainScaffoldState extends State<MainScaffold> {
     }
   }
 
-  void changeTab(int index) {
-    setState(() => _currentIndex = index);
-  }
-
-  Future<void> _handleTabChange(int index) async {
-    if (index == 1 || index == 2) {
+  Future<void> changeTab(int index) async {
+     if (index == 1 || index == 2) {
       final prefs = await SharedPreferences.getInstance();
       final hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
       final hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
@@ -264,19 +276,43 @@ class MainScaffoldState extends State<MainScaffold> {
             ),
           );
           
+          // Helper to inject plan
+          void injectPlanIfPresent(dynamic res) {
+             if (res is Map && res.containsKey('plan')) {
+                print('DEBUG: MainScaffold received new plan -> Injecting into WorkoutPage');
+                _workoutKey.currentState?.setPlan(res['plan']);
+                _mealPlanKey.currentState?.refresh(); // Refresh meals too
+             } else if (res is Map && res['completed'] == true) {
+                // Determine if we need to force reload if plan object missing but completed
+               _workoutKey.currentState?.refresh(force: true);
+               _mealPlanKey.currentState?.refresh(); // Refresh meals too
+             }
+          }
+
+          injectPlanIfPresent(result);
+          
           if (result is Map && result.containsKey('navIndex')) {
-            _handleTabChange(result['navIndex']);
+            changeTab(result['navIndex']);
             return;
           }
           
           if (result is! Map || result['completed'] != true) {
-            return;
+             return;
           }
         }
       }
     }
     
-    changeTab(index);
+    // Refresh Logic when tapping specifically on Workout Tab (index 1)
+    if (index == 1 && _currentIndex == 1) {
+       // Only refresh if tapping the tab while already on it
+       _workoutKey.currentState?.refresh(force: true);
+    }
+    // Removed: else if (index == 1) { _workoutKey.currentState?.refresh(); }
+    
+    if (mounted) {
+      setState(() => _currentIndex = index);
+    }
   }
 
   @override
@@ -355,7 +391,7 @@ class MainScaffoldState extends State<MainScaffold> {
                         currentIndex: _currentIndex,
                         onItemSelected: (index) {
                           if (index >= 0) {
-                            _handleTabChange(index);
+                            changeTab(index);
                           }
                         },
                         isDarkMode: widget.isDarkMode,
@@ -391,7 +427,7 @@ class MainScaffoldState extends State<MainScaffold> {
                 ),
                 bottomNavigationBar: GymBottomNavBar(
                   currentIndex: _currentIndex,
-                  onTap: _handleTabChange,
+                  onTap: changeTab,
                   isDarkMode: widget.isDarkMode,
                 ),
               );

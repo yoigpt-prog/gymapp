@@ -62,6 +62,7 @@ class _EditMealModalState extends State<EditMealModal> {
       carbs: widget.meal.carbs,
       fats: widget.meal.fats,
       eaten: widget.meal.eaten,
+      planId: widget.meal.planId,
       ingredients: _ingredients,
     );
     widget.onSave(updatedMeal);

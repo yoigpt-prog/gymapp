@@ -12,16 +12,23 @@ enum SignupStep { email, otp, password }
 class AuthModal extends StatefulWidget {
   const AuthModal({Key? key}) : super(key: key);
 
-  static void show(BuildContext context) {
-    showDialog(
+  /// True whenever any AuthModal dialog is open (from quiz button OR scaffold timer).
+  /// Used by the scaffold timer to avoid showing a second modal on top.
+  static bool isVisible = false;
+
+  static Future<void> show(BuildContext context) {
+    isVisible = true;
+    return showDialog(
       context: context,
-      barrierDismissible: true, 
+      barrierDismissible: true,
       builder: (context) => const Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: EdgeInsets.zero,
         child: AuthModal(),
       ),
-    );
+    ).whenComplete(() {
+      isVisible = false;
+    });
   }
 
   @override

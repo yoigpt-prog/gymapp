@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'exercise_detail_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async'; // Required for StreamSubscription
 import 'dart:convert';
 import 'dart:math';
 import 'workout_plan_modal.dart';
@@ -10,6 +10,7 @@ import 'home_page.dart'; // Import ExerciseDetail model
 import 'custom_plan_quiz.dart';
 import 'main_scaffold.dart';
 import '../widgets/red_header.dart';
+import '../widgets/polygon_border.dart';
 
 class WorkoutPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -22,13 +23,15 @@ class WorkoutPage extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<WorkoutPage> createState() => _WorkoutPageState();
+  State<WorkoutPage> createState() => WorkoutPageState();
 }
 
-class _WorkoutPageState extends State<WorkoutPage> {
+class WorkoutPageState extends State<WorkoutPage> {
   bool _isDarkMode = false;
   Map<String, dynamic>? _generatedPlan;
   bool _isLoadingPlan = true;
+  bool _isRestDay = false;
+  StreamSubscription<AuthState>? _authStateSubscription;
 
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
@@ -77,13 +80,73 @@ class _WorkoutPageState extends State<WorkoutPage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _loadGeneratedPlan();
     _checkPlanStatus();
-    _initializeExercises();
+    
+    // Subscribe to Auth State Changes to handle race conditions on reload
+    _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final AuthChangeEvent event = data.event;
+      if (event == AuthChangeEvent.signedIn || 
+          event == AuthChangeEvent.initialSession || 
+          event == AuthChangeEvent.tokenRefreshed) {
+            print('DEBUG: Auth Event $event - Triggering Refresh');
+            _refresh();
+      }
+    });
+
+    // Also try immediate refresh
+    _refresh();
+  }
+
+  // Direct injection of plan (No DB fetch needed)
+  void setPlan(Map<String, dynamic> plan) {
+    if (!mounted) return;
+    print('----------------------------------------------------------------');
+    print('DIRECT PLAN INJECTION -> Skipping DB Fetch');
+    print('INJECTED PLAN ID: ${plan['id']}');
+    
+    setState(() {
+      _generatedPlan = plan;
+      _isLoadingPlan = false;
+      _exercises = [];
+      _isRestDay = false;
+      _selectedDay = DateTime.now(); // Reset to today
+    });
+    
+    // Strict update with retry
+    _updateDailyWorkouts(enableRetry: true);
+  }
+
+  // Public refresh method
+  Future<void> refresh({bool force = false}) => _refresh();
+
+  // Robust refresh: Fetch plan -> Then fetch workouts
+  Future<void> _refresh() async {
+    // 1. CLEAR CACHE & RESET STATE
+    if (mounted) {
+       setState(() {
+          _generatedPlan = null;
+          _exercises = [];
+          _isRestDay = false;
+          _isLoadingPlan = true;
+          _selectedDay = DateTime.now(); // Reset selection to Today
+       });
+    }
+    
+    print('----------------------------------------------------------------');
+    print('PLAN CACHE CLEARED -> FETCHING LATEST PLAN...');
+    
+    // 2. FORCE FETCH
+    await _loadGeneratedPlan();
+    
+    // 3. UPDATE VIEW
+    if (mounted) {
+       await _updateDailyWorkouts(enableRetry: false); // Normal refresh doesn't need aggressive retry usually, but maybe?
+    }
   }
 
   @override
   void dispose() {
+    _authStateSubscription?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -111,12 +174,94 @@ class _WorkoutPageState extends State<WorkoutPage> {
     _lastScrollOffset = currentScrollOffset;
   }
 
+  // Helper to normalize IDs (Strict 6 digits)
+  String _normalizeId(dynamic id) {
+    if (id == null) return '';
+    return id.toString().trim().padLeft(6, '0');
+  }
+
+  // Restore: Load plan from DB
   Future<void> _loadGeneratedPlan() async {
-    // AI PLAN LOADING DISABLED
     setState(() {
-      _generatedPlan = null;
-      _isLoadingPlan = false;
+      _isLoadingPlan = true;
+      _generatedPlan = null; // FORCE CLEAR stale data
     });
+
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      Map<String, dynamic>? planRow;
+      
+      if (user != null) {
+         try {
+            print('DEBUG: Fetching latest plan for User: ${user.id}...');
+            // Select only columns required by user
+            final response = await Supabase.instance.client
+               .from('ai_plans')
+               .select('id, schedule_json, created_at') // Match reqs
+               .eq('user_id', user.id)
+               .order('created_at', ascending: false)
+               .limit(1)
+               .maybeSingle();
+
+            if (response != null) {
+               planRow = response;
+               // calculate total weeks strictly from DB data
+               int d = 28;
+               if (planRow['schedule_json'] != null && planRow['schedule_json']['plan_duration_days'] != null) {
+                  d = planRow['schedule_json']['plan_duration_days'];
+               }
+               int w = (d / 7).ceil();
+               print('DEBUG: FETCHED PLAN -> plan_id=${planRow['id']} -> totalWeeks=$w');
+            }
+         } catch (e) {
+            print('ERROR loading plan from DB: $e');
+         }
+
+         // ── Fallback: auto-generate if plan is missing or has empty weeks ──
+         final sched = planRow?['schedule_json'];
+         final weeks = sched?['weeks'];
+         final weeksEmpty = weeks == null || (weeks is Map && weeks.isEmpty);
+
+         if (planRow == null || weeksEmpty) {
+           print('DEBUG: Plan missing or weeks empty — calling generate_user_workout_plan RPC...');
+           try {
+             final rpcResponse = await Supabase.instance.client.rpc(
+               'generate_user_workout_plan',
+               params: {'p_user_id': user.id},
+             );
+             print('DEBUG: RPC response: $rpcResponse');
+             print('DEBUG: RPC succeeded — re-fetching plan...');
+             final refreshed = await Supabase.instance.client
+               .from('ai_plans')
+               .select('id, schedule_json, created_at')
+               .eq('user_id', user.id)
+               .order('created_at', ascending: false)
+               .limit(1)
+               .maybeSingle();
+             if (refreshed != null) planRow = refreshed;
+           } catch (e) {
+             print('WARNING: auto-generate workout plan failed: $e');
+           }
+         }
+      }
+      
+      if (planRow != null && mounted) {
+        setState(() {
+          _generatedPlan = planRow;
+          _isLoadingPlan = false;
+        });
+      } else {
+        setState(() {
+          _generatedPlan = null;
+          _isLoadingPlan = false;
+        });
+        print('DEBUG: No plan found.');
+      }
+    } catch (e) {
+      print('Error _loadGeneratedPlan: $e');
+      if(mounted) setState(() => _isLoadingPlan = false);
+    }
+
   }
   bool _hasPlan = false;
   bool _isLoading = true;
@@ -132,17 +277,89 @@ class _WorkoutPageState extends State<WorkoutPage> {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
   
+  // STRICT Helper: Get Day Data by Index (Index 1..TotalDays)
+  Map<String, dynamic>? _getDayData(int globalDayIndex) {
+     if (_generatedPlan == null) return null;
+     
+     final schedule = _generatedPlan!['schedule_json'];
+     if (schedule == null) return null;
+
+     final weeks = schedule['weeks'];
+     if (weeks == null) return null;
+     
+     // Math: 
+     // globalDayIndex 1 (Day 1) -> Week 1, Day 1
+     // globalDayIndex 8 (Day 8) -> Week 2, Day 1
+     int weekIndex = ((globalDayIndex - 1) ~/ 7) + 1;
+     int dayInWeek = ((globalDayIndex - 1) % 7) + 1;
+
+     final weekKey = weekIndex.toString();
+     final weekData = weeks[weekKey];
+     
+     // Logs for strict validation
+     if (weekData == null) {
+        // This fails if requested day exceeds plan duration
+        return null;
+     }
+
+     final days = weekData['days'];
+     if (days == null) return null;
+
+     return days[dayInWeek.toString()];
+  }
+
+  // Get GLOBAL Day Index from _selectedDay (1-based)
+  int _getCurrentGlobalDayIndex() {
+     // We rely on "created_at" to find start date
+     if (_generatedPlan == null) return 1;
+     
+     final createdAtStr = _generatedPlan!['created_at'];
+     if (createdAtStr == null) return 1; 
+     
+     final createdAt = DateTime.parse(createdAtStr);
+     final start = DateTime(createdAt.year, createdAt.month, createdAt.day); // midnight
+     final current = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+     
+     int diffDays = current.difference(start).inDays;
+     // diffDays 0 = Day 1
+     // STRICT: clamp min to 1
+     if (diffDays < 0) return 1;
+     
+     // Do we clamp max? 
+     // Probably not here, but consumers should handle.
+     return diffDays + 1;
+  }
+
   // Helper method to get workout progress for any day
   double _getWorkoutProgressForDay(DateTime date) {
+    // We need to calculate global index for THIS 'date', distinct from _selectedDay
+    if (_generatedPlan == null) return 0.0;
+    
+    final createdAtStr = _generatedPlan!['created_at'];
+    if (createdAtStr == null) return 0.0; 
+    
+    final createdAt = DateTime.parse(createdAtStr);
+    final start = DateTime(createdAt.year, createdAt.month, createdAt.day); // midnight
+    final current = DateTime(date.year, date.month, date.day);
+    
+    int diffDays = current.difference(start).inDays;
+    if (diffDays < 0) return 0.0;
+    
+    int globalIndex = diffDays + 1;
+    final dayData = _getDayData(globalIndex);
+
+    if (dayData == null || dayData['type'] == 'rest') return 0.0;
+    
+    final rawIds = dayData['exercises'] as List? ?? [];
+    final totalExercises = rawIds.length;
+    if (totalExercises == 0) return 0.0;
+
     final dateKey = _getDateKey(date);
-    final dayCompleted = _completedExercisesByDay[dateKey];
-    if (dayCompleted == null || dayCompleted.isEmpty) return 0.0;
+    final dayCompleted = _completedExercisesByDay[dateKey]; 
     
-    // Assuming 5 exercises per day (adjust based on actual workout structure)
-    final totalExercises = 5;
-    final completedCount = dayCompleted.length;
+    final completedCount = dayCompleted?.length ?? 0;
     
-    return totalExercises == 0 ? 0.0 : (completedCount / totalExercises).clamp(0.0, 1.0);
+    return (completedCount / totalExercises).clamp(0.0, 1.0);
   }
 
   Future<void> _checkPlanStatus() async {
@@ -155,15 +372,13 @@ class _WorkoutPageState extends State<WorkoutPage> {
   // Fetch all exercises once and cache them
   Future<void> _initializeExercises() async {
     try {
-      // Get user gender from shared preferences
       final prefs = await SharedPreferences.getInstance();
       final String gender = prefs.getString('profile_gender') ?? 'Male';
       
       var query = Supabase.instance.client
           .from('exercises')
-          .select('is_male, is_female, group_path, exercise_name, target_muscle, synergists, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
+          .select('is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
           
-      // Apply gender filter
       if (gender == 'Male') {
         query = query.eq('is_male', true);
       } else if (gender == 'Female') {
@@ -176,7 +391,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
           .map((json) => ExerciseDetail.fromJson(json))
           .toList();
 
-      _updateDailyWorkouts(); // Initial load for current day
+      _updateDailyWorkouts(); 
       
     } catch (e) {
       print('Error fetching exercises: $e');
@@ -186,30 +401,145 @@ class _WorkoutPageState extends State<WorkoutPage> {
     }
   }
 
-  // Locally filter exercises for the selected day - Instant!
-  void _updateDailyWorkouts() {
-     if (_allExercisesCache.isEmpty) {
-       setState(() => _isLoading = false);
+  String _normalizeExerciseId(dynamic v) {
+    final s = v.toString().trim();
+    if (RegExp(r'^\d{6}$').hasMatch(s)) return s;
+    if (RegExp(r'^\d+$').hasMatch(s)) return s.padLeft(6, '0');
+    return s;
+  }
+
+  // Filter exercises strictly from the generated plan for the selected day
+  Future<void> _updateDailyWorkouts({bool enableRetry = false}) async {
+     setState(() { _isRestDay = false; });
+
+     if (_generatedPlan == null) {
+       if (mounted) setState(() { _exercises = []; _isLoading = false; });
        return;
      }
 
-      // Filter to random 5-10 exercises for the day
-      // Use the selected day as a seed for consistent results
-      final seed = _selectedDay.year * 10000 + _selectedDay.month * 100 + _selectedDay.day;
-      final random = Random(seed);
-      
-      // Determine count (between 5 and 10)
-      final count = 5 + random.nextInt(6); // 5 + (0 to 5) = 5 to 10
-      
-      // Shuffle a copy of the cache to avoid modifying original order permanently
-      final shuffled = List<ExerciseDetail>.from(_allExercisesCache)..shuffle(random);
-      
-      setState(() {
-        _exercises = shuffled.take(count).toList();
-        _isLoading = false;
-      });
-      
-      print('DEBUG: Updated daily workouts for $_selectedDay (Seed: $seed)');
+     setState(() => _isLoading = true);
+
+     // Fix: Sync completed exercises for this specific day
+     final dateKey = _getDateKey(_selectedDay);
+     final completedForDay = _completedExercisesByDay[dateKey] ?? {};
+     _completedExercises.clear();
+     _completedExercises.addAll(completedForDay);
+
+     // MANDATORY: STRICT INDEX CALCULATION
+     int globalDayIndex = _getCurrentGlobalDayIndex();
+     final schedule = _generatedPlan!['schedule_json'];
+
+     // Debug Logs as Requested
+     int weeksCount = 4; // Default
+     if (schedule != null && schedule['weeks_count'] != null) {
+        weeksCount = schedule['weeks_count'];
+     } else if (schedule != null && schedule['plan_duration_days'] != null) {
+        weeksCount = (schedule['plan_duration_days'] / 7).ceil();
+     }
+     int totalDays = weeksCount * 7;
+     
+     int weekIndex = ((globalDayIndex - 1) ~/ 7) + 1;
+     int dayInWeek = ((globalDayIndex - 1) % 7) + 1;
+
+     print('===========================================');
+     print('STRICT TEMPLATE DEBUG');
+     print('Global Day Index: $globalDayIndex');
+     print('Week Index: $weekIndex'); 
+     print('Day of Week: $dayInWeek (formula: (($globalDayIndex - 1) % 7) + 1)');
+     print('Total Plan Duration: $weeksCount weeks ($totalDays days)');
+     
+     // Use strict helper to get day data
+     final dayData = _getDayData(globalDayIndex);
+
+     if (dayData == null) {
+         print('DEBUG: Day data not found for globalDayIndex=$globalDayIndex');
+         print('===========================================');
+         setState(() { _exercises = []; _isLoading = false; });
+         return;
+     }
+
+     final dayType = dayData['type'];
+     
+     // 2. STRENGTHENED CHECK: Case-insensitive 'rest'
+     if (dayType != null && dayType.toString().toLowerCase() == 'rest') {
+         // Show REST DAY view
+         // STRICT: NEVER show "No exercises found" for Rest.
+         print('Action: Showing REST UI');
+         setState(() { 
+            _exercises = []; 
+            _isLoading = false;
+            _isRestDay = true; 
+         });
+         return;
+     }
+     
+     // Get exercise count (0 for rest days)
+     final rawExercises = dayData['exercises'] as List? ?? [];
+     final List<String> idsForDay = rawExercises.map((e) => _normalizeExerciseId(e)).toList();
+
+     // 2. Workout day - fetch exercises
+     print("Fetching exercises for IDs: ${idsForDay.take(3).toList()}${idsForDay.length > 3 ? '...' : ''}");
+     
+     if (idsForDay.isEmpty) {
+         // If workout day truly has no exercises, we show empty list (UI shows "No exercises found")
+         setState(() { _exercises = []; _isLoading = false; });
+         return;
+     }
+
+     try {
+       List<dynamic> rows = [];
+       int attempt = 0;
+       int maxAttempts = enableRetry ? 5 : 1; 
+
+       while (attempt < maxAttempts) {
+          attempt++;
+          if (attempt > 1) {
+             print('DEBUG: Retry Attempt $attempt for exercises...');
+             await Future.delayed(Duration(milliseconds: 250 * attempt));
+          }
+
+          final response = await Supabase.instance.client
+              .from('exercises')
+              .select('id, exercise_name, urls, synergist, is_male, is_female, target_muscle, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, exercise_type, equipment') 
+              .inFilter('id', idsForDay); 
+          
+          rows = response as List<dynamic>;
+          
+          if (rows.isNotEmpty) break;
+       }
+       
+       print('Fetched ${rows.length} exercises from Supabase');
+       
+       // Build a map for O(1) lookup
+       final Map<String, dynamic> byId = { 
+          for (var r in rows) _normalizeExerciseId(r['id']): r 
+       };
+
+       // Reorder: Use ONLY ordered list from template. NO fallback.
+       final List<ExerciseDetail> orderedExercises = [];
+
+       for (var id in idsForDay) {
+          final r = byId[id];
+          if (r != null) {
+             orderedExercises.add(ExerciseDetail.fromJson(r));
+          } else {
+             print('DEBUG: Missing ID $id in exercises table');
+          }
+       }
+       
+       print('Final Ordered Exercise Count: ${orderedExercises.length}');
+       
+       if (mounted) {
+         setState(() {
+           _exercises = orderedExercises;
+           _isLoading = false;
+         });
+       }
+
+     } catch (e) {
+       print('ERROR fetching exercises: $e');
+       if (mounted) setState(() => _isLoading = false);
+     }
   }
 
   void _markExerciseComplete(String exerciseName) {
@@ -246,6 +576,11 @@ class _WorkoutPageState extends State<WorkoutPage> {
         setState(() {
           _hasPlan = true;
         });
+        
+        // STRICT RELOAD TRIGGER
+        print('DEBUG: Quiz Completed -> Triggering Strict Refresh');
+        await _refresh();
+        
       } else if (completed is Map && completed.containsKey('navIndex')) {
         // Handle navigation
         final mainState = context.findAncestorStateOfType<MainScaffoldState>();
@@ -265,7 +600,8 @@ class _WorkoutPageState extends State<WorkoutPage> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(context).size.width;
 
-    if (_isLoading) {
+    // Check BOTH flags
+    if (_isLoading || _isLoadingPlan) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator(color: const Color(0xFFFF0000))),
       );
@@ -416,7 +752,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
               duration: Duration.zero,
               opacity: _showHeader ? 1.0 : 0.0,
               child: RedHeader(
-                title: 'Fri : Day 26',
+                title: '${_getDayName(_selectedDay.weekday)} : Day ${_getSelectedDayNumber()}',
                 subtitle: 'Your Workout Plan',
                 onToggleTheme: widget.toggleTheme,
                 isDarkMode: widget.isDarkMode,
@@ -425,10 +761,14 @@ class _WorkoutPageState extends State<WorkoutPage> {
           ),
           
           Expanded(
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              child: _showingDayGrid ? _buildGridView(isDarkMode) : _buildDetailView(isDarkMode),
+            child: RefreshIndicator(
+              onRefresh: _refresh,
+              color: const Color(0xFFFF0000),
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.all(16),
+                child: _showingDayGrid ? _buildGridView(isDarkMode) : _buildDetailView(isDarkMode),
+              ),
             ),
           ),
         ],
@@ -436,14 +776,27 @@ class _WorkoutPageState extends State<WorkoutPage> {
     );
   }
 
-  // Grid view: 14-day selection
+  // Grid view: Dynamic duration
   Widget _buildGridView(bool isDarkMode) {
+    // 1) Read duration_days from plan
+    int duration = 28; // Default 4 weeks
+    if (_generatedPlan != null && _generatedPlan!['schedule_json'] != null) {
+       final s = _generatedPlan!['schedule_json'];
+       if (s['plan_duration_days'] != null) {
+         duration = s['plan_duration_days'];
+       }
+    }
+    
+    // 2) Compute totalWeeks
+    int totalWeeks = (duration / 7).ceil();
+    if (totalWeeks < 1) totalWeeks = 1;
+
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     
     return Column(
       children: [
-        // 14-Day Workout Plan Grid
+        // 3) Dynamic Workout Plan Grid
         Container(
           padding: EdgeInsets.all(isSmallScreen ? 16 : 30),
           decoration: BoxDecoration(
@@ -465,7 +818,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
             children: [
               // Title
               Text(
-                '14-Day Workout Plan',
+                '${(duration / 7).ceil()}-Week Workout Plan',
                 style: TextStyle(
                   fontSize: isSmallScreen ? 22 : 28,
                   fontWeight: FontWeight.w700,
@@ -483,43 +836,29 @@ class _WorkoutPageState extends State<WorkoutPage> {
               
               SizedBox(height: isSmallScreen ? 16 : 30),
               
-              // Week 1
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Week 1',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFFF0000),
+              // 4) Loop to render each Week
+              for (int w = 0; w < totalWeeks; w++) ...[
+                 Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Week ${w + 1}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFFF0000),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 15),
-                  _build14DayGrid(1, 7, isDarkMode),
-                ],
-              ),
-              
-              SizedBox(height: isSmallScreen ? 16 : 30),
-              
-              // Week 2
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Week 2',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFFF0000),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  _build14DayGrid(8, 14, isDarkMode),
-                ],
-              ),
-              
-              SizedBox(height: isSmallScreen ? 16 : 30),
+                    const SizedBox(height: 15),
+                    // Grid for this week. Days are 1-based.
+                    // Week 1: 1..7
+                    // Week 2: 8..14
+                    // etc.
+                    _build14DayGrid((w * 7) + 1, (w * 7) + 7, isDarkMode),
+                  ],
+                ),
+                SizedBox(height: isSmallScreen ? 16 : 30),
+              ],
               
               // Statistics Summary
               _buildStatsSummary(isDarkMode),
@@ -667,7 +1006,9 @@ class _WorkoutPageState extends State<WorkoutPage> {
             ? const Center(
                 child: CircularProgressIndicator(color: const Color(0xFFFF0000)),
               )
-            : _exercises.isEmpty
+            : _isRestDay
+               ? _buildRestDayCard(isDarkMode)
+               : _exercises.isEmpty
                 ? Center(
                     child: Text(
                       'No exercises found',
@@ -705,7 +1046,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
         children: [
           // Header
           RedHeader(
-            title: 'Fri : Day 26',
+            title: '${_getDayName(_selectedDay.weekday)} : Day ${_getSelectedDayNumber()}',
             subtitle: 'Your Workout Plan',
             onToggleTheme: widget.toggleTheme,
             isDarkMode: widget.isDarkMode,
@@ -1207,7 +1548,58 @@ class _WorkoutPageState extends State<WorkoutPage> {
       ],
     );
   }
-  
+  // New Rest Day Card
+  Widget _buildRestDayCard(bool isDarkMode) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDarkMode ? Colors.white24 : Colors.grey.shade200,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF4CAF50).withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.spa_rounded,
+              color: Color(0xFF4CAF50),
+              size: 48,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Rest & Recover',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: isDarkMode ? Colors.white : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Your muscles need time to repair and grow. Take it easy today!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              color: isDarkMode ? Colors.white60 : Colors.black54,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // New methods for 14-day grid layout
   Widget _build14DayGrid(int startDay, int endDay, bool isDarkMode) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1232,73 +1624,86 @@ class _WorkoutPageState extends State<WorkoutPage> {
   
   Widget _buildCircularDayIndicator(int dayNumber, bool isDarkMode) {
     // Calculate if this day is selected
-    final now = DateTime.now();
-    final planStartDate = now.subtract(Duration(days: now.weekday - 1));
+    DateTime planStartDate;
+    if (_generatedPlan != null && _generatedPlan!['created_at'] != null) {
+      final createdAt = DateTime.parse(_generatedPlan!['created_at']);
+      // Normalize to midnight
+      planStartDate = DateTime(createdAt.year, createdAt.month, createdAt.day);
+    } else {
+      final now = DateTime.now();
+      planStartDate = now.subtract(Duration(days: now.weekday - 1));
+      planStartDate = DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
+    }
+    
     final dayDate = planStartDate.add(Duration(days: dayNumber - 1));
     final isSelected = dayDate.day == _selectedDay.day && 
                       dayDate.month == _selectedDay.month && 
                       dayDate.year == _selectedDay.year;
     
-    // Get progress for this day
+    // Get progress and data
     final dateKey = _getDateKey(dayDate);
     final dayCompleted = _completedExercisesByDay[dateKey];
-    final totalExercises = 5; // Assuming 5 exercises per day
+    
+    final dayData = _getDayData(dayNumber);
+    final rawIds = dayData != null ? (dayData['exercises'] as List? ?? []) : [];
+    final totalExercises = rawIds.length;
+    final dayType = dayData != null ? dayData['type'] : 'workout'; // Default to workout if unknown
+    
     final completedCount = dayCompleted?.length ?? 0;
     final progressPercent = totalExercises == 0 ? 0 : ((completedCount / totalExercises) * 100).round();
-    final isCompleted = progressPercent == 100;
-    
+    final isRest = dayType == 'rest';
+    final isCompleted = !isRest && progressPercent == 100;
+
     return GestureDetector(
       onTap: () {
         setState(() {
           _selectedDay = dayDate;
-          _showingDayGrid = false; // Switch to detail view
+          _showingDayGrid = false; 
         });
         _updateDailyWorkouts();
       },
       child: Container(
-        decoration: BoxDecoration(
-          color: isCompleted 
-            ? const Color(0xFF4CAF50) 
-            : (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF8F8F8)),
-          borderRadius: BorderRadius.circular(16), // Rounded square
-          border: Border.all(
-            color: isDarkMode ? Colors.white : Colors.black,
-            width: 3,
+        decoration: ShapeDecoration(
+          color: isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8), // Grey background
+          shape: PolygonBorder(
+            sides: 16,
+            borderRadius: 5.0, // Slight rounding at vertices
+            rotate: 11.25, // Rotate to have flat top (360 / 16 / 2)
+            side: BorderSide(
+              color: isDarkMode ? Colors.white : Colors.black, // High contrast border
+              width: 2.5, // Thick border
+            ),
           ),
         ),
         padding: const EdgeInsets.all(4),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Flexible(
-              flex: 2,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$dayNumber',
-                  style: TextStyle(
-                    fontSize: 24, // Slightly reduced base size
-                    fontWeight: FontWeight.w700,
-                    color: isCompleted 
-                      ? Colors.white 
-                      : (isDarkMode ? Colors.white : const Color(0xFF333333)),
-                  ),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                'Day $dayNumber',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900, // Extra bold
+                  color: isDarkMode ? Colors.white : Colors.black,
+                  letterSpacing: -0.5,
                 ),
               ),
             ),
-            const SizedBox(height: 2), // Reduced spacing
-            Flexible(
-              flex: 1,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$progressPercent%',
-                  style: TextStyle(
-                    fontSize: 12, // Reduced base size
-                    color: isCompleted 
-                      ? Colors.white 
-                      : (isDarkMode ? Colors.white54 : const Color(0xFF666666)),
-                  ),
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                isRest ? 'Rest' : '$progressPercent%',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isRest 
+                      ? const Color(0xFFFF0000) // Red for Rest
+                      : (isCompleted 
+                          ? const Color(0xFF4CAF50) // Green for Completed
+                          : const Color(0xFF4CAF50)), // Green for Progress too (based on image)
                 ),
               ),
             ),
@@ -1308,17 +1713,9 @@ class _WorkoutPageState extends State<WorkoutPage> {
     );
   }
   
-  // Helper method to get the selected day number (1-14)
+  // Helper method to get the selected day number (Global Index 1..N)
   int _getSelectedDayNumber() {
-    final now = DateTime.now();
-    // Normalize to midnight to avoid time drift issues causing off-by-one errors
-    final currentMonday = now.subtract(Duration(days: now.weekday - 1));
-    final planStartDate = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
-    
-    final selectedDate = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
-    
-    final difference = selectedDate.difference(planStartDate).inDays;
-    return (difference % 14) + 1;
+    return _getCurrentGlobalDayIndex();
   }
   
   Widget _buildStatsSummary(bool isDarkMode) {
@@ -1389,11 +1786,36 @@ class _WorkoutPageState extends State<WorkoutPage> {
     final planStartDate = now.subtract(Duration(days: now.weekday - 1));
     
     for (int day = 1; day <= 14; day++) {
+      // Calculate global index relative to "now"'s week window?
+      // Wait, this method iterates 1..14 (2 weeks)
+      // "planStartDate" is the current week's Monday.
+      // We need to find the GLOBAL index for these 14 days.
+      
       final dayDate = planStartDate.add(Duration(days: day - 1));
+      
+      // Calculate Global Index for this date
+      final createdAtStr = _generatedPlan != null ? _generatedPlan!['created_at'] : null;
+      int globalIndex = 0;
+      
+      if (createdAtStr != null) {
+         final createdAt = DateTime.parse(createdAtStr);
+         final start = DateTime(createdAt.year, createdAt.month, createdAt.day);
+         final current = DateTime(dayDate.year, dayDate.month, dayDate.day);
+         int diff = current.difference(start).inDays;
+         if (diff >= 0) globalIndex = diff + 1;
+      }
+      
       final dateKey = _getDateKey(dayDate);
       final dayCompleted = _completedExercisesByDay[dateKey];
       
-      final dayTotalExercises = 5; // Assuming 5 exercises per day
+      Map<String, dynamic>? dayData;
+      if (globalIndex > 0) {
+         dayData = _getDayData(globalIndex);
+      }
+      
+      final rawIds = dayData != null ? (dayData['exercises'] as List? ?? []) : [];
+      final dayTotalExercises = rawIds.length;
+      
       final dayCompletedCount = dayCompleted?.length ?? 0;
       
       totalExercises += dayTotalExercises;
@@ -1413,3 +1835,5 @@ class _WorkoutPageState extends State<WorkoutPage> {
     };
   }
 }
+
+

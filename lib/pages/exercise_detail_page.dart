@@ -110,7 +110,7 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                           ),
                         ),
                         TextSpan(
-                          text: widget.exercise.synergists,
+                          text: widget.exercise.synergist,
                           style: TextStyle(color: widget.isDarkMode ? Colors.white70 : Colors.black87),
                         ),
                       ],

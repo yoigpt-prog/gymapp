@@ -151,7 +151,7 @@ class _HomePageState extends State<HomePage> {
       // Use 'in' filter to match either lowercase or capitalized
       var query = Supabase.instance.client
           .from('exercises')
-          .select()
+          .select('is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment')
           .inFilter('group_path', [muscle, capitalizedMuscle]);
 
       // Apply filters
@@ -1616,11 +1616,12 @@ class _HomePageState extends State<HomePage> {
 }
 
 class ExerciseDetail {
+  final String id; // Added ID field
   final String name;
   final String muscleId;
   final String imagePath;
   final String target;
-  final String synergists;
+  final String synergist;
   final String difficulty;
   final List<String> steps;
   final String? gender;
@@ -1628,11 +1629,12 @@ class ExerciseDetail {
   final String? equipment;
 
   ExerciseDetail({
+    required this.id, // Required
     required this.name,
     required this.muscleId,
     required this.imagePath,
     required this.target,
-    required this.synergists,
+    required this.synergist,
     required this.difficulty,
     required this.steps,
     this.gender,
@@ -1660,11 +1662,12 @@ class ExerciseDetail {
     }
 
     return ExerciseDetail(
+      id: getString('id'), // Map ID
       name: getString('exercise_name', defaultVal: 'Unknown Exercise'),
       muscleId: getString('group_path'),
       imagePath: getString('urls'),
       target: getString('target_muscle', defaultVal: getString('target', defaultVal: (json['group_path'] as String? ?? 'General').toUpperCase())),
-      synergists: getString('synergist', defaultVal: getString('synergists', defaultVal: getString('syntects', defaultVal: 'Various'))),
+      synergist: getString('synergist', defaultVal: getString('synergists', defaultVal: 'Various')),
       difficulty: getString('difficulty_level', defaultVal: getString('difficulty', defaultVal: 'Intermediate')),
       steps: instructions,
       // Polyfill gender from boolean columns if needed, though we primarily filter by query now.
@@ -1806,8 +1809,8 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     children: [
                       if (widget.exercise.target.isNotEmpty) 
                         _buildInfoRow('Target muscle:', widget.exercise.target, textColor, subTextColor),
-                      if (widget.exercise.synergists.isNotEmpty) 
-                        _buildInfoRow('Synergists:', widget.exercise.synergists, textColor, subTextColor),
+                      if (widget.exercise.synergist.isNotEmpty) 
+                        _buildInfoRow('Synergist:', widget.exercise.synergist, textColor, subTextColor),
                       if (widget.exercise.difficulty.isNotEmpty) 
                         _buildInfoRow('Difficulty:', widget.exercise.difficulty, textColor, subTextColor),
                     ],
