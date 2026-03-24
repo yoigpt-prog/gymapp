@@ -16,8 +16,14 @@ class AuthModal extends StatefulWidget {
   /// Used by the scaffold timer to avoid showing a second modal on top.
   static bool isVisible = false;
 
+  /// True when the modal is in a multi-step signup flow (OTP or Password step).
+  /// The scaffold's auth listener checks this to avoid auto-closing the modal
+  /// in the middle of the OTP → Set Password transition.
+  static bool isInMultiStep = false;
+
   static Future<void> show(BuildContext context) {
     isVisible = true;
+    isInMultiStep = false;
     return showDialog(
       context: context,
       barrierDismissible: true,
@@ -28,6 +34,7 @@ class AuthModal extends StatefulWidget {
       ),
     ).whenComplete(() {
       isVisible = false;
+      isInMultiStep = false;
     });
   }
 
@@ -111,6 +118,7 @@ class _AuthModalState extends State<AuthModal> {
         password: password,
       );
       if (mounted && response.session != null) {
+        AuthModal.isVisible = false;
         Navigator.pop(context);
         _showSuccess('Welcome back!');
       }
@@ -134,6 +142,8 @@ class _AuthModalState extends State<AuthModal> {
       );
       
       if (mounted) {
+        // Mark as multi-step so scaffold won't auto-close us
+        AuthModal.isInMultiStep = true;
         setState(() {
           _signupStep = SignupStep.otp;
           _resendSeconds = 60;
@@ -155,14 +165,18 @@ class _AuthModalState extends State<AuthModal> {
     
     setState(() => _isLoading = true);
     try {
-      final response = await Supabase.instance.client.auth.verifyOTP(
+      // verifyOTP throws on failure, so any non-exception path means success.
+      await Supabase.instance.client.auth.verifyOTP(
         token: otp,
         type: OtpType.email,
         email: _emailController.text.trim(),
       );
       
-      if (mounted && response.session != null) {
-        // OTP Verified -> Move to Set Password
+      if (mounted) {
+        // OTP Verified -> Move to Set Password.
+        // Keep isInMultiStep = true so the scaffold auth listener won't
+        // auto-dismiss the modal before the user can set their password.
+        AuthModal.isInMultiStep = true;
         setState(() {
           _signupStep = SignupStep.password;
         });
@@ -188,7 +202,10 @@ class _AuthModalState extends State<AuthModal> {
         UserAttributes(password: password),
       );
       if (mounted) {
-        Navigator.pop(context); // Done!
+        // Done with multi-step — let scaffold auto-close if needed
+        AuthModal.isInMultiStep = false;
+        AuthModal.isVisible = false;
+        Navigator.pop(context);
         _showSuccess('Account created successfully!');
       }
     } catch (e) {
@@ -212,15 +229,13 @@ class _AuthModalState extends State<AuthModal> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
+    // Snackbar silenced — log only
+    debugPrint('[AUTH ERROR] $message');
   }
 
   void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: const Color(0xFF4CAF50)),
-    );
+    // Snackbar silenced — log only
+    debugPrint('[AUTH SUCCESS] $message');
   }
 
   // --- BUILD UI ---

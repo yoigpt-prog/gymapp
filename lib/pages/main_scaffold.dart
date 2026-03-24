@@ -42,6 +42,8 @@ class MainScaffoldState extends State<MainScaffold> {
   late List<Widget> _pages; // Re-added missing declaration
   final GlobalKey<WorkoutPageState> _workoutKey = GlobalKey<WorkoutPageState>();
   final GlobalKey<MealPlanPageState> _mealPlanKey = GlobalKey<MealPlanPageState>();
+  final GlobalKey<ProgressPageState> _progressKey = GlobalKey<ProgressPageState>();
+  final GlobalKey<ProfilePageState> _profileKey = GlobalKey<ProfilePageState>();
 
   // Auth Timer State
   Timer? _authTimer;
@@ -77,10 +79,12 @@ class MainScaffoldState extends State<MainScaffold> {
         isDarkMode: widget.isDarkMode,
       ),
       ProgressPage(
+        key: _progressKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       ProfilePage(
+        key: _profileKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
@@ -116,14 +120,32 @@ class MainScaffoldState extends State<MainScaffold> {
   void _initAuthLogic() {
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final session = data.session;
+      final event = data.event;
       
       if (mounted) {
         _checkAuthStatus();
         
-        if (session != null) {
+        if (event == AuthChangeEvent.signedOut) {
+          // User explicitly logged out: jump to Home and clear pages
+          setState(() {
+            _currentIndex = 0;
+          });
+          _workoutKey.currentState?.refresh(force: true);
+          _mealPlanKey.currentState?.refresh();
+          _progressKey.currentState?.refresh(force: true);
+          _profileKey.currentState?.refresh();
+        } else if (session != null) {
           _cancelAuthTimer();
-          if (_isAuthModalOpen) {
-            Navigator.of(context, rootNavigator: true).pop(); 
+          // Refresh all pages so new account data shows immediately
+          _workoutKey.currentState?.refresh(force: true);
+          _mealPlanKey.currentState?.refresh();
+          _progressKey.currentState?.refresh(force: true);
+          _profileKey.currentState?.refresh();
+          if (_isAuthModalOpen && !AuthModal.isInMultiStep && AuthModal.isVisible) {
+            // Only auto-close if NOT in the middle of OTP → Password signup steps
+            AuthModal.isVisible = false;
+            Navigator.of(context, rootNavigator: true).pop();
+            _isAuthModalOpen = false;
           }
         } else {
           // Some Supabase events (userUpdated, tokenRefreshed) can fire with a null
@@ -282,10 +304,12 @@ class MainScaffoldState extends State<MainScaffold> {
                 print('DEBUG: MainScaffold received new plan -> Injecting into WorkoutPage');
                 _workoutKey.currentState?.setPlan(res['plan']);
                 _mealPlanKey.currentState?.refresh(); // Refresh meals too
+                _profileKey.currentState?.refresh();  // Refresh profile stats
              } else if (res is Map && res['completed'] == true) {
                 // Determine if we need to force reload if plan object missing but completed
                _workoutKey.currentState?.refresh(force: true);
                _mealPlanKey.currentState?.refresh(); // Refresh meals too
+               _profileKey.currentState?.refresh();  // Refresh profile stats
              }
           }
 
@@ -303,12 +327,15 @@ class MainScaffoldState extends State<MainScaffold> {
       }
     }
     
-    // Refresh Logic when tapping specifically on Workout Tab (index 1)
+    // Refresh Logic when tapping specifically on Tabs
     if (index == 1 && _currentIndex == 1) {
        // Only refresh if tapping the tab while already on it
        _workoutKey.currentState?.refresh(force: true);
     }
-    // Removed: else if (index == 1) { _workoutKey.currentState?.refresh(); }
+    
+    if (index == 3) {
+      _progressKey.currentState?.refresh(force: true);
+    }
     
     if (mounted) {
       setState(() => _currentIndex = index);
@@ -321,50 +348,54 @@ class MainScaffoldState extends State<MainScaffold> {
     if (!_isLoadingAuth && Supabase.instance.client.auth.currentSession != null && !_isEmailVerified) {
        // ... (OTP UI Code remains same) ...
        return Scaffold(
-         body: Center(
-           child: Padding(
-             padding: const EdgeInsets.all(32.0),
-             child: Column(
-               mainAxisAlignment: MainAxisAlignment.center,
-               children: [
-                 const Icon(Icons.mark_email_unread_outlined, size: 64, color: Colors.red),
-                 const SizedBox(height: 24),
-                 const Text('Verify your email', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                 const SizedBox(height: 12),
-                 const Text(
-                   'We sent a verification link/code to your email address. Please verify your account to continue.',
-                   textAlign: TextAlign.center,
-                   style: TextStyle(fontSize: 16, color: Colors.grey),
-                 ),
-                 const SizedBox(height: 32),
-                 ElevatedButton(
-                   onPressed: () async {
-                      try {
-                        final response = await Supabase.instance.client.auth.refreshSession();
-                        if (response.user != null) {
-                           await _checkAuthStatus(); // Update UI
-                        }
-                      } catch (e) {
+         body: Container(
+           width: double.infinity,
+           height: double.infinity,
+           child: Center(
+             child: Padding(
+               padding: const EdgeInsets.all(32.0),
+               child: Column(
+                 mainAxisAlignment: MainAxisAlignment.center,
+                 children: [
+                   const Icon(Icons.mark_email_unread_outlined, size: 64, color: Colors.red),
+                   const SizedBox(height: 24),
+                   const Text('Verify your email', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                   const SizedBox(height: 12),
+                   const Text(
+                     'We sent a verification link/code to your email address. Please verify your account to continue.',
+                     textAlign: TextAlign.center,
+                     style: TextStyle(fontSize: 16, color: Colors.grey),
+                   ),
+                   const SizedBox(height: 32),
+                   ElevatedButton(
+                     onPressed: () async {
                         try {
-                           await Supabase.instance.client.auth.getUser(); 
-                           await _checkAuthStatus();
-                        } catch (e2) {}
-                      }
-                      
-                      if (mounted && !_isEmailVerified) {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Still unverified. Please check your email.')));
-                      }
-                   },
-                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                   child: const Text('I have verified my email'),
-                 ),
-                 TextButton(
-                   onPressed: () async {
-                     await Supabase.instance.client.auth.signOut();
-                   }, 
-                   child: const Text('Sign Out', style: TextStyle(color: Colors.grey))
-                 )
-               ],
+                          final response = await Supabase.instance.client.auth.refreshSession();
+                          if (response.user != null) {
+                             await _checkAuthStatus(); // Update UI
+                          }
+                        } catch (e) {
+                          try {
+                             await Supabase.instance.client.auth.getUser(); 
+                             await _checkAuthStatus();
+                          } catch (e2) {}
+                        }
+                        
+                        if (mounted && !_isEmailVerified) {
+                           debugPrint('[AUTH] Still unverified. Please check email.');
+                        }
+                     },
+                     style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                     child: const Text('I have verified my email'),
+                   ),
+                   TextButton(
+                     onPressed: () async {
+                       await Supabase.instance.client.auth.signOut();
+                     }, 
+                     child: const Text('Sign Out', style: TextStyle(color: Colors.grey))
+                   )
+                 ],
+               ),
              ),
            ),
          ),
@@ -385,8 +416,11 @@ class MainScaffoldState extends State<MainScaffold> {
         
               if (isDesktop) {
                 return Scaffold(
-                  body: Row(
-                    children: [
+                  body: Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: Row(
+                      children: [
                       SidebarDrawer(
                         currentIndex: _currentIndex,
                         onItemSelected: (index) {
@@ -417,13 +451,18 @@ class MainScaffoldState extends State<MainScaffold> {
                       ),
                     ],
                   ),
-                );
-              }
+                ),
+              );
+            }
               
               return Scaffold(
-                body: IndexedStack(
-                  index: _currentIndex,
-                  children: _pages,
+                body: Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: _pages,
+                  ),
                 ),
                 bottomNavigationBar: GymBottomNavBar(
                   currentIndex: _currentIndex,

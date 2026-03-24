@@ -32,9 +32,11 @@ class _MainLayoutWrapperState extends State<MainLayoutWrapper> {
 
         if (isDesktop) {
           return Scaffold(
-            backgroundColor: widget.isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
-            body: Row(
-              children: [
+            body: Container(
+              width: double.infinity,
+              height: double.infinity,
+              child: Row(
+                children: [
                 // Permanent Sidebar for Desktop
                 SidebarDrawer(
                   currentIndex: widget.currentIndex,
@@ -81,10 +83,11 @@ class _MainLayoutWrapperState extends State<MainLayoutWrapper> {
                 ),
               ],
             ),
-          );
-        }
+          ),
+        );
+      }
 
-        // Mobile layout - just return child (it should be a Scaffold)
+      // Mobile layout - just return child (it should be a Scaffold)
         return widget.child;
       },
     );

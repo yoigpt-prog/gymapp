@@ -19,11 +19,7 @@ class _AuthPageState extends State<AuthPage> {
         redirectTo: 'io.supabase.flutterquickstart://login-callback/',
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      debugPrint('[AUTH ERROR] Google sign-in: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -37,11 +33,7 @@ class _AuthPageState extends State<AuthPage> {
         redirectTo: 'io.supabase.flutterquickstart://login-callback/',
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      debugPrint('[AUTH ERROR] Apple sign-in: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -49,11 +41,8 @@ class _AuthPageState extends State<AuthPage> {
 
   // Simple email sign in for demo purposes - in production use OTP or Password flow
   Future<void> _signInWithEmail() async {
-    // For now, just show a dialog or navigate to an email form
-    // This is a placeholder for the email flow
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Email sign in implementation pending')),
-    );
+    // Email flow placeholder — snackbar silenced
+    debugPrint('[AUTH INFO] Email sign in not yet implemented');
   }
 
   @override

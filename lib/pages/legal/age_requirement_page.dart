@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class AgeRequirementPage extends StatelessWidget {
-  const AgeRequirementPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const AgeRequirementPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return LegalPageLayout(
+      onToggleTheme: toggleTheme,
       title: 'Age Requirement',
       isDarkMode: isDarkMode,
       child: Column(

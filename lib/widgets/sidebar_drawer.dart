@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:gymguide_app/widgets/auth/auth_modal.dart';
 
 class SidebarDrawer extends StatefulWidget {
   final int currentIndex;
@@ -74,6 +77,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/bmi') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.local_fire_department_outlined,
@@ -85,6 +89,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/calorie') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.pie_chart_outline,
@@ -96,6 +101,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/macro') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.monitor_weight_outlined,
@@ -107,6 +113,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/body-fat') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.fitness_center_outlined,
@@ -118,6 +125,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/one-rm') : null,
                     ),
 
                     const SizedBox(height: 24),
@@ -154,8 +162,15 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: () {
-                        // TODO: Implement Auth logic
+                      onTapOverride: () async {
+                        final user = Supabase.instance.client.auth.currentUser;
+                        if (user == null) {
+                          // Not signed in — show login popup
+                          AuthModal.show(context);
+                        } else {
+                          // Signed in — sign out
+                          await Supabase.instance.client.auth.signOut();
+                        }
                       },
                     ),
                   ],

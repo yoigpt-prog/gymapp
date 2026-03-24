@@ -45,9 +45,7 @@ class _ContactPageState extends State<ContactPage> {
         setState(() {
           _isSubmitting = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message sent successfully!')),
-        );
+        debugPrint('[CONTACT] Message sent — snackbar silenced');
         // Clear form
         _nameController.clear();
         _emailController.clear();

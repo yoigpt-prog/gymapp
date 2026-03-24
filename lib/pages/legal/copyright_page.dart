@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class CopyrightPage extends StatelessWidget {
-  const CopyrightPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const CopyrightPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return LegalPageLayout(
+      onToggleTheme: toggleTheme,
       title: 'Copyright',
       isDarkMode: isDarkMode,
       child: Column(

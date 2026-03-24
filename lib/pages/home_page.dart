@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../widgets/red_header.dart';
 import '../widgets/auth/auth_modal.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -21,7 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _gender = 'male'; // 'male' or 'female'
-  String _side = 'front';  // 'front' or 'back'
+  String _side = 'front'; // 'front' or 'back'
   String? _highlightedMuscle; // e.g. 'abs'
   String? _selectedMuscle; // For detail view
 
@@ -31,7 +34,7 @@ class _HomePageState extends State<HomePage> {
   bool _isLoading = false;
   bool _hasMore = true;
   int _currentPage = 0;
-  
+
   // Video Autoplay state
   int? _playingIndex;
 
@@ -44,6 +47,8 @@ class _HomePageState extends State<HomePage> {
   // Search state
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  Timer? _searchDebounce;
+  bool get _isSearchMode => _searchQuery.isNotEmpty;
 
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
@@ -65,14 +70,15 @@ class _HomePageState extends State<HomePage> {
           .from('exercises')
           .select('is_male, is_female, group_path')
           .limit(20);
-      
+
       debugPrint('--- SUPABASE DEBUG DATA ---');
       if (response.isEmpty) {
         debugPrint('No exercises found in DB at all!');
       } else {
         debugPrint('Found ${response.length} sample rows:');
         for (var row in response) {
-          debugPrint('group_path: "${row['group_path']}", is_male: ${row['is_male']}, is_female: ${row['is_female']}');
+          debugPrint(
+              'group_path: "${row['group_path']}", is_male: ${row['is_male']}, is_female: ${row['is_female']}');
         }
       }
       debugPrint('---------------------------');
@@ -83,6 +89,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
@@ -106,7 +113,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handlePagination() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 500) {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 500) {
       _loadMoreExercises();
     }
   }
@@ -116,18 +124,20 @@ class _HomePageState extends State<HomePage> {
 
     // Estimate item height (Card + margin)
     const double itemHeight = 550.0;
-    
+
     final scrollOffset = _scrollController.offset;
     final viewportHeight = _scrollController.position.viewportDimension;
     final centerOffset = scrollOffset + viewportHeight / 2;
 
     // Calculate index based on offset
-    double listStartOffset = 150.0; 
-    
-    int newPlayingIndex = ((centerOffset - listStartOffset) / itemHeight).floor();
-    
+    double listStartOffset = 150.0;
+
+    int newPlayingIndex =
+        ((centerOffset - listStartOffset) / itemHeight).floor();
+
     if (newPlayingIndex < 0) newPlayingIndex = 0;
-    if (newPlayingIndex >= _exercises.length) newPlayingIndex = _exercises.length - 1;
+    if (newPlayingIndex >= _exercises.length)
+      newPlayingIndex = _exercises.length - 1;
 
     if (_playingIndex != newPlayingIndex) {
       setState(() {
@@ -136,63 +146,121 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // Equipment priority is now handled in the DB via CASE ORDER BY
+  // inside the get_exercises_by_muscle RPC — no client-side map needed.
+
   Future<void> _loadMoreExercises() async {
-    if (_isLoading || !_hasMore || _selectedMuscle == null) return;
+    // Guard: need either a muscle OR an active search query
+    if (_isLoading || !_hasMore || (_selectedMuscle == null && !_isSearchMode && !_filterFavorites))
+      return;
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Handle potential casing mismatch in DB (e.g. 'chest' vs 'Chest')
-      final muscle = _selectedMuscle!;
-      final capitalizedMuscle = muscle[0].toUpperCase() + muscle.substring(1);
-      
-      // Use 'in' filter to match either lowercase or capitalized
-      var query = Supabase.instance.client
-          .from('exercises')
-          .select('is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment')
-          .inFilter('group_path', [muscle, capitalizedMuscle]);
+      List<dynamic> data;
+      List<String>? favoriteIds;
 
-      // Apply filters
-      // Use boolean columns for gender filtering
-      if (_gender == 'male') {
-        query = query.eq('is_male', true);
-      } else if (_gender == 'female') {
-        query = query.eq('is_female', true);
-      }
-      
-      // Removed old filters:
-      // final capitalizedGender = _gender[0].toUpperCase() + _gender.substring(1);
-      // query = query.eq('gender', capitalizedGender);
-
-      if (_selectedWorkoutTypes.isNotEmpty) {
-        query = query.inFilter('exercise_type', _selectedWorkoutTypes.toList());
-      }
-      if (_selectedEquipment.isNotEmpty) {
-        query = query.inFilter('equipment', _selectedEquipment.toList());
-      }
-      if (_selectedDifficulties.isNotEmpty) {
-        query = query.inFilter('difficulty_level', _selectedDifficulties.toList());
+      if (_filterFavorites) {
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user != null) {
+          final prefs = await SharedPreferences.getInstance();
+          favoriteIds = prefs.getStringList('favorites_${user.id}') ?? [];
+          if (favoriteIds.isEmpty) {
+            setState(() {
+              _exercises.clear();
+              _isLoading = false;
+              _hasMore = false;
+            });
+            return;
+          }
+        }
       }
 
-      // Apply comprehensive search query across multiple fields
-      if (_searchQuery.isNotEmpty) {
-        query = query.or(
-          'exercise_name.ilike.%$_searchQuery%,'
-          'group_path.ilike.%$_searchQuery%,'
-          'target_muscle.ilike.%$_searchQuery%,'
-          'equipment.ilike.%$_searchQuery%,'
-          'synergist.ilike.%$_searchQuery%,'
-          'exercise_type.ilike.%$_searchQuery%'
-        );
+      if (_filterFavorites && favoriteIds != null && favoriteIds.isNotEmpty) {
+        // ── Favorites path: always use direct table query filtered by name ──
+        // We key favorites by exercise_name (fallback when RPC lacks 'id'),
+        // so we must filter by exercise_name, not the numeric id column.
+        var query = Supabase.instance.client
+            .from('exercises')
+            .select(
+                'id, exercise_name, target_muscle, synergist, difficulty_level, '
+                'instruction_1, instruction_2, instruction_3, instruction_4, '
+                'urls, exercise_type, equipment, is_male, is_female, group_path')
+            .inFilter('exercise_name', favoriteIds);
+
+        if (_gender == 'male') query = query.eq('is_male', true);
+        if (_gender == 'female') query = query.eq('is_female', true);
+        // Optionally narrow by the selected muscle group
+        if (_selectedMuscle != null) {
+          query = query.ilike('group_path', _selectedMuscle!);
+        }
+        if (_selectedEquipment.isNotEmpty) {
+          query = query.inFilter('equipment', _selectedEquipment.toList());
+        }
+        if (_selectedWorkoutTypes.isNotEmpty) {
+          final workoutTypeOrs = _selectedWorkoutTypes
+              .map((t) => 'exercise_type.ilike.%$t%')
+              .join(',');
+          query = query.or(workoutTypeOrs);
+        }
+        data = await query.order('exercise_name');
+      } else if (_selectedMuscle != null) {
+        // ── Muscle-based RPC path (existing behaviour) ──────────────────────
+        final params = <String, dynamic>{
+          'p_muscle': _selectedMuscle!,
+          'p_is_male': _gender == 'male',
+          'p_is_female': _gender == 'female',
+          'p_limit': _pageSize,
+          'p_offset': _currentPage * _pageSize,
+        };
+        if (_selectedEquipment.isNotEmpty)
+          params['p_equipment'] = _selectedEquipment.toList();
+        if (_selectedDifficulties.isNotEmpty)
+          params['p_difficulties'] = _selectedDifficulties.toList();
+        if (_selectedWorkoutTypes.isNotEmpty)
+          params['p_workout_types'] = _selectedWorkoutTypes.toList();
+        if (_searchQuery.isNotEmpty) params['p_search'] = _searchQuery;
+
+        data = await Supabase.instance.client
+            .rpc('get_exercises_by_muscle', params: params);
+      } else {
+        // ── Global text search (no muscle selected) ──────────────────────────
+        final q = _searchQuery.trim();
+        var query = Supabase.instance.client
+            .from('exercises')
+            .select(
+                'id, exercise_name, target_muscle, synergist, difficulty_level, '
+                'instruction_1, instruction_2, instruction_3, instruction_4, '
+                'urls, exercise_type, equipment, is_male, is_female, group_path')
+            .or('exercise_name.ilike.%${q}%,'
+                'target_muscle.ilike.%${q}%,'
+                'equipment.ilike.%${q}%,'
+                'synergist.ilike.%${q}%');
+
+        if (_gender == 'male') query = query.eq('is_male', true);
+        if (_gender == 'female') query = query.eq('is_female', true);
+        if (_selectedDifficulties.isNotEmpty) {
+          query = query.inFilter(
+              'difficulty_level', _selectedDifficulties.toList());
+        }
+        if (_selectedEquipment.isNotEmpty) {
+          query = query.inFilter('equipment', _selectedEquipment.toList());
+        }
+        if (_selectedWorkoutTypes.isNotEmpty) {
+          final workoutTypeOrs = _selectedWorkoutTypes
+              .map((t) => 'exercise_type.ilike.%$t%')
+              .join(',');
+          query = query.or(workoutTypeOrs);
+        }
+        data = await query
+            .range(_currentPage * _pageSize, (_currentPage + 1) * _pageSize - 1)
+            .order('exercise_name');
       }
 
-      final data = await query
-          .order('exercise_name', ascending: true)
-          .range(_currentPage * _pageSize, (_currentPage + 1) * _pageSize - 1);
-
-      final newExercises = (data as List).map((json) => ExerciseDetail.fromJson(json)).toList();
+      final newExercises =
+          (data as List).map((json) => ExerciseDetail.fromJson(json)).toList();
 
       setState(() {
         _exercises.addAll(newExercises);
@@ -218,6 +286,19 @@ class _HomePageState extends State<HomePage> {
     _loadMoreExercises();
   }
 
+  /// Clears the search query and returns to the muscle-map view.
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _exercises.clear();
+      _currentPage = 0;
+      _hasMore = true;
+      _isLoading = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -235,137 +316,151 @@ class _HomePageState extends State<HomePage> {
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
-      body: Column(
-        children: [
-          // Header (Animated)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            height: _showHeader ? null : 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: _showHeader ? 1.0 : 0.0,
-              child: RedHeader(
-                title: Supabase.instance.client.auth.currentUser?.userMetadata?['full_name'] ?? 'Guest',
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        child: Column(
+          children: [
+            // Original red header — web only, hidden on Android & iOS
+            if (kIsWeb)
+              RedHeader(
+                title: Supabase.instance.client.auth.currentUser
+                        ?.userMetadata?['full_name'] ??
+                    'Guest',
                 subtitle: 'Welcome back',
                 onToggleTheme: widget.toggleTheme,
                 isDarkMode: widget.isDarkMode,
               ),
-            ),
-          ),
-          
-          Expanded(
-            child: _selectedMuscle == null
-                ? Column(
-                    children: [
-                      _buildMobileSearchAndFilters(isDark, textColor),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: FittedBox(
-                            fit: BoxFit.contain,
-                            child: SizedBox(
-                              width: 1080,
-                              height: 1920,
-                              child: Transform.scale(
-                                scale: 1.08,
-                                child: MuscleMap(
-                                  gender: _gender,
-                                  side: _side,
-                                  highlightedMuscle: _highlightedMuscle,
-                                  isDarkMode: isDark,
-                                  onTapMuscle: (m) {
+
+            Expanded(
+              child: (_selectedMuscle == null && !_isSearchMode && !_filterFavorites)
+                  ? Column(
+                      children: [
+                        _buildMobileSearchAndFilters(isDark, textColor),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: FittedBox(
+                              fit: BoxFit.contain,
+                              child: SizedBox(
+                                width: 1080,
+                                height: 1920,
+                                child: Transform.scale(
+                                  scale: 1.08,
+                                  child: MuscleMap(
+                                    gender: _gender,
+                                    side: _side,
+                                    highlightedMuscle: _highlightedMuscle,
+                                    isDarkMode: isDark,
+                                    onTapMuscle: (m) {
+                                      setState(() {
+                                        if (_highlightedMuscle == m) {
+                                          _selectedMuscle = m;
+                                          _resetExercises(); // Load exercises for selected muscle
+                                        } else {
+                                          _highlightedMuscle = m;
+                                        }
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child:
+                              _buildMobileSearchAndFilters(isDark, textColor),
+                        ),
+
+                        // Exercise List Header
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon:
+                                      Icon(Icons.arrow_back, color: textColor),
+                                  onPressed: () {
                                     setState(() {
-                                      if (_highlightedMuscle == m) {
-                                        _selectedMuscle = m;
-                                        _resetExercises(); // Load exercises for selected muscle
-                                      } else {
-                                        _highlightedMuscle = m;
-                                      }
+                                      _selectedMuscle = null;
+                                      _exercises.clear();
+                                      _filterFavorites = false; // Reset filterFavorites when going back
                                     });
+                                    if (_isSearchMode) _clearSearch();
                                   },
                                 ),
-                              ),
+                                Expanded(
+                                  child: Text(
+                                    _selectedMuscle != null
+                                        ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
+                                        : _filterFavorites
+                                            ? 'My Favorites'
+                                            : 'Search Results',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: textColor,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ),
-                    ],
-                  )
-                : CustomScrollView(
-                    controller: _scrollController,
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: _buildMobileSearchAndFilters(isDark, textColor),
-                      ),
-                      
-                      // Exercise List Header
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.arrow_back, color: textColor),
-                                onPressed: () => setState(() {
-                                  _selectedMuscle = null;
-                                  _exercises.clear();
-                                }),
-                              ),
-                              Expanded(
+
+                        // Exercise List
+                        SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              if (index >= _exercises.length) {
+                                return _isLoading
+                                    ? const Center(
+                                        child: Padding(
+                                            padding: EdgeInsets.all(16),
+                                            child: CircularProgressIndicator()))
+                                    : const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16),
+                                child: ExerciseDetailCard(
+                                  exercise: _exercises[index],
+                                  isDarkMode: isDark,
+                                  shouldPlay: index == _playingIndex,
+                                ),
+                              );
+                            },
+                            childCount:
+                                _exercises.length + (_isLoading ? 1 : 0),
+                          ),
+                        ),
+
+                        if (_exercises.isEmpty && !_isLoading)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Center(
                                 child: Text(
-                                  '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: textColor,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
+                                  'No exercises found.',
+                                  style: TextStyle(color: textColor),
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      
-                      // Exercise List
-                      SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            if (index >= _exercises.length) {
-                              return _isLoading
-                                  ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
-                                  : const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: ExerciseDetailCard(
-                                exercise: _exercises[index],
-                                isDarkMode: isDark,
-                                shouldPlay: index == _playingIndex,
-                              ),
-                            );
-                          },
-                          childCount: _exercises.length + (_isLoading ? 1 : 0),
-                        ),
-                      ),
-                      
-                      if (_exercises.isEmpty && !_isLoading)
-                         SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.all(32),
-                            child: Center(
-                              child: Text(
-                                'No exercises found.',
-                                style: TextStyle(color: textColor),
-                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-          ),
-        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -374,230 +469,259 @@ class _HomePageState extends State<HomePage> {
     final subTextColor = isDark ? Colors.white70 : Colors.black54;
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200;
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          // Search bar
-          Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Icon(Icons.search, color: subTextColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Search workouts, muscle...',
-                    style: TextStyle(color: subTextColor),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Filters
-          Row(
+    return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
             children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _buildToggleChip(
-                        label: 'Male',
-                        isSelected: _gender == 'male',
-                        onTap: () {
-                          setState(() => _gender = 'male');
-                          if (_selectedMuscle != null) _resetExercises();
+              // Search bar
+              Container(
+                height: 44,
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, color: subTextColor, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (query) {
+                          _searchDebounce?.cancel();
+                          _searchDebounce =
+                              Timer(const Duration(milliseconds: 400), () {
+                            if (!mounted) return;
+                            setState(() => _searchQuery = query);
+                            _resetExercises();
+                          });
                         },
-                        isDark: isDark,
-                        compact: true,
+                        decoration: InputDecoration(
+                          hintText: 'Search exercises, muscles, equipment...',
+                          hintStyle:
+                              TextStyle(color: subTextColor, fontSize: 14),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        style: TextStyle(color: textColor, fontSize: 14),
                       ),
-                      const SizedBox(width: 4),
-                      _buildToggleChip(
-                        label: 'Female',
-                        isSelected: _gender == 'female',
-                        onTap: () {
-                          setState(() => _gender = 'female');
-                          if (_selectedMuscle != null) _resetExercises();
-                        },
-                        isDark: isDark,
-                        compact: true,
+                    ),
+                    if (_searchController.text.isNotEmpty)
+                      GestureDetector(
+                        onTap: _clearSearch,
+                        child: Icon(Icons.clear, size: 18, color: subTextColor),
                       ),
-                      const SizedBox(width: 8),
-                      _buildToggleChip(
-                        label: 'Front',
-                        isSelected: _side == 'front',
-                        onTap: () => setState(() => _side = 'front'),
-                        isDark: isDark,
-                        compact: true,
-                      ),
-                      const SizedBox(width: 4),
-                      _buildToggleChip(
-                        label: 'Back',
-                        isSelected: _side == 'back',
-                        onTap: () => setState(() => _side = 'back'),
-                        isDark: isDark,
-                        compact: true,
-                      ),
-                      // Add padding at the end so content isn't flush with the filter button
-                      const SizedBox(width: 4),
-                    ],
-                  ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _showFilterModal(context),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(12),
+
+              const SizedBox(height: 12),
+
+              // Filters
+              Row(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _buildToggleChip(
+                            label: 'Male',
+                            isSelected: _gender == 'male',
+                            onTap: () {
+                              setState(() => _gender = 'male');
+                              _resetExercises();
+                            },
+                            isDark: isDark,
+                            compact: true,
+                          ),
+                          const SizedBox(width: 4),
+                          _buildToggleChip(
+                            label: 'Female',
+                            isSelected: _gender == 'female',
+                            onTap: () {
+                              setState(() => _gender = 'female');
+                              _resetExercises();
+                            },
+                            isDark: isDark,
+                            compact: true,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildToggleChip(
+                            label: 'Front',
+                            isSelected: _side == 'front',
+                            onTap: () => setState(() => _side = 'front'),
+                            isDark: isDark,
+                            compact: true,
+                          ),
+                          const SizedBox(width: 4),
+                          _buildToggleChip(
+                            label: 'Back',
+                            isSelected: _side == 'back',
+                            onTap: () => setState(() => _side = 'back'),
+                            isDark: isDark,
+                            compact: true,
+                          ),
+                          // Add padding at the end so content isn't flush with the filter button
+                          const SizedBox(width: 4),
+                        ],
+                      ),
+                    ),
                   ),
-                  child: Icon(Icons.tune, size: 22, color: textColor),
-                ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _showFilterModal(context),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(Icons.tune, size: 22, color: textColor),
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 12),
             ],
           ),
-          const SizedBox(height: 12),
+        ));
+  }
+
+  Widget _buildDesktopLayout() {
+    final isDark = widget.isDarkMode;
+    final bgColor = isDark ? const Color(0xFF121212) : const Color(0xFFFFFFFF);
+
+    return Container(
+      color: bgColor,
+      child: Column(
+        children: [
+          // Custom Desktop Header
+          RedHeader(
+            title: 'GymGuide',
+            onToggleTheme: widget.toggleTheme,
+            isDarkMode: widget.isDarkMode,
+            searchController: _searchController,
+            onSearch: (query) {
+              _searchDebounce?.cancel();
+              _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+                if (!mounted) return;
+                setState(() => _searchQuery = query);
+                _resetExercises();
+              });
+            },
+          ),
+
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Calculate responsive panel widths (20% with min/max constraints)
+                final availableWidth = constraints.maxWidth;
+                final panelWidth = (availableWidth * 0.20).clamp(200.0, 280.0);
+                final spacing = 12.0;
+
+                return Stack(
+                  children: [
+                    // Layer 1: Scrollable Content (Center) with Scrollbar at Screen Edge
+                    Positioned.fill(
+                      child: SingleChildScrollView(
+                        padding: EdgeInsets.all(spacing),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Spacer for Filters
+                            SizedBox(width: panelWidth),
+                            SizedBox(width: spacing),
+                            // Actual Scrollable Center Content
+                            Expanded(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? const Color(0xFF1E1E1E)
+                                      : Colors.white,
+                                  border: Border.all(
+                                    color: isDark ? Colors.white : Colors.black,
+                                    width: 1.0,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: _buildDesktopMuscleMap(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: spacing),
+                            // Spacer for Banner
+                            SizedBox(width: panelWidth),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Layer 2: Fixed Sidebars (Filters & Banner)
+                    Positioned.fill(
+                      child: Padding(
+                        padding: EdgeInsets.all(spacing),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Fixed Filters
+                            SizedBox(
+                              width: panelWidth,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? const Color(0xFF1E1E1E)
+                                      : Colors.white,
+                                  border: Border.all(
+                                    color: isDark ? Colors.white : Colors.black,
+                                    width: 1.0,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: _buildDesktopFilterPanel(),
+                              ),
+                            ),
+                            SizedBox(width: spacing),
+                            // Spacer for Center (allows clicks to pass through)
+                            const Expanded(child: SizedBox()),
+                            SizedBox(width: spacing),
+                            // Fixed Banner
+                            SizedBox(
+                              width: panelWidth,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? const Color(0xFF1E1E1E)
+                                      : Colors.white,
+                                  border: Border.all(
+                                    color: isDark ? Colors.white : Colors.black,
+                                    width: 1.0,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: _buildDesktopRightPanel(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
   }
-
-  Widget _buildDesktopLayout() {
-  final isDark = widget.isDarkMode;
-  final bgColor = isDark ? const Color(0xFF121212) : const Color(0xFFF5F7FA);
-
-  return Container(
-    color: bgColor,
-    child: Column(
-      children: [
-        // Custom Desktop Header
-        RedHeader(
-          title: 'GymGuide',
-          onToggleTheme: widget.toggleTheme,
-          isDarkMode: widget.isDarkMode,
-          searchController: _searchController,
-          onSearch: (query) {
-            setState(() {
-              _searchQuery = query;
-              if (_selectedMuscle != null) {
-                _resetExercises();
-              }
-            });
-          },
-        ),
-        
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // Calculate responsive panel widths (20% with min/max constraints)
-              final availableWidth = constraints.maxWidth;
-              final panelWidth = (availableWidth * 0.20).clamp(200.0, 280.0);
-              final spacing = 12.0;
-              
-              return Stack(
-                children: [
-                  // Layer 1: Scrollable Content (Center) with Scrollbar at Screen Edge
-                  Positioned.fill(
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.all(spacing),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Spacer for Filters
-                          SizedBox(width: panelWidth),
-                          SizedBox(width: spacing),
-                          // Actual Scrollable Center Content
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                                border: Border.all(
-                                  color: isDark ? Colors.white : Colors.black,
-                                  width: 1.0,
-                                ),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: _buildDesktopMuscleMap(),
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: spacing),
-                          // Spacer for Banner
-                          SizedBox(width: panelWidth),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // Layer 2: Fixed Sidebars (Filters & Banner)
-                  Positioned.fill(
-                    child: Padding(
-                      padding: EdgeInsets.all(spacing),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Fixed Filters
-                          SizedBox(
-                            width: panelWidth,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                                border: Border.all(
-                                  color: isDark ? Colors.white : Colors.black,
-                                  width: 1.0,
-                                ),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: _buildDesktopFilterPanel(),
-                            ),
-                          ),
-                          SizedBox(width: spacing),
-                          // Spacer for Center (allows clicks to pass through)
-                          const Expanded(child: SizedBox()),
-                          SizedBox(width: spacing),
-                          // Fixed Banner
-                          SizedBox(
-                            width: panelWidth,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                                border: Border.all(
-                                  color: isDark ? Colors.white : Colors.black,
-                                  width: 1.0,
-                                ),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: _buildDesktopRightPanel(),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 
   Widget _buildDesktopFilterPanel() {
     return Padding(
@@ -619,7 +743,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            
+
             // Gender Toggles
             Wrap(
               spacing: 6,
@@ -630,7 +754,7 @@ class _HomePageState extends State<HomePage> {
                   isSelected: _gender == 'male',
                   onTap: () {
                     setState(() => _gender = 'male');
-                    if (_selectedMuscle != null) _resetExercises();
+                    _resetExercises();
                   },
                   isDark: widget.isDarkMode,
                   compact: true,
@@ -640,7 +764,7 @@ class _HomePageState extends State<HomePage> {
                   isSelected: _gender == 'female',
                   onTap: () {
                     setState(() => _gender = 'female');
-                    if (_selectedMuscle != null) _resetExercises();
+                    _resetExercises();
                   },
                   isDark: widget.isDarkMode,
                   compact: true,
@@ -651,27 +775,48 @@ class _HomePageState extends State<HomePage> {
 
             _buildFavoriteFilter(null, compact: true),
             const SizedBox(height: 12),
-            _buildFilterSection('DIFFICULTY', [
-              'Beginner',
-              'Intermediate',
-              'Advanced'
-            ], _selectedDifficulties, null, compact: true),
+            _buildFilterSection(
+                'WORKOUT TYPE',
+                ['Strength', 'Stretching', 'Cardio'],
+                _selectedWorkoutTypes,
+                null,
+                compact: true),
             const SizedBox(height: 12),
-            _buildFilterSection('WORKOUT TYPE', [
-              'Strength',
-              'Stretching',
-              'Cardio'
-            ], _selectedWorkoutTypes, null, compact: true),
-            const SizedBox(height: 12),
-            _buildFilterSection('EQUIPMENT', [
-              'Assisted', 'Band', 'Barbell', 'Battling Rope', 'Body weight',
-              'Bosu ball', 'Cable', 'Dumbbell', 'EZ Barbell', 'Kettlebell',
-              'Leverage machine', 'Medicine Ball', 'Olympic barbell',
-              'Pilates Machine', 'Power Sled', 'Resistance Band', 'Roll',
-              'Rollball', 'Rope', 'Sled machine', 'Smith machine',
-              'Stability ball', 'Stick', 'Suspension', 'Trap bar',
-              'Vibrate Plate', 'Weighted', 'Wheel roller',
-            ], _selectedEquipment, null, compact: true),
+            _buildFilterSection(
+                'EQUIPMENT',
+                [
+                  'Assisted',
+                  'Band',
+                  'Barbell',
+                  'Battling Rope',
+                  'Body weight',
+                  'Bosu ball',
+                  'Cable',
+                  'Dumbbell',
+                  'EZ Barbell',
+                  'Kettlebell',
+                  'Leverage machine',
+                  'Medicine Ball',
+                  'Olympic barbell',
+                  'Pilates Machine',
+                  'Power Sled',
+                  'Resistance Band',
+                  'Roll',
+                  'Rollball',
+                  'Rope',
+                  'Sled machine',
+                  'Smith machine',
+                  'Stability ball',
+                  'Stick',
+                  'Suspension',
+                  'Trap bar',
+                  'Vibrate Plate',
+                  'Weighted',
+                  'Wheel roller',
+                ],
+                _selectedEquipment,
+                null,
+                compact: true),
           ],
         ),
       ),
@@ -682,7 +827,7 @@ class _HomePageState extends State<HomePage> {
     final isDark = widget.isDarkMode;
     final textColor = isDark ? Colors.white : Colors.black87;
 
-    if (_selectedMuscle != null) {
+    if (_selectedMuscle != null || _isSearchMode || _filterFavorites) {
       return _buildDesktopExerciseList();
     }
 
@@ -746,17 +891,24 @@ class _HomePageState extends State<HomePage> {
           child: Row(
             children: [
               IconButton(
-                icon: Icon(Icons.arrow_back, color: widget.isDarkMode ? Colors.white : Colors.black87),
+                icon: Icon(Icons.arrow_back,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87),
                 onPressed: () {
                   setState(() {
                     _selectedMuscle = null;
                     _exercises.clear();
+                    _filterFavorites = false; // Reset filterFavorites
                   });
+                  if (_isSearchMode) _clearSearch();
                 },
               ),
               const SizedBox(width: 8),
               Text(
-                '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises',
+                _selectedMuscle != null
+                    ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
+                    : _filterFavorites
+                        ? 'My Favorites'
+                        : 'Search Results',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -768,16 +920,24 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 16),
         _exercises.isEmpty && !_isLoading
-            ? Center(child: Text('No exercises found.', style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black)))
+            ? Center(
+                child: Text('No exercises found.',
+                    style: TextStyle(
+                        color:
+                            widget.isDarkMode ? Colors.white : Colors.black)))
             : ListView.builder(
-                padding: const EdgeInsets.all(0), // Reduced from 24 to 0 to reduce gap
+                padding: const EdgeInsets.all(
+                    0), // Reduced from 24 to 0 to reduce gap
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: _exercises.length + (_isLoading ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index >= _exercises.length) {
                     return _isLoading
-                        ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                        ? const Center(
+                            child: Padding(
+                                padding: EdgeInsets.all(16),
+                                child: CircularProgressIndicator()))
                         : const SizedBox.shrink();
                   }
                   return Padding(
@@ -795,28 +955,27 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onMuscleTap(String m) {
-  setState(() {
-    if (_highlightedMuscle == m) {
-      // Proceed with muscle selection directly
-      _selectedMuscle = m;
-      _resetExercises();
-      
-      // TRIGGER REQ: Show AuthModal 3 seconds after entering Exercises page
-      Future.delayed(const Duration(seconds: 3), () {
-        if (!mounted) return;
-        // Only show if user is still viewing exercises (hasn't backed out)
-        // and is not already logged in
-        final session = Supabase.instance.client.auth.currentSession;
-        if (_selectedMuscle != null && session == null) {
-          AuthModal.show(context);
-        }
-      });
-      
-    } else {
-      _highlightedMuscle = m;
-    }
-  }); 
-}
+    setState(() {
+      if (_highlightedMuscle == m) {
+        // Proceed with muscle selection directly
+        _selectedMuscle = m;
+        _resetExercises();
+
+        // TRIGGER REQ: Show AuthModal 3 seconds after entering Exercises page
+        Future.delayed(const Duration(seconds: 3), () {
+          if (!mounted) return;
+          // Only show if user is still viewing exercises (hasn't backed out)
+          // and is not already logged in
+          final session = Supabase.instance.client.auth.currentSession;
+          if (_selectedMuscle != null && session == null) {
+            AuthModal.show(context);
+          }
+        });
+      } else {
+        _highlightedMuscle = m;
+      }
+    });
+  }
 
   void _showGoogleSignInDialog() {
     showDialog(
@@ -834,10 +993,14 @@ class _HomePageState extends State<HomePage> {
               child: Container(
                 width: 400,
                 decoration: BoxDecoration(
-                  color: widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF2D2D2D)
+                      : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: widget.isDarkMode ? const Color(0xFF404040) : const Color(0xFFE0E0E0),
+                    color: widget.isDarkMode
+                        ? const Color(0xFF404040)
+                        : const Color(0xFFE0E0E0),
                     width: 1,
                   ),
                 ),
@@ -872,7 +1035,8 @@ class _HomePageState extends State<HomePage> {
                                         Color(0xFFFBBC05),
                                         Color(0xFF34A853),
                                       ],
-                                    ).createShader(const Rect.fromLTWH(0, 0, 24, 24)),
+                                    ).createShader(
+                                        const Rect.fromLTWH(0, 0, 24, 24)),
                                 ),
                               ),
                             ),
@@ -885,7 +1049,9 @@ class _HomePageState extends State<HomePage> {
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w400,
-                                color: widget.isDarkMode ? Colors.white : const Color(0xFF202124),
+                                color: widget.isDarkMode
+                                    ? Colors.white
+                                    : const Color(0xFF202124),
                               ),
                             ),
                           ),
@@ -894,7 +1060,9 @@ class _HomePageState extends State<HomePage> {
                             icon: Icon(
                               Icons.close,
                               size: 20,
-                              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF5F6368),
+                              color: widget.isDarkMode
+                                  ? Colors.white70
+                                  : const Color(0xFF5F6368),
                             ),
                             onPressed: () => Navigator.of(context).pop(),
                             padding: EdgeInsets.zero,
@@ -906,9 +1074,9 @@ class _HomePageState extends State<HomePage> {
                         ],
                       ),
                     ),
-                    
+
                     const Divider(height: 1),
-                    
+
                     // Profile Section
                     Padding(
                       padding: const EdgeInsets.all(20),
@@ -944,7 +1112,9 @@ class _HomePageState extends State<HomePage> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w500,
-                                    color: widget.isDarkMode ? Colors.white : const Color(0xFF202124),
+                                    color: widget.isDarkMode
+                                        ? Colors.white
+                                        : const Color(0xFF202124),
                                   ),
                                 ),
                                 const SizedBox(height: 2),
@@ -952,7 +1122,9 @@ class _HomePageState extends State<HomePage> {
                                   'Sign in with Google',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: widget.isDarkMode ? Colors.white70 : const Color(0xFF5F6368),
+                                    color: widget.isDarkMode
+                                        ? Colors.white70
+                                        : const Color(0xFF5F6368),
                                   ),
                                 ),
                               ],
@@ -961,7 +1133,7 @@ class _HomePageState extends State<HomePage> {
                         ],
                       ),
                     ),
-                    
+
                     // Continue Button
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -971,19 +1143,17 @@ class _HomePageState extends State<HomePage> {
                         child: ElevatedButton(
                           onPressed: () async {
                             try {
-                              await Supabase.instance.client.auth.signInWithOAuth(
+                              await Supabase.instance.client.auth
+                                  .signInWithOAuth(
                                 OAuthProvider.google,
-                                redirectTo: 'io.supabase.gymguideapp://login-callback/',
+                                redirectTo:
+                                    'io.supabase.gymguideapp://login-callback/',
                               );
                               if (context.mounted) {
                                 Navigator.of(context).pop();
                               }
                             } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error signing in: $e')),
-                                );
-                              }
+                              debugPrint('[HOME ERROR] Sign-in: $e');
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1005,7 +1175,7 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
                     ),
-                    
+
                     // Disclaimer
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -1013,7 +1183,9 @@ class _HomePageState extends State<HomePage> {
                         'To continue, Google will share your name, email address, and profile picture with this site.',
                         style: TextStyle(
                           fontSize: 11,
-                          color: widget.isDarkMode ? Colors.white60 : const Color(0xFF5F6368),
+                          color: widget.isDarkMode
+                              ? Colors.white60
+                              : const Color(0xFF5F6368),
                           height: 1.5,
                         ),
                       ),
@@ -1037,7 +1209,8 @@ class _HomePageState extends State<HomePage> {
           child: SingleChildScrollView(
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                minHeight: constraints.maxHeight > 0 ? constraints.maxHeight - 24 : 0,
+                minHeight:
+                    constraints.maxHeight > 0 ? constraints.maxHeight - 24 : 0,
               ),
               child: Center(
                 child: Image.asset(
@@ -1063,9 +1236,12 @@ class _HomePageState extends State<HomePage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
+        padding: EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFF0000) : (isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200),
+          color: isSelected
+              ? const Color(0xFFFF0000)
+              : (isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200),
           borderRadius: BorderRadius.circular(24),
         ),
         child: FittedBox(
@@ -1074,7 +1250,9 @@ class _HomePageState extends State<HomePage> {
             label,
             style: TextStyle(
               fontSize: compact ? 11 : 14,
-              color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
+              color: isSelected
+                  ? Colors.white
+                  : (isDark ? Colors.white : Colors.black87),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1094,17 +1272,21 @@ class _HomePageState extends State<HomePage> {
         Set<String> localDifficulties = Set.from(_selectedDifficulties);
         Set<String> localWorkoutTypes = Set.from(_selectedWorkoutTypes);
         Set<String> localEquipment = Set.from(_selectedEquipment);
-        
+
         bool isEquipmentExpanded = false;
-        
+
         // Common equipment list for collapsed view
         final List<String> commonEquipment = [
-          'Body weight', 'Dumbbell', 'Barbell', 'Band', 'Cable', 'Smith machine'
+          'Body weight',
+          'Dumbbell',
+          'Barbell',
+          'Band',
+          'Cable',
+          'Smith machine'
         ];
 
         return StatefulBuilder(
           builder: (context, setModalState) {
-            
             // Helper to remove an active filter via chip
             void removeFilter(String type, String value) {
               setModalState(() {
@@ -1120,26 +1302,32 @@ class _HomePageState extends State<HomePage> {
               minChildSize: 0.5,
               maxChildSize: 0.95,
               builder: (context, scrollController) {
-                
                 // Build list of active filter chips
                 List<Widget> activeFilterChips = [];
                 if (localFilterFavorites) {
-                   activeFilterChips.add(_buildActiveFilterChip('Favorites', () => removeFilter('favorite', '')));
+                  activeFilterChips.add(_buildActiveFilterChip(
+                      'Favorites', () => removeFilter('favorite', '')));
                 }
                 for (var d in localDifficulties) {
-                  activeFilterChips.add(_buildActiveFilterChip(d, () => removeFilter('difficulty', d)));
+                  activeFilterChips.add(_buildActiveFilterChip(
+                      d, () => removeFilter('difficulty', d)));
                 }
                 for (var w in localWorkoutTypes) {
-                  activeFilterChips.add(_buildActiveFilterChip(w, () => removeFilter('workout_type', w)));
+                  activeFilterChips.add(_buildActiveFilterChip(
+                      w, () => removeFilter('workout_type', w)));
                 }
                 for (var e in localEquipment) {
-                  activeFilterChips.add(_buildActiveFilterChip(e, () => removeFilter('equipment', e)));
+                  activeFilterChips.add(_buildActiveFilterChip(
+                      e, () => removeFilter('equipment', e)));
                 }
 
                 return Container(
                   decoration: BoxDecoration(
-                    color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    color: widget.isDarkMode
+                        ? const Color(0xFF1E1E1E)
+                        : Colors.white,
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(20)),
                   ),
                   child: Column(
                     children: [
@@ -1155,7 +1343,7 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                       ),
-                      
+
                       // Active Filters Summary
                       if (activeFilterChips.isNotEmpty)
                         Container(
@@ -1169,7 +1357,9 @@ class _HomePageState extends State<HomePage> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
-                                  color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                                  color: widget.isDarkMode
+                                      ? Colors.white54
+                                      : Colors.grey.shade600,
                                   letterSpacing: 1.0,
                                 ),
                               ),
@@ -1184,7 +1374,7 @@ class _HomePageState extends State<HomePage> {
                             ],
                           ),
                         ),
-                        
+
                       Expanded(
                         child: ListView(
                           controller: scrollController,
@@ -1200,7 +1390,9 @@ class _HomePageState extends State<HomePage> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: widget.isDarkMode ? Colors.white70 : Colors.black54,
+                                    color: widget.isDarkMode
+                                        ? Colors.white70
+                                        : Colors.black54,
                                     letterSpacing: 1.2,
                                   ),
                                 ),
@@ -1210,25 +1402,35 @@ class _HomePageState extends State<HomePage> {
                                   isSelected: localFilterFavorites,
                                   isDark: widget.isDarkMode,
                                   onTap: () {
+                                    final user = Supabase.instance.client.auth.currentUser;
+                                    if (user == null) {
+                                      AuthModal.show(context);
+                                      return;
+                                    }
                                     setModalState(() {
-                                      localFilterFavorites = !localFilterFavorites;
+                                      localFilterFavorites =
+                                          !localFilterFavorites;
                                     });
                                   },
                                 ),
                               ],
                             ),
                             const SizedBox(height: 24),
-                            
-                            _buildFilterSection('DIFFICULTY', [
-                              'Beginner', 'Intermediate', 'Advanced'
-                            ], localDifficulties, setModalState),
+
+                            _buildFilterSection(
+                                'DIFFICULTY',
+                                ['Beginner', 'Intermediate', 'Advanced'],
+                                localDifficulties,
+                                setModalState),
                             const SizedBox(height: 24),
-                            
-                            _buildFilterSection('WORKOUT TYPE', [
-                              'Strength', 'Stretching', 'Cardio'
-                            ], localWorkoutTypes, setModalState),
+
+                            _buildFilterSection(
+                                'WORKOUT TYPE',
+                                ['Strength', 'Stretching', 'Cardio'],
+                                localWorkoutTypes,
+                                setModalState),
                             const SizedBox(height: 24),
-                            
+
                             // Collapsible Equipment Section
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1238,7 +1440,9 @@ class _HomePageState extends State<HomePage> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: widget.isDarkMode ? Colors.white70 : Colors.black54,
+                                    color: widget.isDarkMode
+                                        ? Colors.white70
+                                        : Colors.black54,
                                     letterSpacing: 1.2,
                                   ),
                                 ),
@@ -1248,20 +1452,32 @@ class _HomePageState extends State<HomePage> {
                                   runSpacing: 12,
                                   children: [
                                     // Show either full list or just common ones
-                                    ...(isEquipmentExpanded 
-                                        ? [
-                                            // Full list
-                                            'Assisted', 'Band', 'Barbell', 'Battling Rope', 'Body weight',
-                                            'Bosu ball', 'Cable', 'Dumbbell', 'EZ Barbell', 'Kettlebell',
-                                            'Leverage machine', 'Medicine Ball', 'Olympic barbell',
-                                            'Pilates Machine', 'Power Sled', 'Resistance Band', 'Roll',
-                                            'Rollball', 'Rope', 'Sled machine', 'Smith machine',
-                                            'Stability ball', 'Stick', 'Suspension', 'Trap bar',
-                                            'Vibrate Plate', 'Weighted', 'Wheel roller',
-                                          ] 
-                                        : commonEquipment
-                                    ).map((label) {
-                                      final isSelected = localEquipment.contains(label);
+                                    ...(isEquipmentExpanded
+                                            ? [
+                                                // Full list
+                                                'Assisted', 'Band', 'Barbell',
+                                                'Battling Rope', 'Body weight',
+                                                'Bosu ball',
+                                                'Cable',
+                                                'Dumbbell',
+                                                'EZ Barbell',
+                                                'Kettlebell',
+                                                'Leverage machine',
+                                                'Medicine Ball',
+                                                'Olympic barbell',
+                                                'Pilates Machine', 'Power Sled',
+                                                'Resistance Band', 'Roll',
+                                                'Rollball', 'Rope',
+                                                'Sled machine', 'Smith machine',
+                                                'Stability ball', 'Stick',
+                                                'Suspension', 'Trap bar',
+                                                'Vibrate Plate', 'Weighted',
+                                                'Wheel roller',
+                                              ]
+                                            : commonEquipment)
+                                        .map((label) {
+                                      final isSelected =
+                                          localEquipment.contains(label);
                                       return _buildToggleChip(
                                         label: label,
                                         isSelected: isSelected,
@@ -1277,38 +1493,51 @@ class _HomePageState extends State<HomePage> {
                                         },
                                       );
                                     }).toList(),
-                                    
+
                                     // Expand/Collapse Button
                                     GestureDetector(
                                       onTap: () {
                                         setModalState(() {
-                                          isEquipmentExpanded = !isEquipmentExpanded;
+                                          isEquipmentExpanded =
+                                              !isEquipmentExpanded;
                                         });
                                       },
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
                                         decoration: BoxDecoration(
                                           border: Border.all(
-                                            color: widget.isDarkMode ? Colors.white24 : Colors.grey.shade300,
+                                            color: widget.isDarkMode
+                                                ? Colors.white24
+                                                : Colors.grey.shade300,
                                           ),
-                                          borderRadius: BorderRadius.circular(24),
+                                          borderRadius:
+                                              BorderRadius.circular(24),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
-                                              isEquipmentExpanded ? 'Show Less' : 'Show All Equipment',
+                                              isEquipmentExpanded
+                                                  ? 'Show Less'
+                                                  : 'Show All Equipment',
                                               style: TextStyle(
                                                 fontSize: 14,
-                                                color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                                                color: widget.isDarkMode
+                                                    ? Colors.white70
+                                                    : Colors.black87,
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
                                             const SizedBox(width: 4),
                                             Icon(
-                                              isEquipmentExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                              isEquipmentExpanded
+                                                  ? Icons.keyboard_arrow_up
+                                                  : Icons.keyboard_arrow_down,
                                               size: 16,
-                                              color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                                              color: widget.isDarkMode
+                                                  ? Colors.white70
+                                                  : Colors.black87,
                                             ),
                                           ],
                                         ),
@@ -1318,20 +1547,24 @@ class _HomePageState extends State<HomePage> {
                                 ),
                               ],
                             ),
-                            
+
                             const SizedBox(height: 100),
                           ],
                         ),
                       ),
-                      
+
                       // Action Bar
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                          color: widget.isDarkMode
+                              ? const Color(0xFF1E1E1E)
+                              : Colors.white,
                           border: Border(
                             top: BorderSide(
-                              color: widget.isDarkMode ? Colors.white12 : Colors.black12,
+                              color: widget.isDarkMode
+                                  ? Colors.white12
+                                  : Colors.black12,
                               width: 1,
                             ),
                           ),
@@ -1347,12 +1580,17 @@ class _HomePageState extends State<HomePage> {
                                   child: TextButton(
                                     onPressed: () => Navigator.pop(context),
                                     style: TextButton.styleFrom(
-                                      foregroundColor: widget.isDarkMode ? Colors.white70 : Colors.black54,
-                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                      foregroundColor: widget.isDarkMode
+                                          ? Colors.white70
+                                          : Colors.black54,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 16),
                                     ),
                                     child: const Text(
                                       'Dismiss',
-                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ),
@@ -1365,10 +1603,12 @@ class _HomePageState extends State<HomePage> {
                                       // Apply changes to main state
                                       setState(() {
                                         _filterFavorites = localFilterFavorites;
-                                        _selectedDifficulties = localDifficulties;
-                                        _selectedWorkoutTypes = localWorkoutTypes;
+                                        _selectedDifficulties =
+                                            localDifficulties;
+                                        _selectedWorkoutTypes =
+                                            localWorkoutTypes;
                                         _selectedEquipment = localEquipment;
-                                        
+
                                         // Reset pagination and reload
                                         _exercises.clear();
                                         _currentPage = 0;
@@ -1380,7 +1620,8 @@ class _HomePageState extends State<HomePage> {
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFFFF0000),
                                       foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 16),
                                       elevation: 0,
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(12),
@@ -1388,33 +1629,13 @@ class _HomePageState extends State<HomePage> {
                                     ),
                                     child: const Text(
                                       'Apply Filters',
-                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 ),
                               ],
-                            ),
-                            const SizedBox(height: 8),
-                             // Reset Button (Tertiary/Subtle)
-                            TextButton(
-                              onPressed: () {
-                                setModalState(() {
-                                  localFilterFavorites = false;
-                                  localDifficulties.clear();
-                                  localWorkoutTypes.clear();
-                                  localEquipment.clear();
-                                });
-                              },
-                              style: TextButton.styleFrom(
-                                foregroundColor: widget.isDarkMode ? Colors.white38 : Colors.grey.shade400,
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                minimumSize: Size.zero, 
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text(
-                                'Reset all filters',
-                                style: TextStyle(fontSize: 13),
-                              ),
                             ),
                           ],
                         ),
@@ -1435,7 +1656,8 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
       decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey.shade100,
+        color:
+            widget.isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: widget.isDarkMode ? Colors.white24 : Colors.grey.shade300,
@@ -1467,15 +1689,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-
-
-  Widget _buildFavoriteFilter(StateSetter? setModalState, {bool compact = false}) {
+  Widget _buildFavoriteFilter(StateSetter? setModalState,
+      {bool compact = false}) {
     void updateState(VoidCallback fn) {
       if (setModalState != null) {
         setModalState(fn);
         setState(() {});
       } else {
         setState(fn);
+        _resetExercises();
       }
     }
 
@@ -1488,7 +1710,8 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
+              color:
+                  widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
               letterSpacing: 1.0,
             ),
           ),
@@ -1500,7 +1723,8 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
+              color:
+                  widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
               letterSpacing: 0.5,
             ),
           ),
@@ -1508,17 +1732,29 @@ class _HomePageState extends State<HomePage> {
         ],
         GestureDetector(
           onTap: () {
+            final user = Supabase.instance.client.auth.currentUser;
+            if (user == null) {
+              AuthModal.show(context);
+              return;
+            }
             updateState(() {
               _filterFavorites = !_filterFavorites;
             });
           },
           child: Container(
-            padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
+            padding: EdgeInsets.symmetric(
+                horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
             decoration: BoxDecoration(
-              color: _filterFavorites ? const Color(0xFFFF0000) : (widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white),
+              color: _filterFavorites
+                  ? const Color(0xFFFF0000)
+                  : (widget.isDarkMode
+                      ? const Color(0xFF2D2D2D)
+                      : Colors.white),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: _filterFavorites ? const Color(0xFFFF0000) : const Color(0xFFE2E8F0),
+                color: _filterFavorites
+                    ? const Color(0xFFFF0000)
+                    : const Color(0xFFE2E8F0),
                 width: compact ? 1.0 : 0.3,
               ),
             ),
@@ -1527,7 +1763,11 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(
                 fontSize: compact ? 11 : 14,
                 fontWeight: FontWeight.w600,
-                color: _filterFavorites ? Colors.white : (widget.isDarkMode ? Colors.white : const Color(0xFF2D3748)),
+                color: _filterFavorites
+                    ? Colors.white
+                    : (widget.isDarkMode
+                        ? Colors.white
+                        : const Color(0xFF2D3748)),
               ),
             ),
           ),
@@ -1536,13 +1776,16 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildFilterSection(String title, List<String> options, Set<String> selectedSet, StateSetter? setModalState, {bool compact = false}) {
+  Widget _buildFilterSection(String title, List<String> options,
+      Set<String> selectedSet, StateSetter? setModalState,
+      {bool compact = false}) {
     void updateState(VoidCallback fn) {
       if (setModalState != null) {
         setModalState(fn);
         setState(() {});
       } else {
         setState(fn);
+        _resetExercises();
       }
     }
 
@@ -1555,7 +1798,8 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
+              color:
+                  widget.isDarkMode ? Colors.white70 : const Color(0xFF4A5568),
               letterSpacing: 1.0,
             ),
           ),
@@ -1567,7 +1811,8 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
+              color:
+                  widget.isDarkMode ? Colors.white54 : const Color(0xFF718096),
               letterSpacing: 0.5,
             ),
           ),
@@ -1589,12 +1834,19 @@ class _HomePageState extends State<HomePage> {
                 });
               },
               child: Container(
-                padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
+                padding: EdgeInsets.symmetric(
+                    horizontal: compact ? 10 : 16, vertical: compact ? 4 : 8),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFFF0000) : (widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white),
+                  color: isSelected
+                      ? const Color(0xFFFF0000)
+                      : (widget.isDarkMode
+                          ? const Color(0xFF2D2D2D)
+                          : Colors.white),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFFFF0000) : const Color(0xFFE2E8F0),
+                    color: isSelected
+                        ? const Color(0xFFFF0000)
+                        : const Color(0xFFE2E8F0),
                     width: compact ? 1.0 : 0.3,
                   ),
                 ),
@@ -1603,7 +1855,11 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(
                     fontSize: compact ? 11 : 14,
                     fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : (widget.isDarkMode ? Colors.white : const Color(0xFF2D3748)),
+                    color: isSelected
+                        ? Colors.white
+                        : (widget.isDarkMode
+                            ? Colors.white
+                            : const Color(0xFF2D3748)),
                   ),
                 ),
               ),
@@ -1661,23 +1917,34 @@ class ExerciseDetail {
       instructions = ['Follow the video demonstration.'];
     }
 
+      // Use 'id' when available; fall back to exercise_name to avoid the
+      // empty-string collision that makes every item look like a favourite.
+      final rawId = json['id']?.toString() ?? '';
+      final exerciseName = json['exercise_name']?.toString() ?? '';
+      final resolvedId = rawId.isNotEmpty ? rawId : exerciseName;
+
     return ExerciseDetail(
-      id: getString('id'), // Map ID
+      id: resolvedId,
       name: getString('exercise_name', defaultVal: 'Unknown Exercise'),
       muscleId: getString('group_path'),
       imagePath: getString('urls'),
-      target: getString('target_muscle', defaultVal: getString('target', defaultVal: (json['group_path'] as String? ?? 'General').toUpperCase())),
-      synergist: getString('synergist', defaultVal: getString('synergists', defaultVal: 'Various')),
-      difficulty: getString('difficulty_level', defaultVal: getString('difficulty', defaultVal: 'Intermediate')),
+      target: getString('target_muscle',
+          defaultVal: getString('target',
+              defaultVal:
+                  (json['group_path'] as String? ?? 'General').toUpperCase())),
+      synergist: getString('synergist',
+          defaultVal: getString('synergists', defaultVal: 'Various')),
+      difficulty: getString('difficulty_level',
+          defaultVal: getString('difficulty', defaultVal: 'Intermediate')),
       steps: instructions,
       // Polyfill gender from boolean columns if needed, though we primarily filter by query now.
       // We check if this exercise is specific to one gender.
-      gender: (json['is_male'] == true && json['is_female'] != true) 
-          ? 'Male' 
-          : (json['is_female'] == true && json['is_male'] != true) 
-              ? 'Female' 
+      gender: (json['is_male'] == true && json['is_female'] != true)
+          ? 'Male'
+          : (json['is_female'] == true && json['is_male'] != true)
+              ? 'Female'
               : 'Unisex', // Default/Fallback
-              
+
       exerciseType: getString('exercise_type'),
       equipment: getString('equipment'),
     );
@@ -1704,6 +1971,32 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
   bool _isFavorite = false;
 
   @override
+  void initState() {
+    super.initState();
+    _loadFavoriteStatus();
+  }
+
+  Future<void> _loadFavoriteStatus() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    // Favorites are keyed by exercise_name for cross-source consistency.
+    if (widget.exercise.name.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favList = prefs.getStringList('favorites_${user.id}') ?? [];
+      if (mounted) {
+        setState(() {
+          // Match by name (stored key), or legacy id key
+          _isFavorite = favList.contains(widget.exercise.name) ||
+              favList.contains(widget.exercise.id);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading favorites: $e');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDarkMode = widget.isDarkMode;
     final cardBg = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
@@ -1720,7 +2013,9 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
         ),
         boxShadow: [
           BoxShadow(
-            color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+            color: isDarkMode
+                ? Colors.white.withOpacity(0.03)
+                : Colors.black.withOpacity(0.12),
             blurRadius: 24,
             offset: const Offset(0, 8),
             spreadRadius: 0,
@@ -1755,16 +2050,41 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     color: Colors.white,
                     size: 48,
                   ),
-                  onPressed: () {
+                  onPressed: () async {
+                    final user = Supabase.instance.client.auth.currentUser;
+                    if (user == null) {
+                      AuthModal.show(context);
+                      return;
+                    }
+
                     setState(() {
                       _isFavorite = !_isFavorite;
                     });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(_isFavorite ? 'Added to favorites' : 'Removed from favorites'),
-                        duration: const Duration(seconds: 1),
-                      ),
-                    );
+
+                    try {
+                      final prefs = await SharedPreferences.getInstance();
+                      final key = 'favorites_${user.id}';
+                      final favList = prefs.getStringList(key) ?? [];
+
+                      // Always use exercise_name as the canonical key so that
+                      // the "Show Favorites Only" query (filtered by name) matches.
+                      final favKey = widget.exercise.name;
+                      if (_isFavorite) {
+                        if (!favList.contains(favKey)) favList.add(favKey);
+                        // Remove any legacy id-based entry to avoid duplicates
+                        favList.remove(widget.exercise.id == favKey ? null : widget.exercise.id);
+                      } else {
+                        favList.remove(favKey);
+                        favList.remove(widget.exercise.id); // also remove legacy
+                      }
+                      await prefs.setStringList(key, favList);
+                    } catch (e) {
+                      debugPrint('Error saving favorite: $e');
+                    }
+
+                    // Favorites feedback silenced — log only
+                    debugPrint(
+                        '[HOME] Favorites: ${_isFavorite ? "added" : "removed"} - ${widget.exercise.id}');
                   },
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -1807,16 +2127,19 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                   ),
                   child: Column(
                     children: [
-                      if (widget.exercise.target.isNotEmpty) 
-                        _buildInfoRow('Target muscle:', widget.exercise.target, textColor, subTextColor),
-                      if (widget.exercise.synergist.isNotEmpty) 
-                        _buildInfoRow('Synergist:', widget.exercise.synergist, textColor, subTextColor),
-                      if (widget.exercise.difficulty.isNotEmpty) 
-                        _buildInfoRow('Difficulty:', widget.exercise.difficulty, textColor, subTextColor),
+                      if (widget.exercise.target.isNotEmpty)
+                        _buildInfoRow('Target muscle:', widget.exercise.target,
+                            textColor, subTextColor),
+                      if (widget.exercise.synergist.isNotEmpty)
+                        _buildInfoRow('Synergist:', widget.exercise.synergist,
+                            textColor, subTextColor),
+                      if (widget.exercise.difficulty.isNotEmpty)
+                        _buildInfoRow('Difficulty:', widget.exercise.difficulty,
+                            textColor, subTextColor),
                     ],
                   ),
                 ),
-                
+
                 const SizedBox(height: 16),
 
                 // Instructions
@@ -1876,9 +2199,10 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, Color textColor, Color subTextColor) {
+  Widget _buildInfoRow(
+      String label, String value, Color textColor, Color subTextColor) {
     final borderColor = widget.isDarkMode ? Colors.white24 : Colors.black12;
-    
+
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -1910,7 +2234,8 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
             // Value cell
             Expanded(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Text(
                   value,
                   style: TextStyle(
@@ -2013,7 +2338,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 /// Muscle map widget handling multiple muscles
 class MuscleMap extends StatelessWidget {
   final String gender; // 'male' or 'female'
-  final String side;   // 'front' or 'back'
+  final String side; // 'front' or 'back'
   final String? highlightedMuscle;
   final ValueChanged<String> onTapMuscle;
   final bool isDarkMode;
@@ -2063,33 +2388,183 @@ class MuscleMap extends StatelessWidget {
     // Define regions based on SVG analysis (approximate relative coordinates)
     final List<MuscleRegion> regions = side == 'front'
         ? [
-            MuscleRegion(id: 'neck', left: 0.42, top: 0.09, width: 0.16, height: 0.07, label: 'Neck'),
-            MuscleRegion(id: 'traps', left: 0.32, top: 0.11, width: 0.36, height: 0.06, label: 'Traps'),
-            MuscleRegion(id: 'shoulders', left: 0.18, top: 0.16, width: 0.18, height: 0.12, label: 'Shldr'), // Left
-            MuscleRegion(id: 'shoulders', left: 0.64, top: 0.16, width: 0.18, height: 0.12, label: 'Shldr'), // Right
-            MuscleRegion(id: 'chest', left: 0.30, top: 0.18, width: 0.40, height: 0.11, label: 'Chest'),
-            MuscleRegion(id: 'biceps', left: 0.12, top: 0.28, width: 0.16, height: 0.12, label: 'Bic'), // Left
-            MuscleRegion(id: 'biceps', left: 0.72, top: 0.28, width: 0.16, height: 0.12, label: 'Bic'), // Right
-            MuscleRegion(id: 'forarms', left: 0.06, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'), // Left
-            MuscleRegion(id: 'forarms', left: 0.76, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'), // Right
-            MuscleRegion(id: 'abs', left: 0.38, top: 0.29, width: 0.24, height: 0.16, label: 'Abs'),
-            MuscleRegion(id: 'obliques', left: 0.30, top: 0.32, width: 0.08, height: 0.12, label: 'Obl'), // Left
-            MuscleRegion(id: 'obliques', left: 0.62, top: 0.32, width: 0.08, height: 0.12, label: 'Obl'), // Right
-            MuscleRegion(id: 'thighs', left: 0.28, top: 0.50, width: 0.44, height: 0.25, label: 'Thighs'),
+            MuscleRegion(
+                id: 'neck',
+                left: 0.42,
+                top: 0.09,
+                width: 0.16,
+                height: 0.07,
+                label: 'Neck'),
+            MuscleRegion(
+                id: 'traps',
+                left: 0.32,
+                top: 0.11,
+                width: 0.36,
+                height: 0.06,
+                label: 'Traps'),
+            MuscleRegion(
+                id: 'shoulders',
+                left: 0.18,
+                top: 0.16,
+                width: 0.18,
+                height: 0.12,
+                label: 'Shldr'), // Left
+            MuscleRegion(
+                id: 'shoulders',
+                left: 0.64,
+                top: 0.16,
+                width: 0.18,
+                height: 0.12,
+                label: 'Shldr'), // Right
+            MuscleRegion(
+                id: 'chest',
+                left: 0.30,
+                top: 0.18,
+                width: 0.40,
+                height: 0.11,
+                label: 'Chest'),
+            MuscleRegion(
+                id: 'biceps',
+                left: 0.12,
+                top: 0.28,
+                width: 0.16,
+                height: 0.12,
+                label: 'Bic'), // Left
+            MuscleRegion(
+                id: 'biceps',
+                left: 0.72,
+                top: 0.28,
+                width: 0.16,
+                height: 0.12,
+                label: 'Bic'), // Right
+            MuscleRegion(
+                id: 'forarms',
+                left: 0.06,
+                top: 0.40,
+                width: 0.18,
+                height: 0.18,
+                label: 'Farm'), // Left
+            MuscleRegion(
+                id: 'forarms',
+                left: 0.76,
+                top: 0.40,
+                width: 0.18,
+                height: 0.18,
+                label: 'Farm'), // Right
+            MuscleRegion(
+                id: 'abs',
+                left: 0.38,
+                top: 0.29,
+                width: 0.24,
+                height: 0.16,
+                label: 'Abs'),
+            MuscleRegion(
+                id: 'obliques',
+                left: 0.30,
+                top: 0.32,
+                width: 0.08,
+                height: 0.12,
+                label: 'Obl'), // Left
+            MuscleRegion(
+                id: 'obliques',
+                left: 0.62,
+                top: 0.32,
+                width: 0.08,
+                height: 0.12,
+                label: 'Obl'), // Right
+            MuscleRegion(
+                id: 'thighs',
+                left: 0.28,
+                top: 0.50,
+                width: 0.44,
+                height: 0.25,
+                label: 'Thighs'),
           ]
         : [
-            MuscleRegion(id: 'traps', left: 0.35, top: 0.10, width: 0.30, height: 0.06, label: 'Traps'),
-            MuscleRegion(id: 'shoulders', left: 0.18, top: 0.16, width: 0.18, height: 0.12, label: 'Shldr'),
-            MuscleRegion(id: 'shoulders', left: 0.64, top: 0.16, width: 0.18, height: 0.12, label: 'Shldr'),
-            MuscleRegion(id: 'lats', left: 0.30, top: 0.22, width: 0.40, height: 0.18, label: 'Lats'),
-            MuscleRegion(id: 'lowerback', left: 0.38, top: 0.40, width: 0.24, height: 0.08, label: 'LowBk'),
-            MuscleRegion(id: 'triceps', left: 0.15, top: 0.26, width: 0.14, height: 0.12, label: 'Tri'),
-            MuscleRegion(id: 'triceps', left: 0.71, top: 0.26, width: 0.14, height: 0.12, label: 'Tri'),
-            MuscleRegion(id: 'forarms', left: 0.06, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'),
-            MuscleRegion(id: 'forarms', left: 0.76, top: 0.40, width: 0.18, height: 0.18, label: 'Farm'),
-            MuscleRegion(id: 'hipsandglutes', left: 0.30, top: 0.48, width: 0.40, height: 0.14, label: 'Glutes'),
-            MuscleRegion(id: 'hamstrings', left: 0.30, top: 0.62, width: 0.40, height: 0.16, label: 'Hams'),
-            MuscleRegion(id: 'calves', left: 0.30, top: 0.78, width: 0.40, height: 0.14, label: 'Calves'),
+            MuscleRegion(
+                id: 'traps',
+                left: 0.35,
+                top: 0.10,
+                width: 0.30,
+                height: 0.06,
+                label: 'Traps'),
+            MuscleRegion(
+                id: 'shoulders',
+                left: 0.18,
+                top: 0.16,
+                width: 0.18,
+                height: 0.12,
+                label: 'Shldr'),
+            MuscleRegion(
+                id: 'shoulders',
+                left: 0.64,
+                top: 0.16,
+                width: 0.18,
+                height: 0.12,
+                label: 'Shldr'),
+            MuscleRegion(
+                id: 'lats',
+                left: 0.30,
+                top: 0.22,
+                width: 0.40,
+                height: 0.18,
+                label: 'Lats'),
+            MuscleRegion(
+                id: 'lowerback',
+                left: 0.38,
+                top: 0.40,
+                width: 0.24,
+                height: 0.08,
+                label: 'LowBk'),
+            MuscleRegion(
+                id: 'triceps',
+                left: 0.15,
+                top: 0.26,
+                width: 0.14,
+                height: 0.12,
+                label: 'Tri'),
+            MuscleRegion(
+                id: 'triceps',
+                left: 0.71,
+                top: 0.26,
+                width: 0.14,
+                height: 0.12,
+                label: 'Tri'),
+            MuscleRegion(
+                id: 'forarms',
+                left: 0.06,
+                top: 0.40,
+                width: 0.18,
+                height: 0.18,
+                label: 'Farm'),
+            MuscleRegion(
+                id: 'forarms',
+                left: 0.76,
+                top: 0.40,
+                width: 0.18,
+                height: 0.18,
+                label: 'Farm'),
+            MuscleRegion(
+                id: 'hipsandglutes',
+                left: 0.30,
+                top: 0.48,
+                width: 0.40,
+                height: 0.14,
+                label: 'Glutes'),
+            MuscleRegion(
+                id: 'hamstrings',
+                left: 0.30,
+                top: 0.62,
+                width: 0.40,
+                height: 0.16,
+                label: 'Hams'),
+            MuscleRegion(
+                id: 'calves',
+                left: 0.30,
+                top: 0.78,
+                width: 0.40,
+                height: 0.14,
+                label: 'Calves'),
           ];
 
     return AspectRatio(
@@ -2101,17 +2576,16 @@ class MuscleMap extends StatelessWidget {
               final RenderBox box = context.findRenderObject() as RenderBox;
               final Offset localPosition = details.localPosition;
               final Size size = box.size;
-              
+
               // Normalize coordinates (0.0 to 1.0)
               final double dx = localPosition.dx / size.width;
               final double dy = localPosition.dy / size.height;
 
-
-
               for (final region in regions) {
-                if (dx >= region.left && dx <= region.left + region.width &&
-                    dy >= region.top && dy <= region.top + region.height) {
-
+                if (dx >= region.left &&
+                    dx <= region.left + region.width &&
+                    dy >= region.top &&
+                    dy <= region.top + region.height) {
                   onTapMuscle(region.id);
                   break;
                 }
@@ -2144,7 +2618,7 @@ class MuscleMap extends StatelessWidget {
                         ),
                       ),
                     )),
-                
+
                 // Debug overlay
                 if (showDebugBoxes)
                   CustomPaint(
@@ -2187,7 +2661,7 @@ class HitBoxPainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.blue.withOpacity(0.3)
       ..style = PaintingStyle.fill;
-    
+
     final border = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
@@ -2202,17 +2676,19 @@ class HitBoxPainter extends CustomPainter {
       );
       canvas.drawRect(rect, paint);
       canvas.drawRect(rect, border);
-      
+
       // Draw label
       final textPainter = TextPainter(
         text: TextSpan(
           text: region.label,
-          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
         ),
         textDirection: TextDirection.ltr,
       );
       textPainter.layout();
-      textPainter.paint(canvas, rect.center - Offset(textPainter.width / 2, textPainter.height / 2));
+      textPainter.paint(canvas,
+          rect.center - Offset(textPainter.width / 2, textPainter.height / 2));
     }
   }
 

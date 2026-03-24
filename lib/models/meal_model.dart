@@ -30,29 +30,39 @@ class Meal {
   factory Meal.fromJson(Map<String, dynamic> json) {
     final type = json['meal_type'] as String? ?? 'Snack';
     
+    final ingredients = (json['ingredients'] as List<dynamic>?)
+            ?.map((i) => MealIngredient.fromJson(i as Map<String, dynamic>))
+            .toList() ??
+        (json['ingredients_json'] as List<dynamic>?)
+            ?.map((e) => MealIngredient(
+                  e['name'] as String? ?? '',
+                  e['quantity'] as String? ?? '',
+                  int.tryParse(e['kcal']?.toString() ?? '0') ?? 0,
+                ))
+            .toList() ??
+        <MealIngredient>[];
+
+    // Recalculate calories from ingredient sum if ingredients exist,
+    // so the displayed total always matches the per-ingredient breakdown.
+    final storedCalories = json['calories'] as int? ?? 0;
+    final ingredientCaloriesSum = ingredients.fold<int>(0, (sum, i) => sum + i.calories);
+    final resolvedCalories = (ingredients.isNotEmpty && ingredientCaloriesSum > 0)
+        ? ingredientCaloriesSum
+        : storedCalories;
+
     return Meal(
       id: json['id'].toString(),
       type: type.toUpperCase(),
       icon: _getIconForType(type),
       name: json['name'] as String? ?? 'Unknown Meal',
-      imageUrl: json['image_url'] as String?, 
-      calories: json['calories'] as int? ?? 0,
+      imageUrl: json['image_url'] as String?,
+      calories: resolvedCalories,
       protein: json['protein_g'] as int? ?? 0,
       carbs: json['carbs_g'] as int? ?? 0,
-      fats: (json['fats_g'] ?? json['fat_g']) as int? ?? 0, // Handle both
-      eaten: json['is_eaten'] as bool? ?? false, 
-      planId: json['plan_row_id']?.toString(), // Map from enriched plan JSON
-      ingredients: (json['ingredients'] as List<dynamic>?) // Prefer standard name
-              ?.map((i) => MealIngredient.fromJson(i as Map<String, dynamic>))
-              .toList() ??
-          (json['ingredients_json'] as List<dynamic>?) // Fallback
-              ?.map((e) => MealIngredient(
-                    e['name'] as String? ?? '',
-                    e['quantity'] as String? ?? '', 
-                    int.tryParse(e['kcal']?.toString() ?? '0') ?? 0,
-                  ))
-              .toList() ??
-          <MealIngredient>[],
+      fats: (json['fats_g'] ?? json['fat_g']) as int? ?? 0,
+      eaten: json['is_eaten'] as bool? ?? false,
+      planId: json['plan_row_id']?.toString(),
+      ingredients: ingredients,
     );
   }
 

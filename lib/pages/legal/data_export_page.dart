@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class DataExportPage extends StatelessWidget {
-  const DataExportPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const DataExportPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -14,6 +15,7 @@ class DataExportPage extends StatelessWidget {
         
         if (isDesktop) {
           return LegalPageLayout(
+      onToggleTheme: toggleTheme,
             title: 'Download Your Data',
             isDarkMode: isDarkMode,
             child: _buildContent(context, isDarkMode),
@@ -21,16 +23,19 @@ class DataExportPage extends StatelessWidget {
         }
         
         return Scaffold(
-          backgroundColor: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
           appBar: AppBar(
             title: const Text('Download Your Data'),
             backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
             foregroundColor: isDarkMode ? Colors.white : Colors.black,
             elevation: 0,
           ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: _buildContent(context, isDarkMode),
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: _buildContent(context, isDarkMode),
+            ),
           ),
         );
       },
@@ -73,7 +78,7 @@ class DataExportPage extends StatelessWidget {
                   _showRequestDialog(context);
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D47A1),
+                  backgroundColor: const Color(0xFFFF0000),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -116,12 +121,12 @@ class DataExportPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF1E3A5F) : const Color(0xFFE3F2FD),
+        color: isDarkMode ? const Color(0xFF330000) : const Color(0xFFFFE5E5),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          const Icon(Icons.email, color: Color(0xFF0D47A1)),
+          const Icon(Icons.email, color: Color(0xFFFF0000)),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -129,7 +134,7 @@ class DataExportPage extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: isDarkMode ? Colors.white : const Color(0xFF0D47A1),
+                color: isDarkMode ? Colors.white : const Color(0xFFFF0000),
               ),
             ),
           ),

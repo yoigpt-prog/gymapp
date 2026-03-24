@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../pages/main_scaffold.dart';
 
 /// Reusable red header widget used across all pages for consistency
 class RedHeader extends StatelessWidget {
@@ -54,9 +55,23 @@ class RedHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Logo
-        SvgPicture.asset(
-          'assets/svg/logo/gymguideicon.svg',
-          height: 35,
+        GestureDetector(
+          onTap: () {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                builder: (context) => MainScaffold(
+                  toggleTheme: onToggleTheme ?? () {},
+                  isDarkMode: isDarkMode ?? false,
+                  initialIndex: 0,
+                ),
+              ),
+              (route) => false,
+            );
+          },
+          child: SvgPicture.asset(
+            'assets/svg/logo/gymguideicon.svg',
+            height: 35,
+          ),
         ),
         const SizedBox(width: 20),
         
@@ -140,9 +155,23 @@ class RedHeader extends StatelessWidget {
           ),
         
         // Logo instead of title
-        SvgPicture.asset(
-          'assets/svg/logo/gymguideicon.svg',
-          height: 48,
+        GestureDetector(
+          onTap: () {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                builder: (context) => MainScaffold(
+                  toggleTheme: onToggleTheme ?? () {},
+                  isDarkMode: isDarkMode ?? false,
+                  initialIndex: 0,
+                ),
+              ),
+              (route) => false,
+            );
+          },
+          child: SvgPicture.asset(
+            'assets/svg/logo/gymguideicon.svg',
+            height: 40,
+          ),
         ),
         
         // Spacer
@@ -152,7 +181,7 @@ class RedHeader extends StatelessWidget {
         _buildStoreIcon('assets/svg/logo/appleminiicon.svg', useOriginalColor: false),
         const SizedBox(width: 8),
         _buildStoreIcon('assets/svg/logo/playminiicon.svg', useOriginalColor: true),
-        const SizedBox(width: 12), // Spacing from right edge or next widget
+        const SizedBox(width: 12),
 
         // Right widget (optional)
         if (rightWidget != null)
@@ -166,13 +195,12 @@ class RedHeader extends StatelessWidget {
 
   Widget _buildStoreIcon(String assetPath, {bool useOriginalColor = false}) {
     return Container(
-      width: 48,
-      height: 48,
-      padding: const EdgeInsets.all(10), // Adjusted padding
+      width: 40,
+      height: 40,
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(12), // Adjusted radius
-        // No border as per screenshot
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Center(
         child: SvgPicture.asset(

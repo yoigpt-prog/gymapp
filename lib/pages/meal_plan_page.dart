@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:math';
@@ -55,7 +56,7 @@ class MealPlanPageState extends State<MealPlanPage> {
   
   // Public refresh method
   Future<void> refresh() async {
-    await _loadMeals();
+    await _loadMeals(clearData: true);
   }
 
   @override
@@ -411,8 +412,14 @@ class MealPlanPageState extends State<MealPlanPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: _buildMobilePlannerContent(isDarkMode),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        child: SafeArea(
+          bottom: false,
+          child: _buildMobilePlannerContent(isDarkMode),
+        ),
+      ),
     );
   }
 
@@ -424,7 +431,8 @@ class MealPlanPageState extends State<MealPlanPage> {
     return Column(
       children: [
         // Header
-        AnimatedContainer(
+        if (kIsWeb)
+          AnimatedContainer(
           duration: Duration.zero,
           height: _showHeader ? null : 0,
           child: AnimatedOpacity(
@@ -476,12 +484,16 @@ class MealPlanPageState extends State<MealPlanPage> {
           ),
           child: Column(
             children: [
-              Text(
-                '$_planDurationWeeks-Week Meal Plan',
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 22 : 28,
-                  fontWeight: FontWeight.w700,
-                  color: isDarkMode ? Colors.white : const Color(0xFF333333),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '$_planDurationWeeks-Week Meal Plan',
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 22 : 28,
+                    fontWeight: FontWeight.w700,
+                    color: isDarkMode ? Colors.white : const Color(0xFF333333),
+                  ),
+                  maxLines: 1,
                 ),
               ),
               SizedBox(height: isSmallScreen ? 6 : 10),
@@ -523,9 +535,7 @@ class MealPlanPageState extends State<MealPlanPage> {
                    );
                 },
               ),
-              
-              // Statistics Summary
-              _buildStatsSummary(isDarkMode),
+
             ],
           ),
         ),
@@ -540,7 +550,7 @@ class MealPlanPageState extends State<MealPlanPage> {
     final meals = mealsMap?.values.toList() ?? [];
     
     // Sort meals if needed, e.g., Breakfast, Lunch, Dinner
-    final order = ['BREAKFAST', 'MORNING SNACK', 'LUNCH', 'AFTERNOON SNACK', 'DINNER'];
+    final order = ['BREAKFAST', 'MORNING SNACK', 'LUNCH', 'SNACK', 'AFTERNOON SNACK', 'DINNER'];
     meals.sort((a, b) {
       final indexA = order.indexOf(a.type);
       final indexB = order.indexOf(b.type);
@@ -1070,21 +1080,40 @@ class MealPlanPageState extends State<MealPlanPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                Text(
+                  ingredient.name,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: textColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    ingredient.name,
+                    '.' * 100,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
                     style: TextStyle(
-                      fontSize: 14,
-                      color: textColor,
-                      fontWeight: FontWeight.w500,
+                      color: isDarkMode ? Colors.white30 : Colors.black26,
+                      letterSpacing: 2,
                     ),
                   ),
                 ),
-                Text(
-                  '${ingredient.amount} • ${ingredient.calories} kcal',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: subTextColor,
+                const SizedBox(width: 8),
+                 RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    children: [
+                      TextSpan(
+                        text: '${ingredient.amount} • ',
+                        style: const TextStyle(color: Colors.blue),
+                      ),
+                      TextSpan(
+                        text: '${ingredient.calories} kcal',
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1254,38 +1283,44 @@ class MealPlanPageState extends State<MealPlanPage> {
           ),
         ),
         padding: const EdgeInsets.all(4),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                'Day $dayNumber',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                  color: isCompleted 
-                    ? Colors.white 
-                    : (isDarkMode ? Colors.white : const Color(0xFF333333)),
-                  letterSpacing: -0.5,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final double circleWidth = constraints.maxWidth;
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Day $dayNumber',
+                    style: TextStyle(
+                      fontSize: circleWidth * 0.30, // 30% responsive scaling
+                      fontWeight: FontWeight.w900,
+                      color: isCompleted 
+                        ? Colors.white 
+                        : (isDarkMode ? Colors.white : const Color(0xFF333333)),
+                      letterSpacing: -0.5,
+                      height: 1.0,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                '$progressPercent%',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: isCompleted 
-                    ? Colors.white 
-                    : const Color(0xFF4CAF50), // Green for percentage
+                SizedBox(height: circleWidth * 0.05),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '$progressPercent%',
+                    style: TextStyle(
+                      fontSize: circleWidth * 0.18,
+                      fontWeight: FontWeight.bold,
+                      color: isCompleted 
+                        ? Colors.white 
+                        : const Color(0xFF4CAF50), // Green for percentage
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show pi, cos, sin;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,8 @@ import '../services/quiz_service.dart';
 import '../services/plan_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/auth/auth_modal.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
+import '../services/revenue_cat_service.dart';
 
 class CustomPlanQuizPage extends StatefulWidget {
   final String quizType; // 'workout' or 'meal'
@@ -39,7 +42,6 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   String targetWeightUnit = 'kg';
   String planDuration = '';
   String experience = '';
-  List<String> bodyAreas = ['Full Body'];
   String workoutLocation = '';
   List<String> equipment = ['All'];
   String trainingDays = '';
@@ -63,7 +65,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   String progressStatus = 'Initializing...';
   int currentStep = 1;
   String selectedPlan = 'weekly';
-  bool isTrialEnabled = true;
+  // Trial toggle removed
+
+  // Intro progress animation state
+  bool _isIntroProgress = false;
+  bool _introComplete = false;
+  Timer? _introTimer;
+  bool _isGenerating = false;
 
   // Animations
   late AnimationController _bounceController;
@@ -114,6 +122,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   @override
   void dispose() {
     _bounceController.dispose();
+    _introTimer?.cancel();
     for (final c in _pickerControllers.values) c.dispose();
     _pickerControllers.clear();
     super.dispose();
@@ -136,6 +145,58 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     });
   }
 
+  /// Presents the RevenueCat paywall on iOS/Android; on Web skips it.
+  /// Returns true when the user has (or already had) an active entitlement.
+  Future<bool> _presentRevenueCatPaywall() async {
+    if (kIsWeb) {
+      // Web: SDK not supported — treat as already subscribed so flow continues
+      return true;
+    }
+    try {
+      final result = await RevenueCatService().showPaywall();
+      debugPrint('[RevenueCat] Paywall result: $result');
+      
+      if (result == null) {
+         if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Store unavailable — bypassing paywall for testing'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+         }
+         return true; // Bypass
+      }
+
+      final success = result == PaywallResult.purchased || result == PaywallResult.restored;
+      if (!success && result != PaywallResult.cancelled) {
+        // Show what result we got so we can debug
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Paywall closed: ${result.name}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+      return success;
+    } catch (e) {
+      debugPrint('[RevenueCat] presentPaywall error: $e');
+      // Show the error so the developer/user can see what went wrong
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment error: ${e.toString()}'),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<void> startPlanGeneration() async {
     // 0. Auth check
     final supabaseService = SupabaseService();
@@ -146,15 +207,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       if (user == null) return;
     }
 
-    nextScreen(28); // Progress Screen
+    if (_isGenerating) return;
+    setState(() => _isGenerating = true);
 
     final prefs = await SharedPreferences.getInstance();
 
     if (!mounted) return;
-    setState(() {
-      progressStatus = 'Analyzing your profile...';
-      progressPercent = 20;
-    });
+    // No setState for progress here — we stay on the paywall
 
     try {
       final quizService = QuizService();
@@ -235,6 +294,29 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       await prefs.setString('weight_unit', weightUnit);
       await prefs.setString('height_unit', heightUnit);
 
+      // ── Sync quiz data → profile page ──────────────────────────────────
+      // The profile page reads these exact keys from SharedPreferences.
+      if (height.isNotEmpty) {
+        // height already includes the unit (e.g. "175 cm"), don't append again
+        await prefs.setString('profile_height', height);
+      }
+      if (weight.isNotEmpty) {
+        // weight already includes the unit (e.g. "75 kg"), don't append again
+        await prefs.setString('profile_weight', weight);
+      }
+      if (age.isNotEmpty) {
+        await prefs.setString('profile_age', age);
+      }
+      if (gender.isNotEmpty) {
+        // Capitalize first letter so it matches profile page display (e.g. "Male")
+        final genderDisplay = gender[0].toUpperCase() + gender.substring(1).toLowerCase();
+        await prefs.setString('profile_gender', genderDisplay);
+      }
+      if (mainGoal.isNotEmpty) {
+        await prefs.setString('profile_goal', mainGoal);
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       final userId = supabaseService.client.auth.currentUser?.id;
       if (userId != null) {
         await prefs.remove('meal_plan_cache_$userId');
@@ -253,56 +335,60 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       }
     } catch (e) {
       print('ERROR in plan generation: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      debugPrint('[QUIZ ERROR] Plan generation failed: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    
-    return Scaffold(
-      backgroundColor: isDarkMode ? const Color(0xFF121212) : Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Content Area
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 400),
-                transitionBuilder: (Widget child, Animation<double> animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: child,
-                  );
-                },
-                child: KeyedSubtree(
-                  key: ValueKey<int>(currentScreen),
-                  child: Container(
-                    color: isDarkMode ? const Color(0xFF121212) : Colors.white,
-                    padding: const EdgeInsets.all(20),
-                    child: _buildCurrentScreen(isDarkMode),
+    // Block back navigation on intro progress screen (27) and paywall (28)
+    final bool isLocked = (currentScreen == 26 && _isIntroProgress);
+
+    return PopScope(
+      canPop: !isLocked,
+      child: Scaffold(
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          child: SafeArea(
+            child: Column(
+            children: [
+              // Content Area
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  transitionBuilder: (Widget child, Animation<double> animation) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: child,
+                    );
+                  },
+                  child: KeyedSubtree(
+                    key: ValueKey<int>(currentScreen),
+                    child: Container(
+                      color: isDarkMode ? const Color(0xFF121212) : const Color(0xFFFFFFFF),
+                      padding: const EdgeInsets.all(20),
+                      child: _buildCurrentScreen(isDarkMode),
+                    ),
                   ),
                 ),
               ),
-            ),
-            
-          ],
+
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: currentScreen == 0
-          ? GymBottomNavBar(
-              currentIndex: widget.quizType == 'workout' ? 1 : (widget.quizType == 'meal' ? 2 : 0),
-              onTap: (index) {
-                Navigator.pop(context, {'navIndex': index});
-              },
-              isDarkMode: isDarkMode,
-            )
-          : null,
+            ? GymBottomNavBar(
+                currentIndex: widget.quizType == 'workout' ? 1 : (widget.quizType == 'meal' ? 2 : 0),
+                onTap: (index) {
+                  Navigator.pop(context, {'navIndex': index});
+                },
+                isDarkMode: isDarkMode,
+              )
+            : null,
+      ),
     );
   }
 
@@ -321,24 +407,22 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       case 8: return _buildTargetWeightScreen(isDarkMode);
       case 9: return _buildPlanDurationScreen(isDarkMode);
       case 10: return _buildExperienceScreen(isDarkMode);
-      case 11: return _buildBodyAreasScreen(isDarkMode);
-      case 12: return _buildWorkoutLocationScreen(isDarkMode);
-      case 13: return _buildEquipmentScreen(isDarkMode);
-      case 14: return _buildTrainingDaysScreen(isDarkMode);
-      case 15: return _buildSessionDurationScreen(isDarkMode);
-      case 16: return _buildWorkoutTimeScreen(isDarkMode);
-      case 17: return _buildInjuriesScreen(isDarkMode);
-      case 18: return _buildHealthConditionsScreen(isDarkMode);
-      case 19: return _buildDietTypeScreen(isDarkMode);
-      case 20: return _buildAllergiesScreen(isDarkMode);
-      case 21: return _buildMacroBalanceScreen(isDarkMode);
-      case 22: return _buildSleepHoursScreen(isDarkMode);
-      case 23: return _buildSleepQualityScreen(isDarkMode);
-      case 24: return _buildStressLevelScreen(isDarkMode);
-      case 25: return _buildWaterIntakeScreen(isDarkMode);
-      case 26: return _buildSummaryScreen(isDarkMode);
-      case 27: return _buildProgressScreen(isDarkMode);
-      case 28: return _buildUpgradeScreen(isDarkMode);
+      case 11: return _buildWorkoutLocationScreen(isDarkMode);
+      case 12: return _buildEquipmentScreen(isDarkMode);
+      case 13: return _buildTrainingDaysScreen(isDarkMode);
+      case 14: return _buildSessionDurationScreen(isDarkMode);
+      case 15: return _buildWorkoutTimeScreen(isDarkMode);
+      case 16: return _buildInjuriesScreen(isDarkMode);
+      case 17: return _buildHealthConditionsScreen(isDarkMode);
+      case 18: return _buildDietTypeScreen(isDarkMode);
+      case 19: return _buildAllergiesScreen(isDarkMode);
+      case 20: return _buildMacroBalanceScreen(isDarkMode);
+      case 21: return _buildSleepHoursScreen(isDarkMode);
+      case 22: return _buildSleepQualityScreen(isDarkMode);
+      case 23: return _buildStressLevelScreen(isDarkMode);
+      case 24: return _buildWaterIntakeScreen(isDarkMode);
+      case 25: return _buildSummaryScreen(isDarkMode);
+      case 26: return _buildProgressScreen(isDarkMode);
       default: return _buildWelcomeScreen();
     }
   }
@@ -483,7 +567,6 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                               nextScreen(1);
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
                               foregroundColor: const Color(0xFFFF0000),
                               padding: EdgeInsets.symmetric(
                                 vertical: isVerySmallScreen ? 14 : 18,
@@ -541,7 +624,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   }
 
   Widget _buildProgressBar(int questionNumber) {
-    double progress = (questionNumber / 26).clamp(0.0, 1.0);
+    double progress = (questionNumber / 25).clamp(0.0, 1.0);
     return Column(
       children: [
 
@@ -635,22 +718,24 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildContinueButton(VoidCallback onPressed) {
+  Widget _buildContinueButton(VoidCallback onPressed, {bool enabled = true}) {
     return _buildAnimatedWidget(
       delay: 600,
       child: Container(
         width: double.infinity,
         margin: const EdgeInsets.only(top: 15),
         child: ElevatedButton(
-          onPressed: onPressed,
+          onPressed: enabled ? onPressed : null,
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFF0000),
+            backgroundColor: enabled ? const Color(0xFFFF0000) : Colors.grey.shade400,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: Colors.grey.shade400,
+            disabledForegroundColor: Colors.white70,
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(50),
             ),
-            elevation: 4,
+            elevation: enabled ? 4 : 0,
             shadowColor: const Color(0xFFFF0000).withOpacity(0.3),
           ),
           child: Row(
@@ -796,16 +881,20 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required ValueChanged<String> onSelect,
     required bool isDarkMode,
   }) {
+    final bool hasSelection = selectedValue.isNotEmpty;
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
-      onContinue: () => nextScreen(questionNumber + 1),
+      onContinue: hasSelection ? () => nextScreen(questionNumber + 1) : () {},
       isDarkMode: isDarkMode,
       content: ListView.builder(
         itemCount: options.length + 1, // +1 for continue button
         itemBuilder: (context, index) {
           if (index == options.length) {
-            return _buildContinueButton(() => nextScreen(questionNumber + 1));
+            return _buildContinueButton(
+              () => nextScreen(questionNumber + 1),
+              enabled: hasSelection,
+            );
           }
           final option = options[index];
           return _buildOption(
@@ -1308,20 +1397,10 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildBodyAreasScreen(bool isDarkMode) {
-    return _buildMultiSelectionScreen(
-      questionNumber: 11,
-      title: "Which areas do you most want to improve?",
-      options: ['Chest', 'Arms', 'Abs', 'Butt', 'Back', 'Legs', 'Shoulders', 'Full Body'],
-      selectedValues: bodyAreas,
-      onToggle: (val) => toggleOption(bodyAreas, val),
-      isDarkMode: isDarkMode,
-    );
-  }
 
   Widget _buildWorkoutLocationScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 12,
+      questionNumber: 11,
       title: "Where will you work out most often?",
       options: ['Home', 'Gym'],
       selectedValue: workoutLocation,
@@ -1332,9 +1411,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildEquipmentScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 13,
+      questionNumber: 12,
       title: "Which equipment do you have access to?",
-      options: ['Bodyweight', 'Dumbbells', 'Resistance Bands', 'Barbell', 'Kettlebells', 'Machines', 'Bench', 'Cable', 'Pull-Up Bar', 'Medicine Ball', 'All'],
+      options: ['Bodyweight', 'Dumbbells', 'Resistance Bands', 'Barbell', 'Kettlebells', 'Machines', 'All'],
       selectedValues: equipment,
       onToggle: (val) => toggleOption(equipment, val),
       isDarkMode: isDarkMode,
@@ -1344,7 +1423,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildTrainingDaysScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 14,
+      questionNumber: 13,
       title: "How many days per week can you train?",
       options: ['3 days', '4 days', '5 days', '6 days', '7 days'],
       selectedValue: trainingDays,
@@ -1355,7 +1434,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSessionDurationScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 15,
+      questionNumber: 14,
       title: "How much time do you have per session?",
       options: ['20 min', '30 min', '45 min', '60 min', '90 min'],
       selectedValue: sessionDuration,
@@ -1366,7 +1445,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildWorkoutTimeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 16,
+      questionNumber: 15,
       title: "What time of day do you usually work out?",
       options: ['Morning', 'Afternoon', 'Evening', 'Flexible'],
       selectedValue: workoutTime,
@@ -1377,7 +1456,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildInjuriesScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 17,
+      questionNumber: 16,
       title: "Do you have any current injuries or pain?",
       options: ['Back', 'Knees', 'Shoulders', 'Hips', 'Neck', 'Elbows', 'Wrists', 'Ankles', 'None'],
       selectedValues: injuries,
@@ -1395,7 +1474,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildHealthConditionsScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 18,
+      questionNumber: 17,
       title: "Do you have any health conditions we should consider?",
       options: ['Hypertension', 'Diabetes', 'Heart Condition', 'Joint Issues', 'None'],
       selectedValues: healthConditions,
@@ -1413,7 +1492,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildDietTypeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 19,
+      questionNumber: 18,
       title: "What best describes your diet type?",
       options: ['No Preference', 'Vegetarian', 'Vegan', 'Pescatarian', 'Mediterranean', 'Keto', 'Low-Carb', 'Gluten-Free'],
       selectedValue: dietType,
@@ -1425,7 +1504,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildAllergiesScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 20,
+      questionNumber: 19,
       title: "Do you have any allergies?",
       options: ['None', 'Nuts', 'Dairy', 'Gluten', 'Eggs', 'Soy', 'Shellfish'],
       selectedValues: allergies,
@@ -1443,7 +1522,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildMacroBalanceScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 21,
+      questionNumber: 20,
       title: "What macro balance fits you best?",
       options: ['Balanced', 'Higher Protein', 'Lower Carb', 'Higher Carb'],
       selectedValue: macroBalance,
@@ -1454,7 +1533,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSleepHoursScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 22,
+      questionNumber: 21,
       title: "How many hours do you sleep?",
       options: ['Less than 5', '5-6 hours', '7-8 hours', 'More than 8'],
       selectedValue: sleepHours,
@@ -1465,7 +1544,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSleepQualityScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 23,
+      questionNumber: 22,
       title: "How would you rate your sleep quality?",
       options: ['Poor', 'Fair', 'Good', 'Excellent'],
       selectedValue: sleepQuality,
@@ -1476,7 +1555,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildStressLevelScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 24,
+      questionNumber: 23,
       title: "What's your current stress level?",
       options: ['Low', 'Moderate', 'High'],
       selectedValue: stressLevel,
@@ -1488,7 +1567,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildWaterIntakeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 25,
+      questionNumber: 24,
       title: "How much water do you usually drink per day?",
       options: ['Less than 1 liter (about 4 cups)', '1–2 liters (4–8 cups)', '2–3 liters (8–12 cups)', 'More than 3 liters (12+ cups)'],
       selectedValue: waterIntake,
@@ -1504,25 +1583,27 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   /// Parse weight/height from quiz state variables and compute BMI.
   double? _computeBmi() {
     try {
-      // Parse weight in kg
+      // ── Parse weight in kg (read unit from the string itself) ──
       double? kg;
       final wMatch = RegExp(r'([\d.]+)').firstMatch(weight);
       if (wMatch == null) return null;
       final wVal = double.parse(wMatch.group(1)!);
-      kg = weightUnit == 'lbs' ? wVal * 0.453592 : wVal;
+      // Determine unit from the embedded string, fall back to state var
+      final isLbs = weight.toLowerCase().contains('lb');
+      kg = isLbs ? wVal * 0.453592 : wVal;
 
-      // Parse height in metres
+      // ── Parse height in metres (read unit from the string itself) ──
       double? m;
-      if (heightUnit == 'cm') {
+      // Try ft/in format first (e.g. "5ft 10in")
+      final ftMatch = RegExp(r'(\d+)ft\s*(\d+)in').firstMatch(height);
+      if (ftMatch != null) {
+        final totalIn = int.parse(ftMatch.group(1)!) * 12 + int.parse(ftMatch.group(2)!);
+        m = totalIn * 0.0254;
+      } else {
+        // Assume cm (e.g. "175 cm")
         final hMatch = RegExp(r'([\d.]+)').firstMatch(height);
         if (hMatch == null) return null;
         m = double.parse(hMatch.group(1)!) / 100;
-      } else {
-        // e.g. "5ft 10in"
-        final ftMatch = RegExp(r'(\d+)ft\s*(\d+)in').firstMatch(height);
-        if (ftMatch == null) return null;
-        final totalIn = int.parse(ftMatch.group(1)!) * 12 + int.parse(ftMatch.group(2)!);
-        m = totalIn * 0.0254;
       }
       if (m == null || m <= 0) return null;
       return kg / (m * m);
@@ -1531,7 +1612,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     }
   }
 
-  Widget _buildBmiWidget(bool isDarkMode) {
+  Widget _buildBmiWidget(bool isDarkMode, {bool compact = false, bool veryCompact = false}) {
     final bmi = _computeBmi();
     if (bmi == null) return const SizedBox.shrink();
 
@@ -1539,6 +1620,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     const double minBmi = 15, maxBmi = 40;
     final double clampedBmi = bmi.clamp(minBmi, maxBmi);
     final double fraction = (clampedBmi - minBmi) / (maxBmi - minBmi);
+
+    // Responsive sizes
+    final double gaugeHeight = veryCompact ? 120 : (compact ? 145 : 190);
+    final double containerPadding = veryCompact ? 12 : (compact ? 16 : 20);
+    final double descFontSize = veryCompact ? 12 : 13;
+    final double afterGaugeSpacing = veryCompact ? 6 : (compact ? 10 : 16);
+    final double descVertPadding = veryCompact ? 10 : 14;
 
     // Category
     String category;
@@ -1570,8 +1658,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildAnimatedWidget(
       delay: 500,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 16),
-        padding: const EdgeInsets.all(20),
+        margin: EdgeInsets.symmetric(vertical: veryCompact ? 6 : 10),
+        padding: EdgeInsets.all(containerPadding),
         decoration: BoxDecoration(
           color: isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFF8F8F8),
           borderRadius: BorderRadius.circular(20),
@@ -1580,119 +1668,50 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           ),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
               'Body-Mass-Index (BMI)',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: compact ? 14 : 16,
                 fontWeight: FontWeight.bold,
                 color: isDarkMode ? Colors.white : Colors.black,
               ),
             ),
-            const SizedBox(height: 20),
-            // Gradient bar + pointer
-            LayoutBuilder(
-              builder: (ctx, bc) {
-                final barWidth = bc.maxWidth;
-                final pointerX = fraction * barWidth;
-                return Column(
-                  children: [
-                    // Pointer label
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Positioned(
-                          left: (pointerX - 50).clamp(0, barWidth - 100),
-                          top: -2,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: isDarkMode ? Colors.white : Colors.black,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'You - ${bmi.toStringAsFixed(1)}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: isDarkMode ? Colors.black : Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    // Gradient bar with pointer dot
-                    Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          height: 14,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(7),
-                            gradient: const LinearGradient(
-                              colors: [
-                                Color(0xFF5BC8F5), // underweight blue
-                                Color(0xFF27AE60), // normal green
-                                Color(0xFFF1C40F), // overweight yellow
-                                Color(0xFFE74C3C), // obese red
-                              ],
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          left: (pointerX - 10).clamp(0, barWidth - 20),
-                          child: Container(
-                            width: 22,
-                            height: 22,
-                            decoration: BoxDecoration(
-                              color: isDarkMode ? Colors.white : Colors.white,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.black26, width: 1.5),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.2),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    // Scale labels
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text('15', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text('18.5', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text('25', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text('30', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                        Text('40', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text('Underweight', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('Normal', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('Overweight', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('Obese', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                      ],
-                    ),
-                  ],
-                );
-              },
+            SizedBox(height: veryCompact ? 4 : 8),
+            // ── Semicircle gauge ──────────────────────────────────────
+            AspectRatio(
+              aspectRatio: 2.0,
+              child: CustomPaint(
+                painter: BmiGaugePainter(
+                  fraction: fraction,
+                  bmi: bmi,
+                  catColor: catColor,
+                  isDarkMode: isDarkMode,
+                ),
+              ),
             ),
-            const SizedBox(height: 16),
-            // Category card
+            // Category label pill
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              decoration: BoxDecoration(
+                color: catColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                category,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            SizedBox(height: afterGaugeSpacing),
+            // ── Category description card ─────────────────────────────
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: descVertPadding),
               decoration: BoxDecoration(
                 color: catColor.withOpacity(isDarkMode ? 0.2 : 0.12),
                 borderRadius: BorderRadius.circular(14),
@@ -1701,8 +1720,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(catIcon, style: const TextStyle(fontSize: 22)),
-                  const SizedBox(width: 12),
+                  Text(catIcon, style: TextStyle(fontSize: veryCompact ? 18 : 22)),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1710,16 +1729,16 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         Text(
                           category,
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: compact ? 13 : 15,
                             fontWeight: FontWeight.bold,
                             color: catColor,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: veryCompact ? 2 : 4),
                         Text(
                           description,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: descFontSize,
                             color: isDarkMode ? Colors.white70 : const Color(0xFF555555),
                             height: 1.4,
                           ),
@@ -1740,10 +1759,15 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return LayoutBuilder(
       builder: (context, constraints) {
         final isSmallScreen = constraints.maxHeight < 700;
-        final double iconSize = isSmallScreen ? 40 : 60;
-        final double titleSize = isSmallScreen ? 20 : 24;
-        final double spacing = isSmallScreen ? 20 : 40;
-        final double smallSpacing = isSmallScreen ? 10 : 15;
+        final isVerySmallScreen = constraints.maxHeight < 600;
+        final double iconSize = isVerySmallScreen ? 32 : (isSmallScreen ? 44 : 60);
+        final double iconPadding = isVerySmallScreen ? 12 : (isSmallScreen ? 16 : 20);
+        final double titleSize = isVerySmallScreen ? 18 : (isSmallScreen ? 20 : 24);
+        final double subtitleSize = isVerySmallScreen ? 13 : (isSmallScreen ? 14 : 16);
+        final double topSpacing = isVerySmallScreen ? 8 : (isSmallScreen ? 12 : 32);
+        final double afterIconSpacing = isVerySmallScreen ? 10 : (isSmallScreen ? 16 : 24);
+        final double smallSpacing = isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 12);
+        final double afterSubtitleSpacing = isVerySmallScreen ? 10 : (isSmallScreen ? 14 : 20);
 
         return SingleChildScrollView(
           child: ConstrainedBox(
@@ -1752,16 +1776,19 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
             ),
             child: Center(
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: isVerySmallScreen ? 8 : 16,
+                ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(height: spacing),
+                    SizedBox(height: topSpacing),
                     _buildAnimatedWidget(
                       delay: 0,
                       child: Container(
-                        padding: const EdgeInsets.all(20),
+                        padding: EdgeInsets.all(iconPadding),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFF0000).withOpacity(0.1),
                           shape: BoxShape.circle,
@@ -1769,7 +1796,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         child: Icon(Icons.check_circle, color: const Color(0xFFFF0000), size: iconSize),
                       ),
                     ),
-                    const SizedBox(height: 30),
+                    SizedBox(height: afterIconSpacing),
                     _buildAnimatedWidget(
                       delay: 200,
                       child: Text(
@@ -1788,18 +1815,50 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         'We have gathered all the information needed to create your personalized plan.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: subtitleSize,
                           color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
-                          height: 1.5,
+                          height: 1.4,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    SizedBox(height: afterSubtitleSpacing),
                     // ── BMI Widget ────────────────────────────────────────
-                    _buildBmiWidget(isDarkMode),
-                    const SizedBox(height: 8),
-                    _buildContinueButton(startPlanGeneration),
-                    const SizedBox(height: 20),
+                    _buildBmiWidget(isDarkMode, compact: isSmallScreen, veryCompact: isVerySmallScreen),
+                    SizedBox(height: isVerySmallScreen ? 6 : 8),
+                    _buildContinueButton(() {
+                      setState(() {
+                        _isIntroProgress = true;
+                        _introComplete = false;
+                        progressPercent = 0;
+                      });
+                      nextScreen(26);
+                      // Start 7-second fake progress timer
+                      _introTimer?.cancel();
+                      const totalMs = 7000;
+                      const tickMs = 70;
+                      int elapsed = 0;
+                      _introTimer = Timer.periodic(
+                        const Duration(milliseconds: tickMs),
+                        (t) {
+                          elapsed += tickMs;
+                          final pct = (elapsed / totalMs * 100).clamp(0.0, 100.0);
+                          if (!mounted) { t.cancel(); return; }
+                          setState(() {
+                            progressPercent = pct;
+                            if (pct < 25) progressStatus = 'Analyzing your profile...';
+                            else if (pct < 50) progressStatus = 'Crafting your workout plan...';
+                            else if (pct < 75) progressStatus = 'Designing your meal plan...';
+                            else progressStatus = 'Finalizing your program...';
+                            currentStep = pct < 25 ? 1 : pct < 50 ? 2 : pct < 75 ? 3 : 4;
+                          });
+                          if (elapsed >= totalMs) {
+                            t.cancel();
+                            if (mounted) setState(() => _introComplete = true);
+                          }
+                        },
+                      );
+                    }),
+                    SizedBox(height: isVerySmallScreen ? 10 : 16),
                   ],
                 ),
               ),
@@ -1839,6 +1898,130 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   }
 
   Widget _buildProgressScreen(bool isDarkMode) {
+    // ── INTRO mode (fake 7-second animation before paywall) ──────────────────
+    if (_isIntroProgress) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final isSmallScreen = constraints.maxHeight < 700;
+          final double progressSize = isSmallScreen ? 100 : 150;
+          final double percentageSize = isSmallScreen ? 24 : 32;
+          final double spacing = isSmallScreen ? 20 : 40;
+          final double smallSpacing = isSmallScreen ? 15 : 30;
+
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(height: spacing),
+                      SizedBox(
+                        height: progressSize,
+                        width: progressSize,
+                        child: Stack(
+                          children: [
+                            Center(
+                              child: SizedBox(
+                                width: progressSize,
+                                height: progressSize,
+                                child: CircularProgressIndicator(
+                                  value: progressPercent / 100,
+                                  strokeWidth: isSmallScreen ? 8 : 12,
+                                  backgroundColor: const Color(0xFFE0E0E0),
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+                                ),
+                              ),
+                            ),
+                            Center(
+                              child: Text(
+                                '${progressPercent.toInt()}%',
+                                style: TextStyle(
+                                  fontSize: percentageSize,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: smallSpacing),
+                      Text(
+                        progressStatus,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                        ),
+                      ),
+                      SizedBox(height: spacing),
+                      _buildProgressStep('Analyzing Profile', currentStep >= 1, isDarkMode),
+                      _buildProgressStep('Crafting Workouts', currentStep >= 2, isDarkMode),
+                      _buildProgressStep('Designing Meal Plan', currentStep >= 3, isDarkMode),
+                      _buildProgressStep('Program Ready', currentStep >= 4, isDarkMode),
+                      const SizedBox(height: 32),
+                      // Button appears only when animation completes
+                      AnimatedOpacity(
+                        opacity: _introComplete ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 500),
+                        child: _introComplete
+                            ? SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _isGenerating ? null : () async {
+                                    final purchased = await _presentRevenueCatPaywall();
+                                    if (!mounted) return;
+                                    if (purchased) {
+                                      await startPlanGeneration();
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFF0000),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 18),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    elevation: 5,
+                                    shadowColor: const Color(0xFFFF0000).withOpacity(0.4),
+                                  ),
+                                  child: _isGenerating
+                                      ? const SizedBox(
+                                          height: 22,
+                                          width: 22,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 2.5,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Start My Program 🚀',
+                                          style: TextStyle(
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                ),
+                              )
+                            : const SizedBox(height: 56),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    // ── REAL generation mode ─────────────────────────────────────────────────
     return LayoutBuilder(
       builder: (context, constraints) {
         final isSmallScreen = constraints.maxHeight < 700;
@@ -1983,426 +2166,190 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       ),
     );
   }
+}
 
-  Widget _buildUpgradeScreen(bool isDarkMode) {
-    // Calculate weekly price based on trial toggle
-    String weeklyPrice = isTrialEnabled ? '\$2.99' : '\$1.99';
-    String weeklyDescription = isTrialEnabled ? '/ week - 3-Day Free Trial Included' : '/ week';
+// ── BMI Gauge Painter ─────────────────────────────────────────────────────────
+/// Draws a semicircle BMI gauge with coloured arc segments and a needle pointer.
+class BmiGaugePainter extends CustomPainter {
+  final double fraction;   // 0..1 position on the gauge
+  final double bmi;        // raw BMI value for the centre label
+  final Color catColor;    // colour of the active category
+  final bool isDarkMode;
+
+  BmiGaugePainter({
+    required this.fraction,
+    required this.bmi,
+    required this.catColor,
+    required this.isDarkMode,
+  });
+
+  // BMI zone colours (left → right on arc)
+  static const List<Color> _zoneColors = [
+    Color(0xFF4FC3F7), // Underweight  (15–18.5)
+    Color(0xFF29B6F6), // Underweight  (transition)
+    Color(0xFF66BB6A), // Normal       (18.5–25)
+    Color(0xFF43A047), // Normal
+    Color(0xFFFFCA28), // Overweight   (25–30)
+    Color(0xFFFFA726), // Overweight
+    Color(0xFFEF5350), // Obese        (30–40)
+    Color(0xFFE53935), // Obese
+  ];
+
+  // Proportional stops on the 180° arc for each zone boundary
+  // 18.5 → (18.5-15)/25 = 14%,  25 → 40%,  30 → 60%
+  static const List<double> _stops = [
+    0.00, 0.14, // underweight
+    0.14, 0.40, // normal
+    0.40, 0.60, // overweight
+    0.60, 1.00, // obese
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height - 10; // bottom baseline with small padding
+    final radius = (size.width * 0.42).clamp(60.0, 160.0);
+    const strokeW = 22.0;
+    const gapBetweenSegments = 0.025; // radians gap between arc segments
+
+    // The semicircle spans from π (left) to 0 (right) in standard math coords,
+    // but drawArc uses clockwise angles starting from the 3-o'clock position.
+    // We paint from 180° (left) sweeping 180° → ends at 0° (right).
+    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
+    final Paint arcPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeW
+      ..strokeCap = StrokeCap.butt;
+
+    // Draw background track
+    arcPaint.color = (isDarkMode ? Colors.white : Colors.black).withOpacity(0.08);
+    canvas.drawArc(rect, pi, pi, false, arcPaint);
+
+    // Reset color to fully opaque so the segment gradients don't inherit 8% opacity
+    arcPaint.color = Colors.white;
+
+    // Draw coloured zone segments (4 zones, each with two stop entries)
+    final zoneData = [
+      (_stops[0], _stops[1], _zoneColors[0], _zoneColors[1]), // underweight
+      (_stops[2], _stops[3], _zoneColors[2], _zoneColors[3]), // normal
+      (_stops[4], _stops[5], _zoneColors[4], _zoneColors[5]), // overweight
+      (_stops[6], _stops[7], _zoneColors[6], _zoneColors[7]), // obese
+    ];
+
+    for (final zone in zoneData) {
+      final startAngle = pi + zone.$1 * pi + gapBetweenSegments / 2;
+      final sweepAngle = (zone.$2 - zone.$1) * pi - gapBetweenSegments;
+      // Use a simple gradient approximation via shader
+      final startPt = Offset(
+        cx + radius * cos(startAngle),
+        cy + radius * sin(startAngle),
+      );
+      final endPt = Offset(
+        cx + radius * cos(startAngle + sweepAngle),
+        cy + radius * sin(startAngle + sweepAngle),
+      );
+      arcPaint.shader = LinearGradient(
+        colors: [zone.$3, zone.$4],
+      ).createShader(Rect.fromPoints(startPt, endPt));
+      canvas.drawArc(
+        rect.inflate(0),
+        startAngle,
+        sweepAngle,
+        false,
+        arcPaint,
+      );
+    }
+    arcPaint.shader = null;
+
+    // ── Needle ──────────────────────────────────────────────────────────────
+    // angle: π = left end (BMI 15), 2π = right end (BMI 40)
+    final needleAngle = pi + fraction * pi;
+    final needleLen = radius - strokeW / 2 + 2;
+    final needleInnerRadius = radius * 0.45; // Leave center empty for the BMI text
     
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenHeight = constraints.maxHeight;
-        final isSmallScreen = screenHeight < 700;
-        final isVerySmallScreen = screenHeight < 600;
+    final needleStartX = cx + needleInnerRadius * cos(needleAngle);
+    final needleStartY = cy + needleInnerRadius * sin(needleAngle);
+    
+    final needleX = cx + needleLen * cos(needleAngle);
+    final needleY = cy + needleLen * sin(needleAngle);
 
-        // Dynamic sizing
-        final double iconSize = isVerySmallScreen ? 40 : (isSmallScreen ? 50 : 60);
-        final double iconPadding = isVerySmallScreen ? 10 : (isSmallScreen ? 15 : 20);
-        final double titleSize = isVerySmallScreen ? 18 : (isSmallScreen ? 20 : 24);
-        final double featureSpacing = isVerySmallScreen ? 8 : 12;
-        final double sectionSpacing = isVerySmallScreen ? 15 : (isSmallScreen ? 20 : 30);
-        final double planSpacing = isVerySmallScreen ? 10 : 15;
-        final double buttonVerticalPadding = isVerySmallScreen ? 14 : 18;
+    final needlePaint = Paint()
+      ..color = isDarkMode ? Colors.white : Colors.black87
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(Offset(needleStartX, needleStartY), Offset(needleX, needleY), needlePaint);
 
-        return Column(
-          children: [
-            SizedBox(height: isVerySmallScreen ? 10 : 20),
-            // Image/Icon
-            Container(
-              padding: EdgeInsets.all(iconPadding),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF8E1),
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '🏋️',
-                style: TextStyle(fontSize: iconSize),
-              ),
-            ),
-            SizedBox(height: isVerySmallScreen ? 10 : 20),
-            Text(
-              'Unlock Premium Access',
-              style: TextStyle(
-                fontSize: titleSize,
-                fontWeight: FontWeight.bold,
-                color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-              ),
-            ),
-            SizedBox(height: isVerySmallScreen ? 10 : 20),
-            
-            // Features
-            _buildFeatureItem('📋 Personalized Workout Plans', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
-            _buildFeatureItem('🍽️ Custom Meal Plans', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
-            _buildFeatureItem('🔄 Unlimited Access to All Features', fontSize: isVerySmallScreen ? 13 : 15, padding: featureSpacing),
-            
-            SizedBox(height: sectionSpacing),
-            
-            // Plan Options - Scrollable
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    // Yearly Plan
-                    _buildPlanOptionNew(
-                      title: 'Yearly Plan',
-                      price: '\$29.00',
-                      period: '/ year',
-                      badge: 'SAVE 85%',
-                      isSelected: selectedPlan == 'yearly',
-                      onTap: () => setState(() => selectedPlan = 'yearly'),
-                      isDarkMode: isDarkMode,
-                      padding: isVerySmallScreen ? 15 : 20,
-                      compact: isVerySmallScreen,
-                    ),
-                    SizedBox(height: planSpacing),
-                    
-                    // Weekly Plan
-                    _buildPlanOptionNew(
-                      title: 'Weekly Plan',
-                      price: weeklyPrice,
-                      period: weeklyDescription,
-                      badge: null,
-                      isSelected: selectedPlan == 'weekly',
-                      onTap: () => setState(() => selectedPlan = 'weekly'),
-                      isDarkMode: isDarkMode,
-                      padding: isVerySmallScreen ? 15 : 20,
-                      compact: isVerySmallScreen,
-                    ),
-                    SizedBox(height: isVerySmallScreen ? 15 : 20),
-                    
-                    // Free Trial Toggle
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: isVerySmallScreen ? 10 : 15),
-                      decoration: BoxDecoration(
-                        color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0),
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Free Trial Enabled',
-                            style: TextStyle(
-                              fontSize: isVerySmallScreen ? 14 : 16,
-                              fontWeight: FontWeight.w600,
-                              color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                            ),
-                          ),
-                          Switch(
-                            value: isTrialEnabled,
-                            onChanged: (value) {
-                              setState(() {
-                                isTrialEnabled = value;
-                              });
-                            },
-                            activeColor: const Color(0xFFFF0000),
-                            activeTrackColor: const Color(0xFFFF9999),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            
-            SizedBox(height: isVerySmallScreen ? 10 : 20),
-            // Action Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: startPlanGeneration,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF0000),
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(vertical: buttonVerticalPadding),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 5,
-                  shadowColor: const Color(0xFFFF0000).withOpacity(0.4),
-                ),
-                child: Text(
-                  isTrialEnabled ? 'Start Free Trial >' : 'Subscribe Now >',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    // Pointer base circle at the inner start
+    canvas.drawCircle(
+      Offset(needleStartX, needleStartY),
+      5,
+      Paint()..color = isDarkMode ? Colors.white : Colors.black87,
     );
+    canvas.drawCircle(
+      Offset(needleStartX, needleStartY),
+      3,
+      Paint()..color = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+    );
+
+    // ── Centre text: BMI value ───────────────────────────────────────────────
+    final textColor = isDarkMode ? Colors.white : const Color(0xFF1A1A1A);
+    _drawText(
+      canvas,
+      bmi.toStringAsFixed(1),
+      Offset(cx, cy - radius * 0.32),
+      fontSize: 36,
+      fontWeight: FontWeight.bold,
+      color: catColor,
+    );
+    _drawText(
+      canvas,
+      'BMI',
+      Offset(cx, cy - radius * 0.12),
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      color: (isDarkMode ? Colors.white : Colors.black).withOpacity(0.5),
+    );
+
+    // ── Scale labels at arc ends ─────────────────────────────────────────────
+    // "15" at left, "40" at right
+    final labelStyle = TextStyle(
+      fontSize: 11,
+      color: textColor.withOpacity(0.5),
+      fontWeight: FontWeight.w500,
+    );
+    _drawTextStyle(
+        canvas, '15', Offset(cx - radius - strokeW * 0.6, cy + 14), labelStyle);
+    _drawTextStyle(
+        canvas, '40', Offset(cx + radius + strokeW * 0.3, cy + 14), labelStyle);
   }
 
-  Widget _buildFeatureItem(String text, {double fontSize = 15, double padding = 12}) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: padding),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: fontSize,
-              fontWeight: FontWeight.w500,
-              color: const Color(0xFF1A1A1A),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlanOptionNew({
-    required String title,
-    required String price,
-    required String period,
-    required String? badge,
-    required bool isSelected,
-    required VoidCallback onTap,
-    required bool isDarkMode,
-    double padding = 20,
-    bool compact = false,
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset center, {
+    required double fontSize,
+    required FontWeight fontWeight,
+    required Color color,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.all(padding),
-        decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(
-            color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.white24 : const Color(0xFFE0E0E0)),
-            width: 1,
-          ),
-          boxShadow: isSelected ? [
-            BoxShadow(
-              color: const Color(0xFFFF0000).withOpacity(0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ] : [],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: compact ? 15 : 16,
-                          fontWeight: FontWeight.w600,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                        ),
-                      ),
-                      if (badge != null) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFF0000),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            badge,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  SizedBox(height: compact ? 2 : 4),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        price,
-                        style: TextStyle(
-                          fontSize: compact ? 18 : 20,
-                          fontWeight: FontWeight.bold,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          period,
-                          style: TextStyle(
-                            fontSize: compact ? 12 : 13,
-                            color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
-                  width: 2,
-                ),
-              ),
-              child: isSelected
-                  ? const Icon(Icons.check, size: 14, color: Colors.white)
-                  : null,
-            ),
-          ],
-        ),
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontWeight: fontWeight, color: color),
       ),
-    );
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
   }
 
-  Widget _buildPlanOption({
-    required String title,
-    required String price,
-    required String period,
-    required List<String> features,
-    required bool isPopular,
-    required bool isSelected,
-    required VoidCallback onTap,
-    required bool isDarkMode,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isSelected 
-              ? (isDarkMode ? const Color(0xFF2C2C2C) : Colors.white)
-              : (isDarkMode ? const Color(0xFF1E1E1E) : Colors.white),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isSelected ? const Color(0xFFFF0000).withOpacity(0.1) : Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            if (isPopular)
-              Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF0000),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Text(
-                  'MOST POPULAR',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          price,
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                          ),
-                        ),
-                        Text(
-                          period,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: isDarkMode ? Colors.white54 : const Color(0xFF999999),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-                    border: Border.all(
-                      color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
-                      width: 2,
-                    ),
-                  ),
-                  child: isSelected
-                      ? const Icon(Icons.check, size: 16, color: Colors.white)
-                      : null,
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            ...features.map((feature) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.check, size: 16, color: Color(0xFFFF0000)),
-                  const SizedBox(width: 8),
-                  Text(
-                    feature,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
-                    ),
-                  ),
-                ],
-              ),
-            )).toList(),
-          ],
-        ),
-      ),
-    );
+  void _drawTextStyle(Canvas canvas, String text, Offset center, TextStyle style) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
   }
+
+  @override
+  bool shouldRepaint(BmiGaugePainter old) =>
+      old.fraction != fraction || old.bmi != bmi;
 }

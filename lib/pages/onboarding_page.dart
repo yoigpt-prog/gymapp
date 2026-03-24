@@ -16,9 +16,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   Future<void> _saveNameAndContinue() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your name')),
-      );
+      debugPrint('[ONBOARDING] Name field empty — snackbar silenced');
       return;
     }
 
@@ -44,11 +42,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving name: $e')),
-        );
-      }
+      debugPrint('[ONBOARDING ERROR] Saving name: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -57,10 +51,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
             return SingleChildScrollView(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
@@ -147,6 +143,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
           },
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

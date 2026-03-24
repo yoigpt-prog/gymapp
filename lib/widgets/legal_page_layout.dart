@@ -58,12 +58,7 @@ class LegalPageLayout extends StatelessWidget {
                                   ),
                                   child: Container(
                                     decoration: BoxDecoration(
-                                    color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                                    // borderRadius removed
-                                      border: Border.all(
-                                        color: isDarkMode ? Colors.white.withOpacity(0.2) : Colors.black,
-                                        width: 1,
-                                      ),
+                                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
                                     ),
                                     clipBehavior: Clip.antiAlias,
                                     padding: const EdgeInsets.all(32),
@@ -120,7 +115,7 @@ class LegalPageLayout extends StatelessWidget {
 
           if (embedded) {
             return Container(
-              color: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
+              color: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F7FA),
               child: content,
             );
           }
@@ -133,22 +128,31 @@ class LegalPageLayout extends StatelessWidget {
 
         // Mobile Layout
         return Scaffold(
-          backgroundColor: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
-          body: Column(
-            children: [
-              RedHeader(
-                title: title,
-                showBack: true,
-                isDarkMode: isDarkMode,
-                onToggleTheme: onToggleTheme,
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: child,
+          backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          appBar: AppBar(
+            title: Text(title),
+            backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+            foregroundColor: isDarkMode ? Colors.white : Colors.black,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            actions: [
+              if (onToggleTheme != null)
+                IconButton(
+                  icon: Icon(isDarkMode ? Icons.dark_mode : Icons.wb_sunny_outlined),
+                  onPressed: onToggleTheme,
                 ),
-              ),
             ],
+          ),
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: child,
+            ),
           ),
         );
       },

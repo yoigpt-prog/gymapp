@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class AITransparencyPage extends StatelessWidget {
-  const AITransparencyPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const AITransparencyPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return LegalPageLayout(
+      onToggleTheme: toggleTheme,
       title: 'AI Assistance Disclosure',
       isDarkMode: isDarkMode,
-      showBanner: false,
+      showBanner: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -34,7 +36,7 @@ class AITransparencyPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF1E3A5F) : const Color(0xFFE3F2FD),
+              color: isDarkMode ? const Color(0xFF4A1A1A) : const Color(0xFFFFEBEE),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
@@ -42,7 +44,7 @@ class AITransparencyPage extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: isDarkMode ? Colors.white : const Color(0xFF0D47A1),
+                color: isDarkMode ? Colors.white : const Color(0xFFC62828),
               ),
             ),
           ),

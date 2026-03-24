@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class SubscriptionTermsPage extends StatelessWidget {
-  const SubscriptionTermsPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const SubscriptionTermsPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return LegalPageLayout(
+      onToggleTheme: toggleTheme,
       title: 'Subscription Terms',
       isDarkMode: isDarkMode,
       child: Column(

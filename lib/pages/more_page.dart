@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../widgets/red_header.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
 import 'legal/disclaimer_page.dart';
 import 'legal/copyright_page.dart';
-
 import 'legal/age_requirement_page.dart';
 import 'legal/subscription_terms_page.dart';
 import 'legal/data_export_page.dart';
 import 'legal/delete_account_page.dart';
-
-
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
+import '../services/revenue_cat_service.dart';
 
 class SettingsPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -31,7 +32,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // Colors used in the design
   final Color _red = const Color(0xFFFF0000);
-  final Color _lightGreyBg = const Color(0xFFF5F5F5);
+  final Color _lightGreyBg = Colors.white;
 
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
@@ -53,7 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _onScroll() {
     final currentScrollOffset = _scrollController.offset;
-    
+
     if (currentScrollOffset > _lastScrollOffset && currentScrollOffset > 50) {
       if (_showHeader) {
         setState(() => _showHeader = false);
@@ -63,7 +64,7 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() => _showHeader = true);
       }
     }
-    
+
     _lastScrollOffset = currentScrollOffset;
   }
 
@@ -72,32 +73,40 @@ class _SettingsPageState extends State<SettingsPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth > 800;
-        final backgroundColor = widget.isDarkMode ? const Color(0xFF121212) : (isDesktop ? const Color(0xFFF5F7FA) : _lightGreyBg);
-        
+        final backgroundColor =
+            widget.isDarkMode ? const Color(0xFF121212) : const Color(0xFFFFFFFF);
+
         return Scaffold(
-          backgroundColor: backgroundColor,
-          body: Column(
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                height: _showHeader ? null : 0,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
-                  opacity: _showHeader ? 1.0 : 0.0,
-                  child: RedHeader(
-                    title: 'Settings',
-                    subtitle: 'Manage your preferences',
-                    onToggleTheme: widget.toggleTheme,
-                    isDarkMode: widget.isDarkMode,
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  if (kIsWeb)
+                    AnimatedContainer(
+                      duration: Duration.zero,
+                      height: _showHeader ? null : 0,
+                      child: AnimatedOpacity(
+                        duration: Duration.zero,
+                        opacity: _showHeader ? 1.0 : 0.0,
+                        child: RedHeader(
+                          title: 'Settings',
+                          subtitle: 'Manage your preferences',
+                          onToggleTheme: widget.toggleTheme,
+                          isDarkMode: widget.isDarkMode,
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: isDesktop
+                        ? _buildDesktopLayout()
+                        : _buildMobileLayout(),
                   ),
-                ),
+                ],
               ),
-              Expanded(
-                child: isDesktop 
-                  ? _buildDesktopLayout() 
-                  : _buildMobileLayout(),
-              ),
-            ],
+            ),
           ),
         );
       },
@@ -112,7 +121,6 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           _buildGeneralSection(),
           _buildPersonalDataSection(),
-
           _buildLegalSection(),
           _buildHealthSafetySection(),
           _buildSubscriptionSection(),
@@ -144,14 +152,25 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Wrap(
-                  spacing: 24,
-                  runSpacing: 24,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 400, child: _buildGeneralSection()),
-                    SizedBox(width: 400, child: _buildPersonalDataSection()),
-
-                    SizedBox(width: 400, child: _buildSubscriptionSection()),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _buildGeneralSection(),
+                          _buildSubscriptionSection(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _buildPersonalDataSection(),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 32),
@@ -164,13 +183,25 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Wrap(
-                  spacing: 24,
-                  runSpacing: 24,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 400, child: _buildLegalSection()),
-                    SizedBox(width: 400, child: _buildHealthSafetySection()),
-                    SizedBox(width: 400, child: _buildAccountSection()),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _buildLegalSection(),
+                          _buildAccountSection(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _buildHealthSafetySection(),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -184,10 +215,11 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------- SECTIONS ----------------
 
   Widget _buildCard({required Widget child}) {
-    final cardColor = widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
-    
+    final cardColor =
+        widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
+
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8), 
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
@@ -197,7 +229,9 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         boxShadow: [
           BoxShadow(
-            color: widget.isDarkMode ? Colors.black26 : Colors.black.withOpacity(0.05),
+            color: widget.isDarkMode
+                ? Colors.black26
+                : Colors.black.withOpacity(0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -209,7 +243,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSectionTitle(String title) {
     final titleColor = widget.isDarkMode ? Colors.white60 : Colors.grey;
-    
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Text(
@@ -242,8 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
               activeTrackColor: _red,
               onChanged: (value) {
                 setState(() => notificationsOn = value);
-                _showMessage(
-                    'Notifications turned ${value ? 'ON' : 'OFF'}');
+                _showMessage('Notifications turned ${value ? 'ON' : 'OFF'}');
               },
             ),
           ),
@@ -251,7 +284,8 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildMenuItem(
             iconEmoji: widget.isDarkMode ? '🌙' : '☀️',
             label: 'Dark Mode',
-            description: widget.isDarkMode ? 'Dark mode is on' : 'Light mode is on',
+            description:
+                widget.isDarkMode ? 'Dark mode is on' : 'Light mode is on',
             trailing: Switch(
               value: widget.isDarkMode,
               activeColor: Colors.white,
@@ -279,7 +313,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Download My Data',
             description: 'Export your personal data',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DataExportPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/data-export');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const DataExportPage()));
+              }
+            },
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -288,7 +331,16 @@ class _SettingsPageState extends State<SettingsPage> {
             description: 'Permanently delete your data',
             isDanger: true,
             trailing: const Icon(Icons.chevron_right, color: Color(0xFFFF0000)),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DeleteAccountPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/delete-account');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const DeleteAccountPage()));
+              }
+            },
           ),
         ],
       ),
@@ -296,8 +348,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ---- AI Transparency ----
-
-
 
   // ---- Legal & Privacy ----
 
@@ -312,7 +362,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'EULA',
             description: 'End User License Agreement',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const TermsOfServicePage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/terms');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const TermsOfServicePage()));
+              }
+            },
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -320,7 +379,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Privacy Policy',
             description: 'How we protect your data',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PrivacyPolicyPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/privacy');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const PrivacyPolicyPage()));
+              }
+            },
           ),
         ],
       ),
@@ -340,7 +408,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Disclaimer',
             description: 'Legal information',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DisclaimerPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/disclaimer');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const DisclaimerPage()));
+              }
+            },
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -348,7 +425,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Copyright',
             description: 'Intellectual property info',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CopyrightPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/copyright');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const CopyrightPage()));
+              }
+            },
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -356,7 +442,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Age Requirement',
             description: 'Minimum age to use this app',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AgeRequirementPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/age-requirement');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const AgeRequirementPage()));
+              }
+            },
           ),
         ],
       ),
@@ -365,6 +460,35 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ---- Subscription ----
 
+  Future<void> _openCustomerCenter() async {
+    if (kIsWeb) {
+      _showMessage('Subscription management is not available on Web');
+      return;
+    }
+    try {
+      await RevenueCatUI.presentCustomerCenter();
+    } catch (e) {
+      debugPrint('[RevenueCat] CustomerCenter error: $e');
+      _showMessage('Could not open subscription manager');
+    }
+  }
+
+  Future<void> _restorePurchases() async {
+    if (kIsWeb) {
+      _showMessage('Restore is not available on Web');
+      return;
+    }
+    try {
+      final info = await RevenueCatService().restorePurchases();
+      final hasActive = info?.entitlements.active.isNotEmpty ?? false;
+      _showMessage(
+          hasActive ? 'Purchases restored!' : 'No previous purchases found');
+    } catch (e) {
+      debugPrint('[RevenueCat] Restore error: $e');
+      _showMessage('Restore failed — please try again');
+    }
+  }
+
   Widget _buildSubscriptionSection() {
     return _buildCard(
       child: Column(
@@ -372,11 +496,31 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           _buildSectionTitle('Subscription'),
           _buildMenuItem(
+            iconEmoji: '⭐',
+            label: 'Go Premium',
+            description: 'Unlock all features and custom plans',
+            trailing: const Icon(Icons.star, color: Color(0xFFFF0000)),
+            onTap: () async {
+              await RevenueCatService().showPaywall();
+            },
+          ),
+          const Divider(height: 1),
+          _buildMenuItem(
             iconEmoji: '💳',
             label: 'Manage Subscription',
-            description: 'Cancel trial or subscription',
+            description: kIsWeb
+                ? 'Available on iOS & Android'
+                : 'Cancel, upgrade or view your plan',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showMessage('Subscription management coming soon'),
+            onTap: _openCustomerCenter,
+          ),
+          const Divider(height: 1),
+          _buildMenuItem(
+            iconEmoji: '🔄',
+            label: 'Restore Purchases',
+            description: 'Recover your previous subscription',
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: _restorePurchases,
           ),
           const Divider(height: 1),
           _buildMenuItem(
@@ -384,7 +528,16 @@ class _SettingsPageState extends State<SettingsPage> {
             label: 'Subscription Terms',
             description: 'View terms and conditions',
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SubscriptionTermsPage())),
+            onTap: () {
+              if (kIsWeb) {
+                Navigator.pushNamed(context, '/subscription-terms');
+              } else {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const SubscriptionTermsPage()));
+              }
+            },
           ),
         ],
       ),
@@ -422,10 +575,11 @@ class _SettingsPageState extends State<SettingsPage> {
     bool isDanger = false,
     VoidCallback? onTap,
   }) {
-    final Color labelColor = isDanger 
-        ? const Color(0xFFFF0000) 
+    final Color labelColor = isDanger
+        ? const Color(0xFFFF0000)
         : (widget.isDarkMode ? Colors.white : const Color(0xFF1A1A1A));
-    final Color descriptionColor = widget.isDarkMode ? Colors.white60 : Colors.grey;
+    final Color descriptionColor =
+        widget.isDarkMode ? Colors.white60 : Colors.grey;
 
     return InkWell(
       onTap: onTap,
@@ -437,7 +591,9 @@ class _SettingsPageState extends State<SettingsPage> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: isDanger ? const Color(0xFFFFE5E5) : const Color(0xFFFFF0F0),
+                color: isDanger
+                    ? const Color(0xFFFFE5E5)
+                    : const Color(0xFFFFF0F0),
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
@@ -480,13 +636,8 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------- HELPERS ----------------
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    // Snackbar silenced — log only
+    debugPrint('[SETTINGS] $message');
   }
 
   void _confirmSignOut() async {
@@ -504,7 +655,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Sign Out', style: TextStyle(color: Color(0xFFFF0000))),
+            child: const Text('Sign Out',
+                style: TextStyle(color: Color(0xFFFF0000))),
           ),
         ],
       ),

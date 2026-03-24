@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class DeleteAccountPage extends StatelessWidget {
-  const DeleteAccountPage({Key? key}) : super(key: key);
+  final VoidCallback? toggleTheme;
+  const DeleteAccountPage({Key? key, this.toggleTheme}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -14,6 +15,7 @@ class DeleteAccountPage extends StatelessWidget {
         
         if (isDesktop) {
           return LegalPageLayout(
+      onToggleTheme: toggleTheme,
             title: 'Delete Account',
             isDarkMode: isDarkMode,
             child: _buildContent(context, isDarkMode),
@@ -21,16 +23,19 @@ class DeleteAccountPage extends StatelessWidget {
         }
         
         return Scaffold(
-          backgroundColor: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
           appBar: AppBar(
             title: const Text('Delete Account'),
             backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
             foregroundColor: isDarkMode ? Colors.white : Colors.black,
             elevation: 0,
           ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: _buildContent(context, isDarkMode),
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: _buildContent(context, isDarkMode),
+            ),
           ),
         );
       },
@@ -214,12 +219,7 @@ class DeleteAccountPage extends StatelessWidget {
 
     if (second == true && context.mounted) {
       // TODO: Call backend to delete account
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Account deletion initiated. Your account will be deleted within 24 hours.'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      debugPrint('[ACCOUNT] Account deletion initiated');
       Navigator.of(context).pop();
     }
   }

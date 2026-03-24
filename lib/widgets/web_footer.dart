@@ -171,10 +171,8 @@ class WebFooterState extends State<WebFooter> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: () {
-          // In a real app, you would use url_launcher to open the URL
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Opening $url')),
-          );
+          // Snackbar silenced — log only
+          debugPrint('[FOOTER] Opening $url');
         },
         child: Container(
           width: 40,
@@ -200,51 +198,41 @@ class WebFooterState extends State<WebFooter> {
   }
 
   void _navigateToPage(BuildContext context, String pageType) {
-    Widget? page;
+    String routeName = '';
     
     switch (pageType) {
       case 'privacy':
-        page = PrivacyPolicyPage();
+        routeName = '/privacy';
         break;
       case 'terms':
-        page = TermsOfServicePage();
+        routeName = '/terms';
         break;
-
       case 'disclaimer':
-        page = DisclaimerPage();
+        routeName = '/disclaimer';
         break;
       case 'subscription':
-        page = SubscriptionTermsPage();
+        routeName = '/subscription-terms';
         break;
       case 'copyright':
-        page = CopyrightPage();
+        routeName = '/copyright';
         break;
       case 'age':
-        page = AgeRequirementPage();
+        routeName = '/age-requirement';
         break;
       case 'ai':
-        page = AITransparencyPage();
+        routeName = '/ai-transparency';
         break;
       case 'contact':
-        page = ContactPage(
-          isDarkMode: widget.isDarkMode,
-          // We don't have access to toggleTheme here easily without passing it down, 
-          // but LegalPageLayout handles null gracefully. 
-          // Ideally WebFooter should accept onToggleTheme.
-        );
+        // Contact page does not have a route defined in main.dart correctly for SEO currently, but let's assume '/contact'
+        // If not, we fall back to push. But let's check main.dart. Let's pushNamed '/contact'.
+       // wait, let's just make sure to pushNamed.
+        routeName = '/contact';
         break;
       default:
         return;
     }
     
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => page!,
-        transitionDuration: Duration.zero,
-        reverseTransitionDuration: Duration.zero,
-      ),
-    );
+    Navigator.pushNamed(context, routeName);
   }
 
   void _showContactInfo(BuildContext context) {

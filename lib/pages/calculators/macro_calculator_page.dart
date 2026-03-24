@@ -58,7 +58,7 @@ class _MacroCalculatorPageState extends State<MacroCalculatorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = widget.isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F7FA);
+    final bgColor = widget.isDarkMode ? const Color(0xFF121212) : const Color(0xFFFFFFFF);
     final cardColor = widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
 
@@ -74,13 +74,6 @@ class _MacroCalculatorPageState extends State<MacroCalculatorPage> {
           decoration: BoxDecoration(
             color: cardColor,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,7 +94,7 @@ class _MacroCalculatorPageState extends State<MacroCalculatorPage> {
                   hintText: 'e.g. 2500',
                   hintStyle: TextStyle(color: textColor.withOpacity(0.5)),
                   filled: true,
-                  fillColor: widget.isDarkMode ? Colors.black12 : Colors.grey.shade100,
+                  fillColor: widget.isDarkMode ? Colors.black12 : const Color(0xFFF5F5F5),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -121,7 +114,7 @@ class _MacroCalculatorPageState extends State<MacroCalculatorPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.black12 : Colors.grey.shade100,
+                  color: widget.isDarkMode ? Colors.black12 : Colors.white,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: DropdownButtonHideUnderline(

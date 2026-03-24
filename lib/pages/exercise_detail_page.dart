@@ -22,7 +22,6 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: widget.isDarkMode ? const Color(0xFF121212) : Colors.grey.shade100,
       appBar: AppBar(
         backgroundColor: const Color(0xFFFF0000),
         elevation: 0,
@@ -36,8 +35,11 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
         ),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        child: Column(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        child: SingleChildScrollView(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Video/Image demonstration
@@ -62,6 +64,86 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                         ),
                       ),
                     ),
+            ),
+
+            // Track Your Sets (between video and instructions)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Track Your Sets',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Set checkboxes
+                  _buildSetCheckbox(0, 'Set 1', '12 reps'),
+                  _buildSetCheckbox(1, 'Set 2', '12 reps'),
+                  _buildSetCheckbox(2, 'Set 3', '12 reps'),
+
+                  const SizedBox(height: 24),
+
+                  // Buttons
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _allSetsCompleted
+                          ? () => Navigator.pop(context, true)
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check, size: 24),
+                          SizedBox(width: 8),
+                          Text(
+                            'Mark Complete & Continue',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.grey.shade400),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Skip Exercise',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: widget.isDarkMode ? Colors.white54 : Colors.black54,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
 
             // Instructions
@@ -135,89 +217,17 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 32),
-
-                  // Track Your Sets
-                  Text(
-                    'Track Your Sets',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: widget.isDarkMode ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Set checkboxes
-                  _buildSetCheckbox(0, 'Set 1', '12 reps'),
-                  _buildSetCheckbox(1, 'Set 2', '12 reps'),
-                  _buildSetCheckbox(2, 'Set 3', '12 reps'),
-
-                  const SizedBox(height: 24),
-
-                  // Buttons
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _allSetsCompleted
-                          ? () => Navigator.pop(context, true) // Return true to mark exercise as complete
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check, size: 24),
-                          SizedBox(width: 8),
-                          Text(
-                            'Mark Complete & Continue',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.grey.shade400),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Skip Exercise',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: widget.isDarkMode ? Colors.white54 : Colors.black54,
-                        ),
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 24),
                 ],
               ),
             ),
+
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildMediaPreview(String url) {
     final cleanUrl = url.trim();
@@ -343,7 +353,8 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
             reps,
             style: TextStyle(
               fontSize: 14,
-              color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600,
+              fontWeight: FontWeight.bold,
+              color: Colors.red,
             ),
           ),
         ],
