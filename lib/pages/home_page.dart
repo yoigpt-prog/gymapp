@@ -1201,28 +1201,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildDesktopRightPanel() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Container(
-          color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-          padding: const EdgeInsets.all(12),
-          child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight:
-                    constraints.maxHeight > 0 ? constraints.maxHeight - 24 : 0,
-              ),
-              child: Center(
-                child: Image.asset(
-                  'assets/banner/adbanner.png',
-                  fit: BoxFit.contain,
-                  width: constraints.maxWidth - 24, // Account for padding
-                ),
-              ),
+    final adAsset = widget.isDarkMode
+        ? 'assets/banner/adblackmode.svg'
+        : 'assets/banner/adwhitemode.svg';
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 50),
+      color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      padding: const EdgeInsets.all(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 50),
+            child: SvgPicture.asset(
+              adAsset,
+              key: ValueKey(adAsset),
+              fit: BoxFit.fill,
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 

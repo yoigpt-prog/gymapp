@@ -8,7 +8,7 @@ class PrivacyPolicyPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    
+
     return LegalPageLayout(
       onToggleTheme: toggleTheme,
       title: 'Privacy Policy',
@@ -16,21 +16,13 @@ class PrivacyPolicyPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSection(
-            'Last Updated: December 2025',
-            '',
-            isDarkMode,
-            isSubtitle: true,
-          ),
-          _buildSection(
-            'Company: GGUIDE Apps Solutions LLC',
-            'Website: https://gymguide.co\nEmail: support@gymguide.co',
-            isDarkMode,
-            isSubtitle: true,
-          ),
+          _buildMeta('Last Updated: January 2026', isDarkMode),
+          _buildMeta('Company: GGUIDE Apps Solutions LLC', isDarkMode),
+          _buildMeta('Website: https://gymguide.co', isDarkMode),
+          _buildMeta('Email: support@gymguide.co', isDarkMode),
           const SizedBox(height: 20),
           _buildText(
-            'This Privacy Policy explains how GymGuide ("App", "we", "our", "us") collects, uses, and protects your information when you use our mobile applications, website, and related services.',
+            'This Privacy Policy explains how GymGuide ("we", "our", "us") collects, uses, stores, and protects your personal information.',
             isDarkMode,
           ),
           const SizedBox(height: 24),
@@ -41,84 +33,121 @@ class PrivacyPolicyPage extends StatelessWidget {
           ),
           _buildSubSection(
             'A. Information You Provide',
-            '• Account details (email, password, profile data)\n'
-            '• Workout goals, health-related quiz answers\n'
-            '• Exercise preferences and experience level\n'
-            '• Meal preferences, allergies, dietary restrictions\n'
+            'When using GymGuide, you may provide:\n\n'
+            '• Account details (email address, login credentials)\n'
+            '• Fitness goals (weight loss, muscle gain, etc.)\n'
+            '• Health-related inputs (quiz responses, preferences)\n'
+            '• Meal preferences and dietary restrictions\n'
             '• Progress data (weight, measurements, workout history)',
             isDarkMode,
           ),
           _buildSubSection(
             'B. Automatically Collected Information',
-            '• Device type, OS, IP address\n'
-            '• Usage analytics\n'
-            '• App performance data\n'
-            '• Subscription status from Apple/Google',
-            isDarkMode,
-          ),
-          _buildSubSection(
-            'C. AI Data Processing',
-            'Your quiz answers and profile details are processed using AI to generate personalized workout & meal plans.\n\n'
-            '• We do not sell your data.\n'
-            '• AI models do not train on your personal data.',
-            isDarkMode,
-          ),
-          _buildSubSection(
-            'D. Third-Party Services',
-            'GymGuide uses:\n\n'
-            '• Supabase (database & authentication)\n'
-            '• Cloudflare R2 (media storage)\n'
-            '• Stripe/Apple/Google (payments)\n'
-            '• OpenAI / Anthropic (AI plan generation)\n\n'
-            'Each third party has its own privacy policies.',
+            'We automatically collect certain data, including:\n\n'
+            '• Device information (model, OS version, device identifiers)\n'
+            '• IP address and general location\n'
+            '• App usage behavior and analytics\n'
+            '• Performance and crash data\n'
+            '• Subscription status via Apple App Store or Google Play',
             isDarkMode,
           ),
           _buildSection(
             '2. How We Use Your Information',
-            '• Generate personalized workout & meal plans\n'
-            '• Provide app features and progress tracking\n'
-            '• Improve app performance and quality\n'
-            '• Maintain user accounts and security\n'
-            '• Process payments & subscriptions\n'
-            '• Customer support',
+            'We use collected data to:\n\n'
+            '• Provide personalized workout and meal plans\n'
+            '• Improve app functionality and user experience\n'
+            '• Monitor performance and fix technical issues\n'
+            '• Manage subscriptions and billing\n'
+            '• Provide customer support\n'
+            '• Ensure security and prevent misuse',
             isDarkMode,
           ),
           _buildSection(
-            '3. How We Protect Your Information',
-            '• Encryption at rest & in transit\n'
-            '• Secure Supabase authentication\n'
-            '• Role-based access controls\n'
-            '• No unauthorized data sharing',
+            '3. AI Data Processing',
+            'GymGuide uses AI systems to generate personalized recommendations.\n\n'
+            '• AI processes your inputs automatically\n'
+            '• Outputs are generated without human intervention\n'
+            '• We do NOT use your personal data to train AI models\n'
+            '• AI responses may not always be accurate',
             isDarkMode,
           ),
           _buildSection(
-            '4. Data Retention',
-            'We store your data as long as your account is active.\n\n'
-            'If you delete your account:\n'
-            '• All personal data is permanently deleted within 30 days\n'
-            '• Subscription data remains with Apple/Google but cannot identify you',
+            '4. Legal Basis for Processing',
+            'We process your data based on:\n\n'
+            '• Your consent\n'
+            '• Performance of our services\n'
+            '• Legal obligations\n'
+            '• Legitimate business interests (app improvement, security)',
             isDarkMode,
           ),
           _buildSection(
-            '5. Your Rights',
-            'You may:\n\n'
-            '• Request your data export\n'
-            '• Delete your account\n'
-            '• Update your personal information\n'
-            '• Withdraw consent for processing\n'
-            '• Request correction of inaccurate data\n\n'
-            'Contact: support@gymguide.co',
+            '5. Data Sharing',
+            'We do NOT sell your personal data.\n\n'
+            'We may share data only when necessary:\n\n'
+            '• With service providers (hosting, analytics, payments)\n'
+            '• With Apple or Google for subscription processing\n'
+            '• When required by law or legal requests',
             isDarkMode,
           ),
           _buildSection(
-            '6. Children',
-            'GymGuide is not intended for children under 13.\n'
-            'We do not knowingly collect data from children.',
+            '6. Third-Party Services',
+            'GymGuide uses trusted third-party providers:\n\n'
+            '• Supabase – database and authentication\n'
+            '• Cloudflare R2 – media storage\n'
+            '• RevenueCat / Apple / Google – payments and subscriptions\n'
+            '• AI providers – plan generation\n\n'
+            'Each third party operates under its own privacy policies.',
             isDarkMode,
           ),
           _buildSection(
-            '7. Changes',
-            'We may update this policy and will notify users when changes occur.',
+            '7. Data Retention',
+            'We retain your data only as long as necessary to:\n\n'
+            '• Provide services\n'
+            '• Comply with legal obligations\n'
+            '• Resolve disputes\n\n'
+            'You may request deletion at any time.',
+            isDarkMode,
+          ),
+          _buildSection(
+            '8. Your Rights',
+            'Depending on your region, you may have the right to:\n\n'
+            '• Access your data\n'
+            '• Correct inaccurate data\n'
+            '• Delete your data\n'
+            '• Restrict or object to processing\n'
+            '• Withdraw consent\n\n'
+            'To exercise your rights, contact: support@gymguide.co',
+            isDarkMode,
+          ),
+          _buildSection(
+            '9. Account Deletion',
+            'You can request deletion of your account and data:\n\n'
+            '• Through in-app settings (if available)\n'
+            '• By contacting support\n\n'
+            'We will process deletion within a reasonable timeframe.',
+            isDarkMode,
+          ),
+          _buildSection(
+            '10. Security',
+            'We use industry-standard measures to protect your data, including encryption and secure storage.\n\n'
+            'However, no system is completely secure.',
+            isDarkMode,
+          ),
+          _buildSection(
+            '11. Children\'s Privacy',
+            'GymGuide does not knowingly collect data from children under 13.\n\n'
+            'If such data is identified, it will be deleted promptly.',
+            isDarkMode,
+          ),
+          _buildSection(
+            '12. International Data Transfers',
+            'Your data may be processed in different countries. We ensure appropriate safeguards are in place.',
+            isDarkMode,
+          ),
+          _buildSection(
+            '13. Changes to This Policy',
+            'We may update this Privacy Policy periodically.\n\n'
+            'Continued use of the app indicates acceptance of the updated policy.',
             isDarkMode,
           ),
           const SizedBox(height: 40),
@@ -127,17 +156,31 @@ class PrivacyPolicyPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSection(String title, String content, bool isDarkMode, {bool isSubtitle = false}) {
+  Widget _buildMeta(String text, bool isDarkMode) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: isDarkMode ? Colors.white70 : Colors.black54,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSection(String title, String content, bool isDarkMode) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
             style: TextStyle(
-              fontSize: isSubtitle ? 14 : 18,
-              fontWeight: isSubtitle ? FontWeight.w500 : FontWeight.bold,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
               color: isDarkMode ? Colors.white : Colors.black,
             ),
           ),
@@ -176,7 +219,7 @@ class PrivacyPolicyPage extends StatelessWidget {
       text,
       style: TextStyle(
         fontSize: 14,
-        height: 1.5,
+        height: 1.6,
         color: isDarkMode ? Colors.white70 : Colors.black87,
       ),
     );

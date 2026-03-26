@@ -35,7 +35,6 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   String heightUnit = 'cm';
   String weight = '';
   String weightUnit = 'kg';
-  String bodyType = '';
   String activityLevel = '';
   String mainGoal = '';
   String targetWeight = '';
@@ -48,7 +47,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   String sessionDuration = '';
   String workoutTime = '';
   List<String> injuries = ['None'];
-  List<String> healthConditions = ['None'];
+
   String dietType = 'No Preference';
   String excludeFoods = '';
   List<String> allergies = ['None'];
@@ -343,7 +342,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     // Block back navigation on intro progress screen (27) and paywall (28)
-    final bool isLocked = (currentScreen == 26 && _isIntroProgress);
+    final bool isLocked = (currentScreen == 25 && _isIntroProgress);
 
     return PopScope(
       canPop: !isLocked,
@@ -401,28 +400,27 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       case 2: return _buildAgeScreen(isDarkMode);
       case 3: return _buildHeightScreen(isDarkMode);
       case 4: return _buildWeightScreen(isDarkMode);
-      case 5: return _buildBodyTypeScreen(isDarkMode);
-      case 6: return _buildActivityLevelScreen(isDarkMode);
-      case 7: return _buildGoalScreen(isDarkMode);
-      case 8: return _buildTargetWeightScreen(isDarkMode);
-      case 9: return _buildPlanDurationScreen(isDarkMode);
-      case 10: return _buildExperienceScreen(isDarkMode);
-      case 11: return _buildWorkoutLocationScreen(isDarkMode);
-      case 12: return _buildEquipmentScreen(isDarkMode);
-      case 13: return _buildTrainingDaysScreen(isDarkMode);
-      case 14: return _buildSessionDurationScreen(isDarkMode);
-      case 15: return _buildWorkoutTimeScreen(isDarkMode);
-      case 16: return _buildInjuriesScreen(isDarkMode);
-      case 17: return _buildHealthConditionsScreen(isDarkMode);
-      case 18: return _buildDietTypeScreen(isDarkMode);
-      case 19: return _buildAllergiesScreen(isDarkMode);
-      case 20: return _buildMacroBalanceScreen(isDarkMode);
-      case 21: return _buildSleepHoursScreen(isDarkMode);
-      case 22: return _buildSleepQualityScreen(isDarkMode);
-      case 23: return _buildStressLevelScreen(isDarkMode);
-      case 24: return _buildWaterIntakeScreen(isDarkMode);
-      case 25: return _buildSummaryScreen(isDarkMode);
-      case 26: return _buildProgressScreen(isDarkMode);
+      case 5: return _buildActivityLevelScreen(isDarkMode);
+      case 6: return _buildGoalScreen(isDarkMode);
+      case 7: return _buildTargetWeightScreen(isDarkMode);
+      case 8: return _buildPlanDurationScreen(isDarkMode);
+      case 9: return _buildExperienceScreen(isDarkMode);
+      case 10: return _buildWorkoutLocationScreen(isDarkMode);
+      case 11: return _buildEquipmentScreen(isDarkMode);
+      case 12: return _buildTrainingDaysScreen(isDarkMode);
+      case 13: return _buildSessionDurationScreen(isDarkMode);
+      case 14: return _buildWorkoutTimeScreen(isDarkMode);
+      case 15: return _buildInjuriesScreen(isDarkMode);
+      case 16: return _buildDietTypeScreen(isDarkMode);
+      case 17: return _buildAllergiesScreen(isDarkMode);
+      case 18: return _buildMacroBalanceScreen(isDarkMode);
+      case 19: return _buildSleepHoursScreen(isDarkMode);
+      case 20: return _buildSleepQualityScreen(isDarkMode);
+      case 21: return _buildStressLevelScreen(isDarkMode);
+      case 22: return _buildWaterIntakeScreen(isDarkMode);
+      case 23: return _buildMedicalDisclaimerScreen(isDarkMode);
+      case 24: return _buildSummaryScreen(isDarkMode);
+      case 25: return _buildProgressScreen(isDarkMode);
       default: return _buildWelcomeScreen();
     }
   }
@@ -507,7 +505,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         ),
                         SizedBox(height: smallSpacing),
                         Text(
-                          'Transform Your Body',
+                          'Start Your Program Now.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: titleSize,
@@ -524,7 +522,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         ),
                         SizedBox(height: smallSpacing),
                         Text(
-                          'Get a science-backed fitness plan designed just for you',
+                          'A simple, flexible plan to help you move better, eat smarter, and stay consistent.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: subtitleSize,
@@ -535,21 +533,43 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         SizedBox(height: spacing),
                         Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: 16,
+                            horizontal: 24,
                             vertical: isVerySmallScreen ? 12 : 16,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Text(
-                            '✨ Create Your Custom Plan in 2 Minutes ✨',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: badgeSize,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🔥 Effective workouts',
+                                style: TextStyle(
+                                  fontSize: badgeSize,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '🥗 Flexible meal ideas',
+                                style: TextStyle(
+                                  fontSize: badgeSize,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '📊 Easy progress tracking',
+                                style: TextStyle(
+                                  fontSize: badgeSize,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         SizedBox(height: spacing),
@@ -577,13 +597,22 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                               elevation: 10,
                             ),
                             child: Text(
-                              "LET'S GET STARTED",
+                              "GET STARTED",
                               style: TextStyle(
                                 fontSize: buttonSize,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 1,
                               ),
                             ),
+                          ),
+                        ),
+                        SizedBox(height: spacing),
+                        Text(
+                          'No strict rules. No pressure.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: subtitleSize,
+                            color: Colors.white.withOpacity(0.8),
                           ),
                         ),
                       ],
@@ -624,7 +653,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   }
 
   Widget _buildProgressBar(int questionNumber) {
-    double progress = (questionNumber / 25).clamp(0.0, 1.0);
+    double progress = (questionNumber / 23).clamp(0.0, 1.0);
     return Column(
       children: [
 
@@ -668,6 +697,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildQuestionScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required Widget content,
     required VoidCallback onContinue,
     required bool isDarkMode,
@@ -706,6 +736,21 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     ),
                   ),
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 8),
+                  _buildAnimatedWidget(
+                    delay: 150,
+                    slideUp: false,
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Expanded(
                   child: content,
@@ -718,7 +763,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildContinueButton(VoidCallback onPressed, {bool enabled = true}) {
+  Widget _buildContinueButton(VoidCallback onPressed, {bool enabled = true, String text = 'CONTINUE'}) {
     return _buildAnimatedWidget(
       delay: 600,
       child: Container(
@@ -740,16 +785,16 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
+            children: [
               Text(
-                'CONTINUE',
-                style: TextStyle(
+                text,
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(width: 8),
-              Icon(Icons.play_arrow, size: 16),
+              const SizedBox(width: 8),
+              const Icon(Icons.play_arrow, size: 16),
             ],
           ),
         ),
@@ -822,6 +867,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildInputScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required String placeholder,
     required String value,
     required ValueChanged<String> onChanged,
@@ -832,6 +878,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
+      subtitle: subtitle,
       onContinue: onContinue,
       isDarkMode: isDarkMode,
       content: SingleChildScrollView(
@@ -876,6 +923,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildSelectionScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required List<String> options,
     required String selectedValue,
     required ValueChanged<String> onSelect,
@@ -885,6 +933,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
+      subtitle: subtitle,
       onContinue: hasSelection ? () => nextScreen(questionNumber + 1) : () {},
       isDarkMode: isDarkMode,
       content: ListView.builder(
@@ -912,6 +961,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildMultiSelectionScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required List<String> options,
     required List<String> selectedValues,
     required ValueChanged<String> onToggle,
@@ -925,6 +975,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
+      subtitle: subtitle,
       onContinue: () => nextScreen(questionNumber + 1),
       isDarkMode: isDarkMode,
       content: CustomScrollView(
@@ -981,6 +1032,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildUnitInputScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required String placeholder,
     required String value,
     required String unit,
@@ -992,6 +1044,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
+      subtitle: subtitle,
       onContinue: () => nextScreen(questionNumber + 1),
       isDarkMode: isDarkMode,
       content: SingleChildScrollView(
@@ -1073,6 +1126,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   Widget _buildNumberPickerScreen({
     required int questionNumber,
     required String title,
+    String? subtitle,
     required List<String> values,
     required String selectedValue,
     required ValueChanged<String> onChanged,
@@ -1128,6 +1182,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
+      subtitle: subtitle,
       onContinue: () => nextScreen(questionNumber + 1),
       isDarkMode: isDarkMode,
       content: Column(
@@ -1255,6 +1310,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildNumberPickerScreen(
       questionNumber: 2,
       title: "How old are you?",
+      subtitle: "Used to estimate general recommendations.",
       values: ages,
       selectedValue: age,
       onChanged: (val) => setState(() => age = val),
@@ -1273,6 +1329,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildNumberPickerScreen(
       questionNumber: 3,
       title: "What's your height?",
+      subtitle: "Used for general calculations.",
       values: vals,
       selectedValue: height,
       onChanged: (val) => setState(() => height = val),
@@ -1297,6 +1354,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildNumberPickerScreen(
       questionNumber: 4,
       title: "What's your current weight?",
+      subtitle: "This helps us estimate general daily needs.",
       values: vals,
       selectedValue: weight,
       onChanged: (val) => setState(() => weight = val),
@@ -1312,22 +1370,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildBodyTypeScreen(bool isDarkMode) {
-    return _buildSelectionScreen(
-      questionNumber: 5,
-      title: "What is your body type?",
-      options: ['Ectomorph', 'Mesomorph', 'Endomorph'],
-      selectedValue: bodyType,
-      onSelect: (val) => setState(() => bodyType = val),
-      isDarkMode: isDarkMode,
-    );
-  }
-
-
-
   Widget _buildActivityLevelScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 6,
+      questionNumber: 5,
       title: "What best describes your daily activity level (outside of workouts)?",
       options: [
         'Sedentary (mostly sitting, office work)',
@@ -1343,9 +1388,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildGoalScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 7,
+      questionNumber: 6,
       title: "What's your main fitness goal?",
-      options: ['Lose Fat', 'Build Muscle'],
+      options: ['Lose Fat & Stay Lean', 'Build Muscle & Gain Strength'],
       selectedValue: mainGoal,
       onSelect: (val) => setState(() => mainGoal = val),
       isDarkMode: isDarkMode,
@@ -1358,8 +1403,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         : List.generate(331, (i) => '${i + 66} lbs');
     if (targetWeight.isEmpty) targetWeight = targetWeightUnit == 'kg' ? '65 kg' : '145 lbs';
     return _buildNumberPickerScreen(
-      questionNumber: 8,
-      title: "What is your target weight?",
+      questionNumber: 7,
+      title: "Do you have a goal in mind? (optional)",
+      subtitle: "This is only used to track your progress.",
       values: vals,
       selectedValue: targetWeight,
       onChanged: (val) => setState(() => targetWeight = val),
@@ -1377,7 +1423,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildPlanDurationScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 9,
+      questionNumber: 8,
       title: "How long do you want this first plan to last?",
       options: ['2 Weeks (14 Days)', '3 Weeks (21 Days)', '4 Weeks (28 Days)', '12 Weeks (90 Days)'],
       selectedValue: planDuration,
@@ -1388,7 +1434,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildExperienceScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 10,
+      questionNumber: 9,
       title: "What is your fitness experience?",
       options: ['Beginner', 'Intermediate', 'Advanced'],
       selectedValue: experience,
@@ -1400,7 +1446,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildWorkoutLocationScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 11,
+      questionNumber: 10,
       title: "Where will you work out most often?",
       options: ['Home', 'Gym'],
       selectedValue: workoutLocation,
@@ -1411,7 +1457,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildEquipmentScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 12,
+      questionNumber: 11,
       title: "Which equipment do you have access to?",
       options: ['Bodyweight', 'Dumbbells', 'Resistance Bands', 'Barbell', 'Kettlebells', 'Machines', 'All'],
       selectedValues: equipment,
@@ -1423,7 +1469,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildTrainingDaysScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 13,
+      questionNumber: 12,
       title: "How many days per week can you train?",
       options: ['3 days', '4 days', '5 days', '6 days', '7 days'],
       selectedValue: trainingDays,
@@ -1434,7 +1480,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSessionDurationScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 14,
+      questionNumber: 13,
       title: "How much time do you have per session?",
       options: ['20 min', '30 min', '45 min', '60 min', '90 min'],
       selectedValue: sessionDuration,
@@ -1445,7 +1491,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildWorkoutTimeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 15,
+      questionNumber: 14,
       title: "What time of day do you usually work out?",
       options: ['Morning', 'Afternoon', 'Evening', 'Flexible'],
       selectedValue: workoutTime,
@@ -1456,9 +1502,10 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildInjuriesScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 16,
-      title: "Do you have any current injuries or pain?",
-      options: ['Back', 'Knees', 'Shoulders', 'Hips', 'Neck', 'Elbows', 'Wrists', 'Ankles', 'None'],
+      questionNumber: 15,
+      title: "Do you have any areas that feel uncomfortable during exercise?",
+      subtitle: "We'll keep your plan flexible and easy to adjust.",
+      options: ['None', 'Back', 'Knees', 'Shoulders', 'Hips', 'Neck', 'Elbows', 'Wrists', 'Ankles'],
       selectedValues: injuries,
       onToggle: (val) {
         if (val == 'None') {
@@ -1472,28 +1519,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildHealthConditionsScreen(bool isDarkMode) {
-    return _buildMultiSelectionScreen(
-      questionNumber: 17,
-      title: "Do you have any health conditions we should consider?",
-      options: ['Hypertension', 'Diabetes', 'Heart Condition', 'Joint Issues', 'None'],
-      selectedValues: healthConditions,
-      onToggle: (val) {
-        if (val == 'None') {
-          setState(() => healthConditions = ['None']);
-        } else {
-          if (healthConditions.contains('None')) healthConditions.remove('None');
-          toggleOption(healthConditions, val);
-        }
-      },
-      isDarkMode: isDarkMode,
-    );
-  }
-
   Widget _buildDietTypeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 18,
+      questionNumber: 16,
       title: "What best describes your diet type?",
+      subtitle: "This helps us suggest meals you may enjoy.",
       options: ['No Preference', 'Vegetarian', 'Vegan', 'Pescatarian', 'Mediterranean', 'Keto', 'Low-Carb', 'Gluten-Free'],
       selectedValue: dietType,
       onSelect: (val) => setState(() => dietType = val),
@@ -1504,8 +1534,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildAllergiesScreen(bool isDarkMode) {
     return _buildMultiSelectionScreen(
-      questionNumber: 19,
-      title: "Do you have any allergies?",
+      questionNumber: 17,
+      title: "Any ingredients we should exclude?",
+      subtitle: "This helps filter recipe suggestions.",
       options: ['None', 'Nuts', 'Dairy', 'Gluten', 'Eggs', 'Soy', 'Shellfish'],
       selectedValues: allergies,
       onToggle: (val) {
@@ -1522,7 +1553,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildMacroBalanceScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 20,
+      questionNumber: 18,
       title: "What macro balance fits you best?",
       options: ['Balanced', 'Higher Protein', 'Lower Carb', 'Higher Carb'],
       selectedValue: macroBalance,
@@ -1533,8 +1564,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSleepHoursScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 21,
+      questionNumber: 19,
       title: "How many hours do you sleep?",
+      subtitle: "Sleep plays a big role in fitness recovery.",
       options: ['Less than 5', '5-6 hours', '7-8 hours', 'More than 8'],
       selectedValue: sleepHours,
       onSelect: (val) => setState(() => sleepHours = val),
@@ -1544,7 +1576,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildSleepQualityScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 22,
+      questionNumber: 20,
       title: "How would you rate your sleep quality?",
       options: ['Poor', 'Fair', 'Good', 'Excellent'],
       selectedValue: sleepQuality,
@@ -1555,8 +1587,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildStressLevelScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 23,
-      title: "What's your current stress level?",
+      questionNumber: 21,
+      title: "What's your current lifestyle stress level?",
+      subtitle: "Used to suggest appropriate recovery times.",
       options: ['Low', 'Moderate', 'High'],
       selectedValue: stressLevel,
       onSelect: (val) => setState(() => stressLevel = val),
@@ -1567,12 +1600,71 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
   Widget _buildWaterIntakeScreen(bool isDarkMode) {
     return _buildSelectionScreen(
-      questionNumber: 24,
+      questionNumber: 22,
       title: "How much water do you usually drink per day?",
+      subtitle: "We'll suggest a general daily hydration goal.",
       options: ['Less than 1 liter (about 4 cups)', '1–2 liters (4–8 cups)', '2–3 liters (8–12 cups)', 'More than 3 liters (12+ cups)'],
       selectedValue: waterIntake,
       onSelect: (val) => setState(() => waterIntake = val),
       isDarkMode: isDarkMode,
+    );
+  }
+
+  Widget _buildMedicalDisclaimerScreen(bool isDarkMode) {
+    return Column(
+      children: [
+        _buildProgressBar(23),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: isDarkMode ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildAnimatedWidget(
+                  delay: 100,
+                  slideUp: false,
+                  child: Text(
+                    "Before we continue",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildAnimatedWidget(
+                  delay: 150,
+                  slideUp: false,
+                  child: Text(
+                    "This app provides general fitness and nutrition guidance. It is not medical advice.\n\nAlways consult a qualified professional before making major changes to your diet or exercise routine.",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                _buildContinueButton(() => nextScreen(24), text: 'I UNDERSTAND'),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1629,30 +1721,15 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     final double descVertPadding = veryCompact ? 10 : 14;
 
     // Category
-    String category;
-    String description;
     Color catColor;
-    String catIcon;
     if (bmi < 18.5) {
-      category = 'Underweight';
-      description = 'Focus on building lean muscle mass and increasing caloric intake.';
       catColor = const Color(0xFF5BC8F5);
-      catIcon = '⚡';
     } else if (bmi < 25) {
-      category = 'Healthy BMI';
-      description = 'Good starting BMI to build muscle, lose fat and get your dream body.';
       catColor = const Color(0xFF27AE60);
-      catIcon = '👌';
     } else if (bmi < 30) {
-      category = 'Overweight';
-      description = 'A fat-loss focused program will help you reach a healthier weight.';
       catColor = const Color(0xFFE67E22);
-      catIcon = '🔥';
     } else {
-      category = 'Obese';
-      description = 'Starting with low-intensity cardio and diet changes will make a big difference.';
       catColor = const Color(0xFFE74C3C);
-      catIcon = '💪';
     }
 
     return _buildAnimatedWidget(
@@ -1691,59 +1768,35 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                 ),
               ),
             ),
-            // Category label pill
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-              decoration: BoxDecoration(
-                color: catColor,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                category,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-            ),
             SizedBox(height: afterGaugeSpacing),
-            // ── Category description card ─────────────────────────────
+            // ── Compliance text ─────────────────────────────
             Container(
               width: double.infinity,
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: descVertPadding),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               decoration: BoxDecoration(
-                color: catColor.withOpacity(isDarkMode ? 0.2 : 0.12),
+                color: isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: catColor.withOpacity(0.4)),
+                border: Border.all(color: isDarkMode ? Colors.white24 : Colors.black12),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(catIcon, style: TextStyle(fontSize: veryCompact ? 18 : 22)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          category,
-                          style: TextStyle(
-                            fontSize: compact ? 13 : 15,
-                            fontWeight: FontWeight.bold,
-                            color: catColor,
-                          ),
-                        ),
-                        SizedBox(height: veryCompact ? 2 : 4),
-                        Text(
-                          description,
-                          style: TextStyle(
-                            fontSize: descFontSize,
-                            color: isDarkMode ? Colors.white70 : const Color(0xFF555555),
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
+                  Text(
+                    'Your BMI estimate: ${bmi.toStringAsFixed(1)}',
+                    style: TextStyle(
+                      fontSize: compact ? 14 : 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDarkMode ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'This is a general reference and not a medical assessment.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: descFontSize,
+                      color: isDarkMode ? Colors.white70 : const Color(0xFF555555),
+                      height: 1.4,
                     ),
                   ),
                 ],
@@ -1831,7 +1884,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         _introComplete = false;
                         progressPercent = 0;
                       });
-                      nextScreen(26);
+                      nextScreen(25);
                       // Start 7-second fake progress timer
                       _introTimer?.cancel();
                       const totalMs = 7000;
@@ -1845,11 +1898,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                           if (!mounted) { t.cancel(); return; }
                           setState(() {
                             progressPercent = pct;
-                            if (pct < 25) progressStatus = 'Analyzing your profile...';
-                            else if (pct < 50) progressStatus = 'Crafting your workout plan...';
-                            else if (pct < 75) progressStatus = 'Designing your meal plan...';
-                            else progressStatus = 'Finalizing your program...';
-                            currentStep = pct < 25 ? 1 : pct < 50 ? 2 : pct < 75 ? 3 : 4;
+                            progressStatus = 'Setting up your plan...';
+                            currentStep = pct < 33.3 ? 1 : (pct < 66.6 ? 2 : 3);
                           });
                           if (elapsed >= totalMs) {
                             t.cancel();
@@ -1959,10 +2009,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         ),
                       ),
                       SizedBox(height: spacing),
-                      _buildProgressStep('Analyzing Profile', currentStep >= 1, isDarkMode),
-                      _buildProgressStep('Crafting Workouts', currentStep >= 2, isDarkMode),
-                      _buildProgressStep('Designing Meal Plan', currentStep >= 3, isDarkMode),
-                      _buildProgressStep('Program Ready', currentStep >= 4, isDarkMode),
+                      _buildProgressStep('Preparing your preferences', currentStep >= 1, isDarkMode),
+                      _buildProgressStep('Organizing workouts', currentStep >= 2, isDarkMode),
+                      _buildProgressStep('Creating your schedule', currentStep >= 3, isDarkMode),
                       const SizedBox(height: 32),
                       // Button appears only when animation completes
                       AnimatedOpacity(
@@ -2089,10 +2138,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     ),
                     SizedBox(height: spacing),
                     // Steps
-                    _buildProgressStep('Analyzing Profile', currentStep >= 1, isDarkMode),
-                    _buildProgressStep('Generating Workouts', currentStep >= 2, isDarkMode),
-                    _buildProgressStep('Creating Meal Plan', currentStep >= 3, isDarkMode),
-                    _buildProgressStep('Finalizing Program', currentStep >= 4, isDarkMode),
+                    _buildProgressStep('Preparing your preferences', currentStep >= 1, isDarkMode),
+                    _buildProgressStep('Organizing workouts', currentStep >= 2, isDarkMode),
+                    _buildProgressStep('Creating your schedule', currentStep >= 3, isDarkMode),
                     const SizedBox(height: 20),
                   ],
                 ),

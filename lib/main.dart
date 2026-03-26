@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'pages/home_page.dart';
 import 'pages/workout_page.dart';
 import 'pages/meal_plan_page.dart';
@@ -15,7 +18,7 @@ import 'pages/legal/terms_of_service_page.dart';
 import 'pages/legal/delete_account_page.dart';
 import 'pages/legal/copyright_page.dart';
 import 'pages/legal/age_requirement_page.dart';
-import 'pages/contact_page.dart';
+import 'pages/legal/contact_support_page.dart';
 import '../widgets/auth/auth_modal.dart';
 import 'pages/auth_page.dart';
 import 'pages/onboarding_page.dart';
@@ -28,6 +31,7 @@ import 'pages/calculators/body_fat_calculator_page.dart';
 import 'pages/calculators/one_rm_calculator_page.dart';
 
 Future<void> main() async {
+  usePathUrlStrategy();
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
@@ -83,13 +87,13 @@ class _GymGuideAppState extends State<GymGuideApp> {
         scaffoldBackgroundColor: const Color(0xFF121212),
         primarySwatch: Colors.red,
       ),
-      home: MainScaffold(
-        toggleTheme: _toggleTheme,
-        isDarkMode: _themeMode == ThemeMode.dark,
-      ),
+      initialRoute: '/',
       onGenerateRoute: (settings) {
         WidgetBuilder? builder;
         switch (settings.name) {
+          case '/':
+            builder = (context) => MainScaffold(initialIndex: 0, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+            break;
           case '/eula':
             builder = (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
             break;
@@ -121,7 +125,7 @@ class _GymGuideAppState extends State<GymGuideApp> {
             builder = (context) => AgeRequirementPage(toggleTheme: _toggleTheme);
             break;
           case '/contact':
-            builder = (context) => ContactPage(isDarkMode: _themeMode == ThemeMode.dark, toggleTheme: _toggleTheme);
+            builder = (context) => ContactSupportPage(toggleTheme: _toggleTheme);
             break;
           case '/calculators/bmi':
             builder = (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
@@ -137,6 +141,12 @@ class _GymGuideAppState extends State<GymGuideApp> {
             break;
           case '/calculators/one-rm':
             builder = (context) => MainScaffold(initialIndex: 10, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+            break;
+          case '/profile':
+            builder = (context) => MainScaffold(initialIndex: 4, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+            break;
+          case '/settings':
+            builder = (context) => MainScaffold(initialIndex: 5, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
             break;
         }
 
@@ -165,63 +175,77 @@ class AuthWrapper extends StatefulWidget {
 class _AuthWrapperState extends State<AuthWrapper> {
   bool _isLoading = true;
   bool _isAuthenticated = false;
-  bool _hasName = false;
+  bool _hasProfile = false;
+  StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
-
-    _checkAuthState();
     
-    // Listen for auth state changes
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-
+    // Listen for auth state changes (will fire initially and on any login/logout)
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       _checkAuthState();
     });
   }
 
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
   Future<void> _checkAuthState() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final user = Supabase.instance.client.auth.currentUser;
 
-    // FOR DEBUGGING: Force Onboarding state
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) {
-      setState(() {
-        _isAuthenticated = true;
-        _hasName = false;
-        _isLoading = false;
-      });
-
+    if (session == null || user == null) {
+      if (mounted) {
+        setState(() {
+          _isAuthenticated = false;
+          _hasProfile = false;
+          _isLoading = false;
+        });
+      }
       return;
     }
 
-    /* 
-    // Original logic
-    final session = Supabase.instance.client.auth.currentSession;
-    
-    if (session != null) {
-      // Check if user has a name in metadata
-      final user = Supabase.instance.client.auth.currentUser;
-      final name = user?.userMetadata?['full_name'];
-      
-      setState(() {
-        _isAuthenticated = true;
-        _hasName = name != null && name.toString().isNotEmpty;
-        _isLoading = false;
-      });
-    } else {
-      setState(() {
-        _isAuthenticated = false;
-        _hasName = false;
-        _isLoading = false;
-      });
+    // User is authenticated, now check if they have a profile (user_preferences)
+    try {
+      final response = await Supabase.instance.client
+          .from('user_preferences')
+          .select('user_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (mounted) {
+        if (response != null) {
+          // Sync missing SharedPreferences for returning users on new devices
+          // to prevent them from being forced into the onboarding quiz.
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('has_workout_plan', true);
+          await prefs.setBool('has_meal_plan', true);
+        }
+
+        setState(() {
+          _isAuthenticated = true;
+          _hasProfile = response != null;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[Auth] Error checking profile: $e');
+      if (mounted) {
+        setState(() {
+          _isAuthenticated = true;
+          _hasProfile = false;
+          _isLoading = false;
+        });
+      }
     }
-    */
   }
 
   @override
   Widget build(BuildContext context) {
-
-    
     if (_isLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator(color: Colors.red)),
@@ -232,7 +256,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return const AuthPage();
     }
 
-    if (!_hasName) {
+    if (!_hasProfile) {
       return const OnboardingPage();
     }
 

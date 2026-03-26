@@ -296,13 +296,16 @@ class WorkoutPageState extends State<WorkoutPage> {
       if (planRow != null && mounted) {
         setState(() {
           _generatedPlan = planRow;
+          _hasPlan = true;
           _isLoadingPlan = false;
         });
       } else {
-        setState(() {
-          _generatedPlan = null;
-          _isLoadingPlan = false;
-        });
+        if (mounted) {
+          setState(() {
+            _generatedPlan = null;
+            _isLoadingPlan = false;
+          });
+        }
         print('DEBUG: No plan found.');
       }
     } catch (e) {

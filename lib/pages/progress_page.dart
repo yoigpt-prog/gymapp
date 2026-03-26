@@ -1096,26 +1096,6 @@ class _BodyMetricsCard extends StatelessWidget {
         : 1.0;
     final rate = change != null ? change / elapsedWks : null;
 
-    // BMI
-    double? bmi;
-    String bmiLabel = '';
-    Color bmiColor = Colors.green;
-    if (heightM != null && heightM > 0 && curW != null) {
-      bmi = curW / (heightM * heightM);
-      if (bmi < 18.5) {
-        bmiLabel = 'Underweight';
-        bmiColor = Colors.blue;
-      } else if (bmi < 25) {
-        bmiLabel = 'Normal';
-        bmiColor = Colors.green;
-      } else if (bmi < 30) {
-        bmiLabel = 'Overweight';
-        bmiColor = Colors.orange;
-      } else {
-        bmiLabel = 'Obese';
-        bmiColor = Colors.red;
-      }
-    }
 
     final changeStr =
         change != null ? '${change >= 0 ? '+' : ''}${_fmt(change)} kg' : '—';
@@ -1199,65 +1179,6 @@ class _BodyMetricsCard extends StatelessWidget {
                         color: isDarkMode ? Colors.white54 : Colors.grey,
                         fontSize: 13)),
               ]),
-              if (bmi != null) ...[
-                const Divider(height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('BMI',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDarkMode
-                                      ? Colors.white54
-                                      : Colors.grey)),
-                          const SizedBox(height: 4),
-                          Row(children: [
-                            Text(_fmt(bmi, dp: 1),
-                                style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black)),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                  color: bmiColor.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(4)),
-                              child: Text(bmiLabel,
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: bmiColor)),
-                            ),
-                          ]),
-                        ]),
-                    Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('Healthy range',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDarkMode
-                                      ? Colors.white54
-                                      : Colors.grey)),
-                          const SizedBox(height: 4),
-                          Text('18.5 – 25',
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDarkMode
-                                      ? Colors.white70
-                                      : Colors.black87)),
-                        ]),
-                  ],
-                ),
-              ],
             ]),
         ],
       ),
@@ -1681,6 +1602,8 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
         if (context.findAncestorStateOfType<ProgressPageState>() != null) {
           context.findAncestorStateOfType<ProgressPageState>()!.refresh();
         }
+        // Also reload local data to sync the displayed weight list
+        await _loadData();
       }
     } catch (e) {
       print('Error logging weight: $e');

@@ -99,7 +99,11 @@ class _AuthModalState extends State<AuthModal> {
         authScreenLaunchMode: LaunchMode.externalNonBrowserApplication,
       );
     } catch (e) {
-      if (mounted) _showError(e.toString());
+      final msg = e.toString().toLowerCase();
+      // Swallow cancellation silently, show errors for everything else
+      if (!msg.contains('cancel') && !msg.contains('dismiss') && !msg.contains('user closed')) {
+        if (mounted) _showError('Apple sign-in failed. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -229,7 +233,15 @@ class _AuthModalState extends State<AuthModal> {
   }
 
   void _showError(String message) {
-    // Snackbar silenced — log only
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red[700],
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
     debugPrint('[AUTH ERROR] $message');
   }
 
@@ -591,16 +603,6 @@ class _AuthModalState extends State<AuthModal> {
         ),
         SizedBox(height: isCompact ? 12 : 16),
         _buildButton(
-          label: 'with Google',
-          iconWidget: SvgPicture.asset('assets/svg/logo/G.svg', height: isCompact ? 18 : 22, width: isCompact ? 18 : 22),
-          onTap: _signInWithGoogle,
-          isCompact: isCompact,
-          textColor: Colors.black,
-          hasBorder: true,
-          backgroundColor: Colors.white,
-        ),
-        SizedBox(height: isCompact ? 8 : 12),
-        _buildButton(
           label: 'with Apple',
           iconWidget: Icon(FontAwesomeIcons.apple, size: isCompact ? 18 : 22, color: Colors.white),
           onTap: _signInWithApple,
@@ -608,6 +610,16 @@ class _AuthModalState extends State<AuthModal> {
           textColor: Colors.white,
           hasBorder: false,
           backgroundColor: Colors.black,
+        ),
+        SizedBox(height: isCompact ? 8 : 12),
+        _buildButton(
+          label: 'with Google',
+          iconWidget: SvgPicture.asset('assets/svg/logo/G.svg', height: isCompact ? 18 : 22, width: isCompact ? 18 : 22),
+          onTap: _signInWithGoogle,
+          isCompact: isCompact,
+          textColor: Colors.black,
+          hasBorder: true,
+          backgroundColor: Colors.white,
         ),
       ],
     );

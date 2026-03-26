@@ -8,7 +8,7 @@ import '../pages/legal/subscription_terms_page.dart';
 import '../pages/legal/copyright_page.dart';
 import '../pages/legal/age_requirement_page.dart';
 import '../pages/legal/ai_transparency_page.dart';
-import '../pages/contact_page.dart';
+import '../pages/legal/contact_support_page.dart';
 
 class WebFooter extends StatefulWidget {
   final bool isDarkMode;

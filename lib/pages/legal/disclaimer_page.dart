@@ -8,7 +8,7 @@ class DisclaimerPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    
+
     return LegalPageLayout(
       onToggleTheme: toggleTheme,
       title: 'Health & Safety Disclaimer',
@@ -17,41 +17,62 @@ class DisclaimerPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildText(
-            'GymGuide provides general fitness and nutrition guidance.\n'
-            'GymGuide is not a medical service and does not provide medical advice.',
+            'GymGuide provides general fitness and nutrition guidance for informational purposes only.',
             isDarkMode,
             bold: true,
           ),
           const SizedBox(height: 24),
           _buildSection(
-            'Always consult a licensed physician before:',
-            '• Starting a new workout\n'
-            '• Changing your diet\n'
-            '• Following nutrition plans\n'
-            '• Training with pre-existing conditions',
+            'Not Medical Advice',
+            'GymGuide is NOT a medical service.\n\n'
+            'Nothing in the app should be considered:\n\n'
+            '• Medical advice\n'
+            '• Diagnosis\n'
+            '• Treatment',
             isDarkMode,
           ),
           _buildSection(
-            'Stop immediately if you feel:',
-            '• Pain\n'
+            'Before Using the App',
+            'Consult a licensed healthcare professional before:\n\n'
+            '• Starting a new exercise program\n'
+            '• Changing your diet\n'
+            '• Following any plan if you have medical conditions',
+            isDarkMode,
+          ),
+          _buildSection(
+            'During Use',
+            'Stop immediately and seek medical attention if you experience:\n\n'
+            '• Pain or injury\n'
+            '• Dizziness or fainting\n'
             '• Shortness of breath\n'
-            '• Dizziness\n'
-            '• Chest tightness',
+            '• Chest pain or discomfort',
+            isDarkMode,
+          ),
+          _buildSection(
+            'Personal Responsibility',
+            'You acknowledge that:\n\n'
+            '• You are responsible for your own health\n'
+            '• You use the app at your own risk\n'
+            '• Results are not guaranteed',
             isDarkMode,
           ),
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFE5E5),
+              color: isDarkMode ? const Color(0xFF4A1A1A) : const Color(0xFFFFE5E5),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Text(
-              'GymGuide and GGUIDE Apps Solutions LLC are not responsible for injuries or damages resulting from your use of the app.\n\nUse at your own risk.',
+            child: Text(
+              'Liability Waiver\n\nGymGuide and GGUIDE Apps Solutions LLC are not responsible for:\n\n'
+              '• Injuries\n'
+              '• Health complications\n'
+              '• Misuse of recommendations\n\n'
+              'Use at your own risk.',
               style: TextStyle(
                 fontSize: 14,
-                height: 1.5,
-                color: Color(0xFFB71C1C),
+                height: 1.6,
+                color: isDarkMode ? Colors.white : const Color(0xFFB71C1C),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -71,7 +92,7 @@ class DisclaimerPage extends StatelessWidget {
           Text(
             title,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
               color: isDarkMode ? Colors.white : Colors.black,
             ),
@@ -88,7 +109,7 @@ class DisclaimerPage extends StatelessWidget {
       text,
       style: TextStyle(
         fontSize: 14,
-        height: 1.5,
+        height: 1.6,
         fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
         color: isDarkMode ? Colors.white70 : Colors.black87,
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class DeleteAccountPage extends StatelessWidget {
@@ -168,30 +169,106 @@ class DeleteAccountPage extends StatelessWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
+    final TextEditingController typeController = TextEditingController();
+    bool canDelete = false;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     final first = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'Are you sure you want to delete your account?\n\n'
-          'This will permanently delete:\n'
-          '• All workout data\n'
-          '• Meal plans\n'
-          '• Progress history\n'
-          '• Account settings\n\n'
-          'This action CANNOT be undone!',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF0000))),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setModalState) {
+          return AlertDialog(
+            backgroundColor: isDarkMode ? const Color(0xFF1C1C1E) : Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935), size: 22),
+                const SizedBox(width: 8),
+                Text('Delete Account',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                      color: isDarkMode ? Colors.white : Colors.black,
+                    )),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Are you sure you want to delete your account?\n\n'
+                  'This will permanently delete:\n'
+                  '• All workout data\n'
+                  '• Meal plans\n'
+                  '• Progress history\n'
+                  '• Account settings\n\n'
+                  'This action CANNOT be undone!',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: isDarkMode ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Type DELETE to confirm:',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDarkMode ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: typeController,
+                  autofocus: false,
+                  style: TextStyle(
+                    color: isDarkMode ? Colors.white : Colors.black,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'DELETE',
+                    hintStyle: TextStyle(
+                      color: isDarkMode ? Colors.white30 : Colors.black26,
+                    ),
+                    filled: true,
+                    fillColor: isDarkMode ? const Color(0xFF2C2C2E) : const Color(0xFFF5F5F5),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                  onChanged: (val) {
+                    setModalState(() {
+                      canDelete = val.trim() == 'DELETE';
+                    });
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: Text('Cancel',
+                    style: TextStyle(
+                      color: isDarkMode ? Colors.white60 : Colors.black54,
+                    )),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canDelete ? const Color(0xFFE53935) : Colors.grey,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: canDelete ? () => Navigator.of(ctx).pop(true) : null,
+                child: const Text('Delete'),
+              ),
+            ],
+          );
+        });
+      },
     );
 
     if (first != true || !context.mounted) return;
@@ -218,9 +295,40 @@ class DeleteAccountPage extends StatelessWidget {
     );
 
     if (second == true && context.mounted) {
-      // TODO: Call backend to delete account
-      debugPrint('[ACCOUNT] Account deletion initiated');
-      Navigator.of(context).pop();
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const Center(child: CircularProgressIndicator()),
+      );
+
+      try {
+        // Call backend RPC to delete account
+        await Supabase.instance.client.rpc('delete_current_user');
+        // Sign out locally
+        await Supabase.instance.client.auth.signOut();
+        
+        debugPrint('[ACCOUNT] Account deletion successful');
+
+        if (context.mounted) {
+          // Pop loading indicator
+          Navigator.of(context).pop();
+          // Pop the page and return to home/auth
+          Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+        }
+      } catch (error) {
+        debugPrint('[ACCOUNT] Error deleting account: $error');
+        if (context.mounted) {
+          // Pop loading indicator
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to delete account. Please try again or contact support.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     }
   }
 }

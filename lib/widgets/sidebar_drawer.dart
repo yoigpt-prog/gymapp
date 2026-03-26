@@ -3,6 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:gymguide_app/widgets/auth/auth_modal.dart';
+import '../utils/platform_url.dart';
 
 class SidebarDrawer extends StatefulWidget {
   final int currentIndex;
@@ -66,6 +67,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: () => Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false),
                     ),
                     _buildNavItem(
                       icon: Icons.calculate_outlined,
@@ -140,6 +142,9 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb
+                          ? () => Navigator.pushNamed(context, '/profile')
+                          : null,
                     ),
                     _buildNavItem(
                       icon: Icons.settings_outlined,
@@ -151,6 +156,9 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
+                      onTapOverride: kIsWeb
+                          ? () => Navigator.pushNamed(context, '/settings')
+                          : null,
                     ),
                     _buildNavItem(
                       icon: Icons.logout,

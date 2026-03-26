@@ -16,8 +16,13 @@ import 'legal/terms_of_service_page.dart';
 import 'legal/disclaimer_page.dart';
 import 'legal/subscription_terms_page.dart';
 import 'legal/data_export_page.dart';
-// removed eula import
+import 'legal/delete_account_page.dart';
+import 'legal/copyright_page.dart';
+import 'legal/age_requirement_page.dart';
 import 'legal/ai_transparency_page.dart';
+import 'legal/contact_support_page.dart';
+import 'legal/about_app_page.dart';
+import '../widgets/desktop_right_panel.dart';
 
 class ProfilePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -358,10 +363,14 @@ class ProfilePageState extends State<ProfilePage> {
   void _openShareUrl(String url) async {
     final uri = Uri.parse(url);
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this option on your device.')),
+        );
       }
-    } catch (_) {}
+    }
   }
 
   void _showEditProfileDialog() {
@@ -535,45 +544,98 @@ class ProfilePageState extends State<ProfilePage> {
               isDarkMode: widget.isDarkMode,
             ),
             Expanded(
-              child: Scrollbar(
-                thumbVisibility: true,
-                controller: _scrollController,
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1200),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Left Column: User Profile Card
-                          SizedBox(
-                            width: 350,
-                            child: _buildUserProfileCard(),
-                          ),
-                          const SizedBox(width: 24),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Responsive ad panel: 22% of screen width, clamped to [200, 320]
+                  final adPanelWidth = (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
 
-                          // Right Column: Stats & Goals Grid
-                          Expanded(
-                            child: Column(
+                  const double spacing = 16.0;
+
+                  return Stack(
+                    children: [
+                      // Layer 1: Scrollable Content with Scrollbar on far right
+                      Positioned.fill(
+                        child: Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.all(spacing),
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _buildSectionTitle('Physical Stats'),
-                                const SizedBox(height: 16),
-                                _buildStatsGrid(),
-                                const SizedBox(height: 32),
-                                _buildSectionTitle('Goals & Preferences'),
-                                const SizedBox(height: 16),
-                                _buildGoalsGrid(),
+                                Expanded(
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(maxWidth: 1200),
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          // Left Column: User Profile Card
+                                          SizedBox(
+                                            width: 350,
+                                            child: _buildUserProfileCard(),
+                                          ),
+                                          const SizedBox(width: 24),
+
+                                          // Right Column: Stats & Goals Grid
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                _buildSectionTitle('Physical Stats'),
+                                                const SizedBox(height: 16),
+                                                _buildStatsGrid(),
+                                                const SizedBox(height: 32),
+                                                _buildSectionTitle('Goals & Preferences'),
+                                                const SizedBox(height: 16),
+                                                _buildGoalsGrid(),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: spacing),
+                                SizedBox(width: adPanelWidth), // Spacer for Ad
                               ],
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                ),
+
+                      // Layer 2: Fixed Ad Panel
+                      Positioned.fill(
+                        child: Padding(
+                          padding: const EdgeInsets.all(spacing),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Expanded(child: SizedBox()), // Allows clicks to pass through
+                              const SizedBox(width: spacing),
+                              SizedBox(
+                                width: adPanelWidth,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                                    border: Border.all(
+                                      color: widget.isDarkMode ? Colors.white : Colors.black,
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: DesktopRightPanel(isDarkMode: widget.isDarkMode),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ],
@@ -676,126 +738,105 @@ class ProfilePageState extends State<ProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      // Legal & Privacy Section
+
+                      // ── LEGAL & PRIVACY ──────────────────────────
                       _buildMobileSectionHeader('Legal & Privacy'),
                       const SizedBox(height: 12),
                       _buildMobileLegalItem(
-                        icon: Icons.description_outlined,
-                        title: 'EULA',
-                        subtitle: 'End User License Agreement',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/eula');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const SubscriptionTermsPage()));
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildMobileLegalItem(
                         icon: Icons.privacy_tip_outlined,
                         title: 'Privacy Policy',
-                        subtitle: 'How we protect your data',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/privacy');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const PrivacyPolicyPage()));
-                          }
-                        },
+                        subtitle: 'Your data & privacy',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const PrivacyPolicyPage())),
                       ),
                       const SizedBox(height: 8),
                       _buildMobileLegalItem(
                         icon: Icons.article_outlined,
                         title: 'Terms of Service',
-                        subtitle: 'Terms and conditions',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/terms');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const TermsOfServicePage()));
-                          }
-                        },
+                        subtitle: 'Terms & conditions',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const TermsOfServicePage())),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.description_outlined,
+                        title: 'EULA',
+                        subtitle: 'End User License Agreement',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const SubscriptionTermsPage())),
                       ),
                       const SizedBox(height: 8),
                       _buildMobileLegalItem(
                         icon: Icons.info_outline,
                         title: 'Disclaimer',
-                        subtitle: 'Important information',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/disclaimer');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const DisclaimerPage()));
-                          }
-                        },
+                        subtitle: 'Health & safety info',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const DisclaimerPage())),
                       ),
                       const SizedBox(height: 8),
                       _buildMobileLegalItem(
-                        icon: Icons.credit_card_outlined,
-                        title: 'Subscription Terms',
-                        subtitle: 'Billing and subscription info',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/subscription-terms');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const SubscriptionTermsPage()));
-                          }
-                        },
+                        icon: Icons.copyright_outlined,
+                        title: 'Copyright',
+                        subtitle: 'Intellectual property rights',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const CopyrightPage())),
                       ),
                       const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.verified_user_outlined,
+                        title: 'Age Requirement',
+                        subtitle: 'Eligibility requirements',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const AgeRequirementPage())),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // ── DATA & TRANSPARENCY ───────────────────────
+                      _buildMobileSectionHeader('Data & Transparency'),
+                      const SizedBox(height: 12),
                       _buildMobileLegalItem(
                         icon: Icons.download_outlined,
-                        title: 'Data & Export',
-                        subtitle: 'Download your personal data',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/data-export');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const DataExportPage()));
-                          }
-                        },
+                        title: 'Download My Data',
+                        subtitle: 'Export your personal data',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const DataExportPage())),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.delete_forever_outlined,
+                        title: 'Delete Account',
+                        subtitle: 'Permanently delete your account',
+                        isDestructive: true,
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const DeleteAccountPage())),
                       ),
                       const SizedBox(height: 8),
                       _buildMobileLegalItem(
                         icon: Icons.psychology_outlined,
                         title: 'AI Transparency',
                         subtitle: 'How AI is used in this app',
-                        onTap: () {
-                          if (kIsWeb) {
-                            Navigator.pushNamed(context, '/ai-transparency');
-                          } else {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const AITransparencyPage()));
-                          }
-                        },
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const AITransparencyPage())),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // ── SUPPORT ───────────────────────────────────
+                      _buildMobileSectionHeader('Support'),
+                      const SizedBox(height: 12),
+                      _buildMobileLegalItem(
+                        icon: Icons.headset_mic_outlined,
+                        title: 'Contact Support',
+                        subtitle: 'support@gymguide.co',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const ContactSupportPage())),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.info_outline_rounded,
+                        title: 'About App',
+                        subtitle: 'Version & company info',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const AboutAppPage())),
                       ),
                       const SizedBox(height: 24),
 
@@ -834,8 +875,7 @@ class ProfilePageState extends State<ProfilePage> {
   Widget _buildMobileGoalsGrid() {
     // Only show Goal card on mobile (excluding Target Weight, Activity, Diet Type)
     // Full width for single Goal card
-    return _buildStatCard('Goal', _userStats['goal'], Icons.flag_outlined, true,
-        width: MediaQuery.of(context).size.width - 32);
+    return _buildStatCard('Goal', _userStats['goal'], Icons.flag_outlined, true);
   }
 
   Widget _buildMobileSectionHeader(String title) {
@@ -919,11 +959,17 @@ class ProfilePageState extends State<ProfilePage> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    bool isDestructive = false,
   }) {
     final cardColor =
         widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
+    final textColor = isDestructive
+        ? const Color(0xFFFF0000)
+        : (widget.isDarkMode ? Colors.white : Colors.black87);
     final subTextColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
+    final iconBg = isDestructive
+        ? const Color(0xFFFF0000).withOpacity(0.12)
+        : const Color(0xFFFF0000).withOpacity(0.1);
 
     return InkWell(
       onTap: onTap,
@@ -934,7 +980,9 @@ class ProfilePageState extends State<ProfilePage> {
           color: cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: widget.isDarkMode ? Colors.white : Colors.black,
+            color: isDestructive
+                ? const Color(0xFFFF0000).withOpacity(0.4)
+                : (widget.isDarkMode ? Colors.white : Colors.black),
             width: 1,
           ),
         ),
@@ -943,7 +991,7 @@ class ProfilePageState extends State<ProfilePage> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF0000).withOpacity(0.1),
+                color: iconBg,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(
@@ -977,7 +1025,7 @@ class ProfilePageState extends State<ProfilePage> {
             ),
             Icon(
               Icons.chevron_right,
-              color: subTextColor,
+              color: isDestructive ? const Color(0xFFFF0000) : subTextColor,
             ),
           ],
         ),
@@ -1141,14 +1189,15 @@ class ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildStatsGrid({bool isMobile = false}) {
-    return Wrap(
-      spacing: 16,
-      runSpacing: 16,
+    return Column(
       children: [
         _buildStatCard('Height', _userStats['height'], Icons.height, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard('Weight', _userStats['weight'],
             Icons.monitor_weight_outlined, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard('Age', _userStats['age'], Icons.cake_outlined, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard(
             'Gender', _userStats['gender'], Icons.person_outline, isMobile),
       ],
@@ -1156,17 +1205,17 @@ class ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildGoalsGrid({bool isMobile = false}) {
-    return Wrap(
-      spacing: 16,
-      runSpacing: 16,
+    return Column(
       children: [
         _buildStatCard(
-            'Goal', _userStats['goal'], Icons.flag_outlined, isMobile,
-            width: isMobile ? null : 300),
+            'Goal', _userStats['goal'], Icons.flag_outlined, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard('Target Weight', _userStats['target_weight'],
             Icons.track_changes, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard('Activity', _userStats['activity_level'],
             Icons.directions_run, isMobile),
+        const SizedBox(height: 12),
         _buildStatCard(
             'Diet Type', _userStats['diet'], Icons.restaurant_menu, isMobile),
       ],
@@ -1181,80 +1230,24 @@ class ProfilePageState extends State<ProfilePage> {
     final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
     final subTextColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
 
-    // Calculate width for grid items
-    // On desktop, we want 2 items per row roughly, or auto-flow
-    // Default width for stat cards
-    final cardWidth = width ??
-        (isMobile ? (MediaQuery.of(context).size.width - 48) / 2 : 200.0);
-
-    // Mobile layout: more compact, reduced vertical spacing for rectangular look
-    if (isMobile) {
-      return Container(
-        width: cardWidth,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: widget.isDarkMode ? Colors.white : Colors.black,
-            width: 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF0000).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                icon,
-                color: const Color(0xFFFF0000),
-                size: 20,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: subTextColor,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Desktop layout: original design
     return Container(
-      width: cardWidth,
-      padding: const EdgeInsets.all(20),
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 16 : 20, vertical: isMobile ? 12 : 16),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(isMobile ? 12 : 16),
         border: Border.all(
-          color: widget.isDarkMode ? Colors.white12 : Colors.black12,
+          color: isMobile
+              ? (widget.isDarkMode ? Colors.white : Colors.black)
+              : (widget.isDarkMode ? Colors.white12 : Colors.black12),
           width: 1,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(isMobile ? 10 : 12),
             decoration: BoxDecoration(
               color: const Color(0xFFFF0000).withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
@@ -1262,24 +1255,32 @@ class ProfilePageState extends State<ProfilePage> {
             child: Icon(
               icon,
               color: const Color(0xFFFF0000),
-              size: 24,
+              size: isMobile ? 20 : 24,
             ),
           ),
-          const SizedBox(height: 16),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: subTextColor,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: textColor,
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: isMobile ? 13 : 14,
+                    color: subTextColor,
+                  ),
+                ),
+                SizedBox(height: isMobile ? 2 : 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : 18,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

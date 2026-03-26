@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'main_layout_wrapper.dart';
-import 'desktop_right_panel.dart';
 import 'red_header.dart';
 
-class LegalPageLayout extends StatelessWidget {
+class LegalPageLayout extends StatefulWidget {
   final String title;
   final Widget child;
   final bool isDarkMode;
@@ -22,136 +22,197 @@ class LegalPageLayout extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<LegalPageLayout> createState() => _LegalPageLayoutState();
+}
+
+class _LegalPageLayoutState extends State<LegalPageLayout> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth > 800;
 
         if (isDesktop) {
+          // Responsive ad panel: 22% of screen width, clamped to [200, 320]
+          final adPanelWidth =
+              (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
+          final adAsset = widget.isDarkMode
+              ? 'assets/banner/adblackmode.svg'
+              : 'assets/banner/adwhitemode.svg';
+
+          const double spacing = 16.0;
+
           final content = Column(
             children: [
               // Header
               RedHeader(
                 title: 'GymGuide',
-                isDarkMode: isDarkMode,
-                onToggleTheme: onToggleTheme,
+                isDarkMode: widget.isDarkMode,
+                onToggleTheme: widget.onToggleTheme,
               ),
-              
-              // Content Area
+
+              // Content + Ad Stack
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    return SingleChildScrollView(
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 0, right: 8, top: 8, bottom: 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Left Spacer (where sidebar is)
-                            const SizedBox(width: 12),
-                              
-                              // Main Content - Stretched to fill height
+                child: Stack(
+                  children: [
+                    // Layer 1: Scrollable Content with Scrollbar on far right
+                    Positioned.fill(
+                      child: Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(spacing),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Main content area
                               Expanded(
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    minHeight: constraints.maxHeight - 16, // Stretch to fill available height
-                                  ),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: widget.isDarkMode
+                                        ? const Color(0xFF1E1E1E)
+                                        : Colors.white,
+                                    border: Border.all(
+                                      color: widget.isDarkMode ? Colors.white : Colors.black,
+                                      width: 1.0,
                                     ),
-                                    clipBehavior: Clip.antiAlias,
-                                    padding: const EdgeInsets.all(32),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          title,
-                                          style: TextStyle(
-                                            fontSize: 28,
-                                            fontWeight: FontWeight.bold,
-                                            color: isDarkMode ? Colors.white : Colors.black,
-                                          ),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  padding: const EdgeInsets.all(32),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        widget.title,
+                                        style: TextStyle(
+                                          fontSize: 28,
+                                          fontWeight: FontWeight.bold,
+                                          color: widget.isDarkMode
+                                              ? Colors.white
+                                              : Colors.black,
                                         ),
-                                        const SizedBox(height: 24),
-                                        child,
-                                      ],
+                                      ),
+                                      const SizedBox(height: 24),
+                                      widget.child,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              if (widget.showBanner) ...[
+                                const SizedBox(width: spacing),
+                                SizedBox(width: adPanelWidth), // Spacer for Ad
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Layer 2: Fixed Ad Panel
+                    if (widget.showBanner)
+                      Positioned.fill(
+                        child: Padding(
+                          padding: const EdgeInsets.all(spacing),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Expanded(child: SizedBox()), // Allows clicks to pass through
+                              const SizedBox(width: spacing),
+                              SizedBox(
+                                width: adPanelWidth,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: widget.isDarkMode
+                                        ? const Color(0xFF1E1E1E)
+                                        : Colors.white,
+                                    border: Border.all(
+                                      color: widget.isDarkMode ? Colors.white : Colors.black,
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        return AnimatedSwitcher(
+                                          duration: const Duration(milliseconds: 50),
+                                          child: SvgPicture.asset(
+                                            adAsset,
+                                            key: ValueKey(adAsset),
+                                            fit: BoxFit.fill,
+                                            width: constraints.maxWidth,
+                                            height: constraints.maxHeight,
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ),
                                 ),
                               ),
-                              
-                              if (showBanner) ...[
-                                const SizedBox(width: 8),
-                                
-                                // Right Banner - Keep natural height (not stretched)
-                                SizedBox(
-                                  width: 280,
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                                      // borderRadius removed
-                                      border: Border.all(
-                                        color: isDarkMode ? Colors.white.withOpacity(0.2) : Colors.black,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: DesktopRightPanel(isDarkMode: isDarkMode),
-                                  ),
-                                ),
-                              ],
-                              
-                              const SizedBox(width: 8),
                             ],
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                  ],
                 ),
+              ),
             ],
           );
 
-          if (embedded) {
+          if (widget.embedded) {
             return Container(
-              color: isDarkMode ? const Color(0xFF121212) : const Color(0xFFF5F7FA),
+              color: widget.isDarkMode
+                  ? const Color(0xFF121212)
+                  : const Color(0xFFF5F7FA),
               child: content,
             );
           }
 
           return MainLayoutWrapper(
-            isDarkMode: isDarkMode,
+            isDarkMode: widget.isDarkMode,
             child: content,
           );
         }
 
-        // Mobile Layout
+        // Mobile Layout — unchanged
         return Scaffold(
-          backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          backgroundColor:
+              widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
           appBar: AppBar(
-            title: Text(title),
-            backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-            foregroundColor: isDarkMode ? Colors.white : Colors.black,
+            title: Text(widget.title),
+            backgroundColor:
+                widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+            foregroundColor: widget.isDarkMode ? Colors.white : Colors.black,
             elevation: 0,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
-              if (onToggleTheme != null)
+              if (widget.onToggleTheme != null)
                 IconButton(
-                  icon: Icon(isDarkMode ? Icons.dark_mode : Icons.wb_sunny_outlined),
-                  onPressed: onToggleTheme,
+                  icon: Icon(widget.isDarkMode
+                      ? Icons.dark_mode
+                      : Icons.wb_sunny_outlined),
+                  onPressed: widget.onToggleTheme,
                 ),
             ],
           ),
-          body: Container(
+          body: SizedBox(
             width: double.infinity,
             height: double.infinity,
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
-              child: child,
+              child: widget.child,
             ),
           ),
         );

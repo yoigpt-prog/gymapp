@@ -181,6 +181,33 @@ class MainScaffoldState extends State<MainScaffold> {
     final session = Supabase.instance.client.auth.currentSession;
     final user = Supabase.instance.client.auth.currentUser;
     
+    // Attempt local state sync if user is authenticated
+    if (session != null && user != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
+        final hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
+
+        // If local flags are missing, check DB to see if they're actually a returning user
+        if (!hasWorkoutPlan || !hasMealPlan) {
+          final response = await Supabase.instance.client
+              .from('user_preferences')
+              .select('user_id')
+              .eq('user_id', user.id)
+              .maybeSingle();
+
+          if (response != null) {
+            // User exists in DB! Sync local flags to prevent Quiz loops.
+            await prefs.setBool('has_workout_plan', true);
+            await prefs.setBool('has_meal_plan', true);
+            print('DEBUG: Returning user detected. Synced SharedPreferences.');
+          }
+        }
+      } catch (e) {
+        print('DEBUG: Error syncing auth state preferences: $e');
+      }
+    }
+
     if (mounted) {
       setState(() {
         if (session != null && user != null) {
@@ -344,8 +371,18 @@ class MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    // PREVENT RENDER UNTIL SYNC COMPLETES
+    if (_isLoadingAuth) {
+      return Scaffold(
+        backgroundColor: widget.isDarkMode ? const Color(0xFF121212) : Colors.white,
+        body: const Center(
+          child: CircularProgressIndicator(color: Colors.red),
+        ),
+      );
+    }
+
     // BLOCKING OTP UI
-    if (!_isLoadingAuth && Supabase.instance.client.auth.currentSession != null && !_isEmailVerified) {
+    if (Supabase.instance.client.auth.currentSession != null && !_isEmailVerified) {
        // ... (OTP UI Code remains same) ...
        return Scaffold(
          body: Container(

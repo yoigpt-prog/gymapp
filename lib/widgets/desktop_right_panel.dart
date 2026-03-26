@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class DesktopRightPanel extends StatelessWidget {
   final bool isDarkMode;
@@ -10,14 +11,27 @@ class DesktopRightPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final adAsset = isDarkMode
+        ? 'assets/banner/adblackmode.svg'
+        : 'assets/banner/adwhitemode.svg';
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 50),
       color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: Image.asset(
-          'assets/banner/adbanner.png',
-          fit: BoxFit.contain,
-        ),
+      padding: const EdgeInsets.all(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 50),
+            child: SvgPicture.asset(
+              adAsset,
+              key: ValueKey(adAsset),
+              fit: BoxFit.fill,
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+            ),
+          );
+        },
       ),
     );
   }

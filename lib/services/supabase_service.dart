@@ -15,6 +15,26 @@ class SupabaseService {
     }
   }
 
+  Future<void> sendContactMessage({
+    required String name,
+    required String email,
+    required String subject,
+    required String message,
+  }) async {
+    try {
+      await _client.from('contact_messages').insert({
+        'name': name.trim(),
+        'email': email.trim(),
+        'subject': subject.trim(),
+        'message': message.trim(),
+      });
+      print('DEBUG: Successfully inserted contact message to Supabase');
+    } catch (e) {
+      print('ERROR: Failed to send contact message: $e');
+      throw e;
+    }
+  }
+
   Future<List<Meal>> getMeals() async {
     try {
       // Fetch meals by category in parallel to ensure we get a mix of all types

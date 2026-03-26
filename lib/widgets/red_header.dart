@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../pages/main_scaffold.dart';
+import '../utils/platform_url.dart';
 
 /// Reusable red header widget used across all pages for consistency
 class RedHeader extends StatelessWidget {
@@ -57,16 +59,7 @@ class RedHeader extends StatelessWidget {
         // Logo
         GestureDetector(
           onTap: () {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(
-                builder: (context) => MainScaffold(
-                  toggleTheme: onToggleTheme ?? () {},
-                  isDarkMode: isDarkMode ?? false,
-                  initialIndex: 0,
-                ),
-              ),
-              (route) => false,
-            );
+            Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
           },
           child: SvgPicture.asset(
             'assets/svg/logo/gymguideicon.svg',
@@ -157,16 +150,7 @@ class RedHeader extends StatelessWidget {
         // Logo instead of title
         GestureDetector(
           onTap: () {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(
-                builder: (context) => MainScaffold(
-                  toggleTheme: onToggleTheme ?? () {},
-                  isDarkMode: isDarkMode ?? false,
-                  initialIndex: 0,
-                ),
-              ),
-              (route) => false,
-            );
+            Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
           },
           child: SvgPicture.asset(
             'assets/svg/logo/gymguideicon.svg',
