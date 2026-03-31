@@ -196,23 +196,18 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     }
   }
 
-  Future<void> startPlanGeneration() async {
-    // 0. Auth check
-    final supabaseService = SupabaseService();
-    var user = supabaseService.client.auth.currentUser;
-    if (user == null) {
-      await AuthModal.show(context);
-      user = supabaseService.client.auth.currentUser;
-      if (user == null) return;
-    }
-
+  Future<void> _startRealGenerationFlow() async {
     if (_isGenerating) return;
-    setState(() => _isGenerating = true);
+    setState(() {
+      _isGenerating = true;
+      _isIntroProgress = true;
+      _introComplete = false;
+    });
 
+    final supabaseService = SupabaseService();
     final prefs = await SharedPreferences.getInstance();
 
     if (!mounted) return;
-    // No setState for progress here — we stay on the paywall
 
     try {
       final quizService = QuizService();
@@ -226,7 +221,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         'training_days': trainingDays,
         'workout_location': workoutLocation,
         'plan_duration': planDuration,
-        'meals_per_day': 4, // Fixed: Always 4 meals
+        'meals_per_day': 4,
         'diet_type': dietType,
         'allergies': allergies,
       };
@@ -234,8 +229,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Saving your preferences...';
-        progressPercent = 40;
+        progressStatus = 'Preparing your preferences...';
+        progressPercent = 15;
+        currentStep = 1;
       });
 
       int durationWeeks = 4;
@@ -250,6 +246,19 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         }
       }
 
+      final double? hNum = double.tryParse(height.replaceAll(RegExp(r'[^\d.]'), ''));
+      double? wNum = double.tryParse(weight.replaceAll(RegExp(r'[^\d.]'), ''));
+      if (wNum != null && weightUnit == 'lbs') {
+        wNum = wNum * 0.453592;
+      }
+
+      final int? aNum = int.tryParse(age.replaceAll(RegExp(r'[^\d.]'), ''));
+      
+      double? tWNum = double.tryParse(targetWeight.replaceAll(RegExp(r'[^\d.]'), ''));
+      if (tWNum != null && targetWeightUnit == 'lbs') {
+        tWNum = tWNum * 0.453592;
+      }
+
       await supabaseService.saveUserPreferences(
         mainGoal: mainGoal,
         dietType: dietType,
@@ -258,12 +267,17 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         trainingLocation: normalized['training_location'],
         gender: normalized['gender'],
         trainingDays: normalized['training_days'],
+        height: hNum,
+        weight: wNum,
+        age: aNum,
+        targetWeight: tWNum,
       );
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Generating workout plan...';
-        progressPercent = 60;
+        progressStatus = 'Organizing workouts...';
+        progressPercent = 45;
+        currentStep = 2;
       });
 
       final planService = PlanService();
@@ -276,8 +290,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Generating meal plan...';
+        progressStatus = 'Creating your schedule...';
         progressPercent = 80;
+        currentStep = 3;
       });
 
       try {
@@ -293,29 +308,6 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       await prefs.setString('weight_unit', weightUnit);
       await prefs.setString('height_unit', heightUnit);
 
-      // ── Sync quiz data → profile page ──────────────────────────────────
-      // The profile page reads these exact keys from SharedPreferences.
-      if (height.isNotEmpty) {
-        // height already includes the unit (e.g. "175 cm"), don't append again
-        await prefs.setString('profile_height', height);
-      }
-      if (weight.isNotEmpty) {
-        // weight already includes the unit (e.g. "75 kg"), don't append again
-        await prefs.setString('profile_weight', weight);
-      }
-      if (age.isNotEmpty) {
-        await prefs.setString('profile_age', age);
-      }
-      if (gender.isNotEmpty) {
-        // Capitalize first letter so it matches profile page display (e.g. "Male")
-        final genderDisplay = gender[0].toUpperCase() + gender.substring(1).toLowerCase();
-        await prefs.setString('profile_gender', genderDisplay);
-      }
-      if (mainGoal.isNotEmpty) {
-        await prefs.setString('profile_goal', mainGoal);
-      }
-      // ────────────────────────────────────────────────────────────────────
-
       final userId = supabaseService.client.auth.currentUser?.id;
       if (userId != null) {
         await prefs.remove('meal_plan_cache_$userId');
@@ -324,17 +316,20 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       if (mounted) {
         setState(() {
           progressPercent = 100;
-          progressStatus = 'Ready!';
-        });
-        await Future.delayed(const Duration(milliseconds: 600));
-        Navigator.pop(context, {
-          'completed': true,
-          'navIndex': 1, // Workout tab
+          progressStatus = 'Setup complete!';
+          _introComplete = true; // Important: Make the button appear
+          _isGenerating = false;
         });
       }
     } catch (e) {
       print('ERROR in plan generation: $e');
       debugPrint('[QUIZ ERROR] Plan generation failed: $e');
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          _introComplete = true; // Let them hit the button anyway
+        });
+      }
     }
   }
 
@@ -543,31 +538,52 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '🔥 Effective workouts',
-                                style: TextStyle(
-                                  fontSize: badgeSize,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset('assets/svg/mealsicons/iconfire.png', width: badgeSize + 6, height: badgeSize + 6),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Effective workouts',
+                                    style: TextStyle(
+                                      fontSize: badgeSize,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 6),
-                              Text(
-                                '🥗 Flexible meal ideas',
-                                style: TextStyle(
-                                  fontSize: badgeSize,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset('assets/svg/mealsicons/iconmeal.png', width: badgeSize + 6, height: badgeSize + 6),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Flexible meal ideas',
+                                    style: TextStyle(
+                                      fontSize: badgeSize,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 6),
-                              Text(
-                                '📊 Easy progress tracking',
-                                style: TextStyle(
-                                  fontSize: badgeSize,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset('assets/svg/mealsicons/iconprogress.png', width: badgeSize + 6, height: badgeSize + 6),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Easy progress tracking',
+                                    style: TextStyle(
+                                      fontSize: badgeSize,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -579,11 +595,32 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                             onPressed: () async {
                               final supabaseService = SupabaseService();
                               var user = supabaseService.client.auth.currentUser;
+                              bool justSignedIn = false;
                               if (user == null) {
                                 await AuthModal.show(context);
                                 user = supabaseService.client.auth.currentUser;
                                 if (user == null) return; // still not signed in
+                                justSignedIn = true;
                               }
+                              
+                              if (justSignedIn) {
+                                // Double check if this existing user already has a profile!
+                                try {
+                                  final response = await supabaseService.client
+                                      .from('user_preferences')
+                                      .select('user_id')
+                                      .eq('user_id', user.id)
+                                      .maybeSingle();
+                                      
+                                  if (response != null && mounted) {
+                                    // They ALREADY have a profile/plan. Close the quiz and load it!
+                                    // the MainScaffold auth listener will handle refreshing the UI.
+                                    Navigator.pop(context, {'completed': true, 'navIndex': widget.quizType == 'workout' ? 1 : 2});
+                                    return;
+                                  }
+                                } catch (_) {}
+                              }
+                              
                               nextScreen(1);
                             },
                             style: ElevatedButton.styleFrom(
@@ -1822,20 +1859,20 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         final double smallSpacing = isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 12);
         final double afterSubtitleSpacing = isVerySmallScreen ? 10 : (isSmallScreen ? 14 : 20);
 
-        return SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight,
-            ),
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: isVerySmallScreen ? 8 : 16,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
+        return Column(
+          children: [
+            Expanded(
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: isVerySmallScreen ? 8 : 16,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(height: topSpacing),
                     _buildAnimatedWidget(
@@ -1877,43 +1914,38 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     SizedBox(height: afterSubtitleSpacing),
                     // ── BMI Widget ────────────────────────────────────────
                     _buildBmiWidget(isDarkMode, compact: isSmallScreen, veryCompact: isVerySmallScreen),
-                    SizedBox(height: isVerySmallScreen ? 6 : 8),
-                    _buildContinueButton(() {
-                      setState(() {
-                        _isIntroProgress = true;
-                        _introComplete = false;
-                        progressPercent = 0;
-                      });
-                      nextScreen(25);
-                      // Start 7-second fake progress timer
-                      _introTimer?.cancel();
-                      const totalMs = 7000;
-                      const tickMs = 70;
-                      int elapsed = 0;
-                      _introTimer = Timer.periodic(
-                        const Duration(milliseconds: tickMs),
-                        (t) {
-                          elapsed += tickMs;
-                          final pct = (elapsed / totalMs * 100).clamp(0.0, 100.0);
-                          if (!mounted) { t.cancel(); return; }
-                          setState(() {
-                            progressPercent = pct;
-                            progressStatus = 'Setting up your plan...';
-                            currentStep = pct < 33.3 ? 1 : (pct < 66.6 ? 2 : 3);
-                          });
-                          if (elapsed >= totalMs) {
-                            t.cancel();
-                            if (mounted) setState(() => _introComplete = true);
-                          }
-                        },
-                      );
-                    }),
-                    SizedBox(height: isVerySmallScreen ? 10 : 16),
-                  ],
+                      const SizedBox(height: 10),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20).copyWith(bottom: 20),
+              child: _buildContinueButton(() async {
+                // 1. Auth check before we start loading UI
+                final supabaseService = SupabaseService();
+                var user = supabaseService.client.auth.currentUser;
+                if (user == null) {
+                  await AuthModal.show(context);
+                  user = supabaseService.client.auth.currentUser;
+                  if (user == null) return; // aborted login
+                }
+
+                if (!mounted) return;
+                setState(() {
+                  _isIntroProgress = true;
+                  _introComplete = false;
+                  progressPercent = 0;
+                });
+                nextScreen(25);
+                
+                // Real layout executes plan concurrently with the UI steps!
+                await _startRealGenerationFlow();
+              }),
+            ),
+          ],
         );
       },
     );
@@ -2025,7 +2057,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                                     final purchased = await _presentRevenueCatPaywall();
                                     if (!mounted) return;
                                     if (purchased) {
-                                      await startPlanGeneration();
+                                      // Data was already generated, just navigate instantly!
+                                      Navigator.pop(context, {
+                                        'completed': true,
+                                        'navIndex': 1,
+                                      });
                                     }
                                   },
                                   style: ElevatedButton.styleFrom(
@@ -2092,42 +2128,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(height: spacing),
-                    SizedBox(
-                      height: progressSize,
-                      width: progressSize,
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: SizedBox(
-                              width: progressSize,
-                              height: progressSize,
-                              child: CircularProgressIndicator(
-                                value: progressPercent / 100,
-                                strokeWidth: isSmallScreen ? 8 : 12,
-                                backgroundColor: const Color(0xFFE0E0E0),
-                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
-                              ),
-                            ),
-                          ),
-                          Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '${progressPercent.toInt()}%',
-                                  style: TextStyle(
-                                    fontSize: percentageSize,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                    Icon(
+                      Icons.cloud_sync_outlined,
+                      size: isSmallScreen ? 80 : 100,
+                      color: const Color(0xFFFF0000),
                     ),
-                    SizedBox(height: smallSpacing),
+                    SizedBox(height: smallSpacing + 10),
                     Text(
                       progressStatus,
                       style: TextStyle(
@@ -2136,11 +2142,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
                       ),
                     ),
-                    SizedBox(height: spacing),
-                    // Steps
-                    _buildProgressStep('Preparing your preferences', currentStep >= 1, isDarkMode),
-                    _buildProgressStep('Organizing workouts', currentStep >= 2, isDarkMode),
-                    _buildProgressStep('Creating your schedule', currentStep >= 3, isDarkMode),
+                    const SizedBox(height: 20),
+                    // Removed duplicate progress steps from REAL loading mode to avoid confusing users
+                    const SizedBox(height: 10),
+                    const CircularProgressIndicator(
+                       color: Color(0xFFFF0000),
+                    ),
                     const SizedBox(height: 20),
                   ],
                 ),

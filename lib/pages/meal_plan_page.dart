@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:math';
@@ -109,6 +110,18 @@ class MealPlanPageState extends State<MealPlanPage> {
     }
   }
 
+  Future<void> _invalidateCache() async {
+    try {
+      final key = _getCacheKey();
+      if (key == null) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(key);
+      print('DEBUG: [Cache] Meal plan cache invalidated due to user edit');
+    } catch (e) {
+      // Ignored
+    }
+  }
+
   Future<Map<String, dynamic>?> _loadPlanFromCache() async {
     try {
       final key = _getCacheKey();
@@ -184,16 +197,21 @@ class MealPlanPageState extends State<MealPlanPage> {
     try {
       if (!mounted) return;
 
-      // For a full fetch with no filters, try showing cached data instantly
+      // ── DB-first strategy for cross-device sync ──
+      // We always fetch from Supabase so edits made on another device
+      // are picked up immediately. The cache is only used as a fast-path
+      // for the FIRST render while the DB query is in-flight.
       bool usedCache = false;
       if (week == null && day == null && !clearData) {
         final cached = await _loadPlanFromCache();
         if (cached != null && mounted) {
+          // Apply cache for instant display, but still fetch DB below
           _applyCachedData(cached);
           usedCache = true;
         }
       }
 
+      // Always fire a DB fetch to get the latest state
       if (!usedCache) {
         setState(() {
           _isLoading = true;
@@ -395,7 +413,7 @@ class MealPlanPageState extends State<MealPlanPage> {
       }
 
       // Sync to DB
-      await _supabaseService.toggleMealStatus(meal.planId!, newStatus);
+      await _supabaseService.toggleMealStatus(meal, newStatus);
       print('Status updated for plan row ${meal.planId}');
 
     } catch (e) {
@@ -877,6 +895,15 @@ class MealPlanPageState extends State<MealPlanPage> {
   }
 
 
+  String _getMealSvgIcon(String type) {
+    final t = type.toLowerCase();
+    if (t.contains('breakfast')) return 'assets/svg/mealsicons/breakfasticon.svg';
+    if (t.contains('lunch')) return 'assets/svg/mealsicons/lunchicon.svg';
+    if (t.contains('snack')) return 'assets/svg/mealsicons/snackicon.svg';
+    if (t.contains('dinner')) return 'assets/svg/mealsicons/dinnericon.svg';
+    return 'assets/svg/mealsicons/snackicon.svg';
+  }
+
   Widget _buildMealCard(Meal meal, bool isDarkMode, {bool isMobile = true}) {
     final cardColor = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -905,25 +932,32 @@ class MealPlanPageState extends State<MealPlanPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Image first - Mobile Only with eaten badge overlay
-          if (isMobile && meal.imageUrl != null && meal.imageUrl!.isNotEmpty) ...[
+          if (isMobile) ...[
             Stack(
               children: [
                 AspectRatio(
                   aspectRatio: 1,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      meal.imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          color: Colors.grey[200],
+                    child: (meal.imageUrl != null && meal.imageUrl!.isNotEmpty) 
+                      ? Image.network(
+                          meal.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey[200],
+                              child: const Center(
+                                child: Icon(Icons.broken_image, color: Colors.grey, size: 32),
+                              ),
+                            );
+                          },
+                        )
+                      : Container(
+                          color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey[200],
                           child: const Center(
-                            child: Icon(Icons.broken_image, color: Colors.grey, size: 32),
+                            child: Icon(Icons.restaurant, color: Colors.grey, size: 48),
                           ),
-                        );
-                      },
-                    ),
+                        ),
                   ),
                 ),
                 if (meal.eaten)
@@ -974,9 +1008,10 @@ class MealPlanPageState extends State<MealPlanPage> {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          meal.icon,
-                          style: const TextStyle(fontSize: 24),
+                        SvgPicture.asset(
+                          _getMealSvgIcon(meal.type),
+                          width: 24,
+                          height: 24,
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -1018,39 +1053,51 @@ class MealPlanPageState extends State<MealPlanPage> {
                       const SizedBox(width: 8),
                        GestureDetector(
                           onTap: () {
-                            showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              backgroundColor: Colors.transparent,
-                              builder: (context) => EditMealModal(
-                                meal: meal,
-                                onSave: (updatedMeal) async {
-                                  // Persist change
-                                  if (updatedMeal.planId != null) {
-                                      await _supabaseService.replaceMealInPlan(updatedMeal.planId!, updatedMeal);
-                                      // Refresh from DB to confirm IDs and new calories
-                                      // Calculate w/d from selected day
-                                      final diff = _selectedDay.difference(DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1))).inDays;
-                                      final gDay = diff + 1; // Approx
-                                      // Actually, easier to just reload the current view's data
-                                      // or let the optimistic local map update hold (but we need new meal_id for next edits)
-                                      
-                                      // Better to reload
-                                      // We need strict week/day.
-                                      // Let's rely on the fact that _loadMeals without args does a full refresh which is safer but slower?
-                                      // Or just update local state if we trust it.
-                                      // "When user edits... immediately recompute... and refresh UI"
-                                      
-                                      setState(() {
-                                        final dateKey = _getDateKey(_selectedDay);
-                                        if (_mealsByDay.containsKey(dateKey)) {
-                                          _mealsByDay[dateKey]![updatedMeal.type] = updatedMeal;
-                                        }
-                                      });
+                            final builder = (BuildContext context) => EditMealModal(
+                              meal: meal,
+                              onSave: (updatedMeal) async {
+                                final user = _supabaseService.client.auth.currentUser;
+                                if (user == null) return;
+
+                                // ── 1. Optimistic UI update (runs immediately) ──
+                                final dateKey = _getDateKey(_selectedDay);
+                                setState(() {
+                                  if (_mealsByDay.containsKey(dateKey)) {
+                                    _mealsByDay[dateKey]![updatedMeal.type] = updatedMeal;
                                   }
-                                },
-                              ),
+                                });
+
+                                // ── 2. Persist to DB using deep clone ──
+                                final planRowId = updatedMeal.planId;
+                                if (planRowId != null) {
+                                  try {
+                                    await _supabaseService.saveMealOverrides(planRowId, updatedMeal);
+                                    print('DEBUG: Meal overrides saved for plan row $planRowId');
+                                    // ── 3. Update cache and fetch DB silently in background ──
+                                    _savePlanToCache(_buildCachePayload());
+                                    _loadMeals(clearData: false);
+                                  } catch (e) {
+                                    print('ERROR saving meal overrides: $e');
+                                  }
+                                } else {
+                                  print('WARNING: planId is null for meal ${updatedMeal.id}, cannot save override.');
+                                }
+                              },
                             );
+
+                            if (MediaQuery.of(context).size.width > 600) {
+                              showDialog(
+                                context: context,
+                                builder: builder,
+                              );
+                            } else {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: builder,
+                              );
+                            }
                           },
                           child: Container(
                             padding: const EdgeInsets.all(4),
@@ -1126,31 +1173,48 @@ class MealPlanPageState extends State<MealPlanPage> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
+                // ── 1. Optimistic UI toggle (instant) ──
+                final newStatus = !meal.eaten;
+                final newMeal = Meal(
+                  id: meal.id,
+                  type: meal.type,
+                  icon: meal.icon,
+                  name: meal.name,
+                  imageUrl: meal.imageUrl,
+                  calories: meal.calories,
+                  protein: meal.protein,
+                  carbs: meal.carbs,
+                  fats: meal.fats,
+                  eaten: newStatus,
+                  planId: meal.planId,
+                  ingredients: meal.ingredients,
+                );
+
+                final dateKey = _getDateKey(_selectedDay);
+                if (!_mealsByDay.containsKey(dateKey)) return;
+
                 setState(() {
-                  // Toggle eaten status
-                  final newStatus = !meal.eaten;
-                  final newMeal = Meal(
-                    id: meal.id,
-                    type: meal.type,
-                    icon: meal.icon,
-                    name: meal.name,
-                    imageUrl: meal.imageUrl,
-                    calories: meal.calories,
-                    protein: meal.protein,
-                    carbs: meal.carbs,
-                    fats: meal.fats,
-                    eaten: newStatus,
-                    planId: meal.planId, // Copied planId
-                    ingredients: meal.ingredients,
-                  );
-                  
-                  final dateKey = _getDateKey(_selectedDay);
-                  if (_mealsByDay.containsKey(dateKey)) {
-                    _mealsByDay[dateKey]![meal.type] = newMeal;
-                    _saveMealStatus(dateKey, meal.type, newStatus);
-                  }
+                  _mealsByDay[dateKey]![meal.type] = newMeal;
                 });
+
+                // ── Update local cache silently ──
+                _savePlanToCache(_buildCachePayload());
+
+                // ── 2. Persist to DB in background ──
+                // Update is_eaten in user_meal_plan
+                _saveMealStatus(dateKey, meal.type, newStatus);
+
+                // Log immutable snapshot to meal_logs (only when marking eaten)
+                if (newStatus && newMeal.id != null) {
+                  final globalDay = _getSelectedDayNumber();
+                  try {
+                    await _supabaseService.logMealEaten(newMeal, globalDay);
+                  } catch (e) {
+                    print('WARNING: Could not save meal log: $e');
+                    // UI already toggled — this is non-critical (meal_logs is for history)
+                  }
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: meal.eaten 
@@ -1282,43 +1346,45 @@ class MealPlanPageState extends State<MealPlanPage> {
             ),
           ),
         ),
-        padding: const EdgeInsets.all(4),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final double circleWidth = constraints.maxWidth;
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    'Day $dayNumber',
-                    style: TextStyle(
-                      fontSize: circleWidth * 0.30, // 30% responsive scaling
-                      fontWeight: FontWeight.w900,
-                      color: isCompleted 
-                        ? Colors.white 
-                        : (isDarkMode ? Colors.white : const Color(0xFF333333)),
-                      letterSpacing: -0.5,
-                      height: 1.0,
+            return Padding(
+              padding: EdgeInsets.all(circleWidth * 0.15),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Day $dayNumber',
+                      style: TextStyle(
+                        fontSize: circleWidth * 0.35,
+                        fontWeight: FontWeight.w900,
+                        color: isCompleted 
+                          ? Colors.white 
+                          : (isDarkMode ? Colors.white : const Color(0xFF333333)),
+                        letterSpacing: -0.5,
+                        height: 1.0,
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(height: circleWidth * 0.05),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    '$progressPercent%',
-                    style: TextStyle(
-                      fontSize: circleWidth * 0.18,
-                      fontWeight: FontWeight.bold,
-                      color: isCompleted 
-                        ? Colors.white 
-                        : const Color(0xFF4CAF50), // Green for percentage
+                  SizedBox(height: circleWidth * 0.05),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '$progressPercent%',
+                      style: TextStyle(
+                        fontSize: circleWidth * 0.22,
+                        fontWeight: FontWeight.bold,
+                        color: isCompleted 
+                          ? Colors.white 
+                          : const Color(0xFF4CAF50), // Green for percentage
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             );
           },
         ),

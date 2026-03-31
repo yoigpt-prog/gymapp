@@ -84,42 +84,46 @@ class WebFooterState extends State<WebFooter> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // Copyright on the left
-            const Text(
-              '© 2025 GGUIDE Apps Solutions LLC. All rights reserved.',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
+            Expanded(
+              flex: 1,
+              child: const Text(
+                '© 2025 GGUIDE Apps Solutions LLC. All rights reserved.',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            
-            const Spacer(),
             
             // Legal Links - Center
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildFooterLink('Privacy', () => _navigateToPage(context, 'privacy')),
-                  _buildSeparator(),
-                  _buildFooterLink('Terms & EULA', () => _navigateToPage(context, 'terms')),
-                  _buildSeparator(),
-                  _buildFooterLink('Disclaimer', () => _navigateToPage(context, 'disclaimer')),
-                  _buildSeparator(),
-                  _buildFooterLink('Subscription', () => _navigateToPage(context, 'subscription')),
-                  _buildSeparator(),
-                  _buildFooterLink('Copyright', () => _navigateToPage(context, 'copyright')),
-                  _buildSeparator(),
-                  _buildFooterLink('Age', () => _navigateToPage(context, 'age')),
-                  _buildSeparator(),
-                  _buildFooterLink('AI', () => _navigateToPage(context, 'ai')),
-                  _buildSeparator(),
-                  _buildFooterLink('Contact', () => _navigateToPage(context, 'contact')),
-                ],
+            Expanded(
+              flex: 2,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildFooterLink('Privacy', () => _navigateToPage(context, 'privacy')),
+                    _buildSeparator(),
+                    _buildFooterLink('Terms & EULA', () => _navigateToPage(context, 'terms')),
+                    _buildSeparator(),
+                    _buildFooterLink('Disclaimer', () => _navigateToPage(context, 'disclaimer')),
+                    _buildSeparator(),
+                    _buildFooterLink('Subscription', () => _navigateToPage(context, 'subscription')),
+                    _buildSeparator(),
+                    _buildFooterLink('Copyright', () => _navigateToPage(context, 'copyright')),
+                    _buildSeparator(),
+                    _buildFooterLink('Age', () => _navigateToPage(context, 'age')),
+                    _buildSeparator(),
+                    _buildFooterLink('AI', () => _navigateToPage(context, 'ai')),
+                    _buildSeparator(),
+                    _buildFooterLink('Contact', () => _navigateToPage(context, 'contact')),
+                  ],
+                ),
               ),
             ),
-            
-            const Spacer(),
             
             // Social Media Icons - Right
             Row(

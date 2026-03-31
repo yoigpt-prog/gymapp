@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/supabase_service.dart';
 import 'exercise_detail_page.dart';
 import 'dart:async'; // Required for StreamSubscription
 import 'dart:convert';
@@ -93,7 +94,6 @@ class WorkoutPageState extends State<WorkoutPage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _checkPlanStatus();
 
     // Subscribe to Auth State Changes to handle race conditions on reload
     _authStateSubscription =
@@ -102,40 +102,32 @@ class WorkoutPageState extends State<WorkoutPage> {
       if (event == AuthChangeEvent.signedIn ||
           event == AuthChangeEvent.initialSession ||
           event == AuthChangeEvent.tokenRefreshed) {
-        print('DEBUG: Auth Event $event - Triggering Refresh');
+        debugPrint('[WorkoutPage] Auth Event $event → triggering refresh');
         _refresh();
       }
     });
 
-    _loadCompletedExercises();
-
-    // Also try immediate refresh
+    // Start refresh — completed exercises are loaded inside refresh after plan loads
     _refresh();
   }
 
   Future<void> _loadCompletedExercises() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
-      final prefs = await SharedPreferences.getInstance();
-      final String? data = prefs.getString('completed_exercises_${user.id}');
-      if (data != null) {
-        try {
-          final Map<String, dynamic> decoded = jsonDecode(data);
-          setState(() {
-            _completedExercisesByDay.clear();
-            decoded.forEach((key, value) {
-              _completedExercisesByDay[key] =
-                  (value as List).map((e) => e.toString()).toSet();
-            });
-            final dateKey = _getDateKey(_selectedDay);
-            if (_completedExercisesByDay.containsKey(dateKey)) {
-              _completedExercises.clear();
-              _completedExercises.addAll(_completedExercisesByDay[dateKey]!);
-            }
+      final allCompleted = await SupabaseService().getAllCompletedExercises();
+      if (mounted) {
+        setState(() {
+          _completedExercisesByDay.clear();
+          allCompleted.forEach((key, list) {
+            _completedExercisesByDay[key] = list.toSet();
           });
-        } catch (e) {
-          print('Error parsing completed exercises: $e');
-        }
+          
+          final dateKey = _getDateKey(_selectedDay);
+          if (_completedExercisesByDay.containsKey(dateKey)) {
+            _completedExercises.clear();
+            _completedExercises.addAll(_completedExercisesByDay[dateKey]!);
+          }
+        });
       }
     }
   }
@@ -178,14 +170,15 @@ class WorkoutPageState extends State<WorkoutPage> {
     print('----------------------------------------------------------------');
     print('PLAN CACHE CLEARED -> FETCHING LATEST PLAN...');
 
-    // 2. FORCE FETCH
+    // 2. FORCE FETCH plan
     await _loadGeneratedPlan();
 
-    // 3. UPDATE VIEW
+    // 3. FETCH progress from cloud (must come after plan so _exercises is populated)
+    await _loadCompletedExercises();
+
+    // 4. UPDATE VIEW
     if (mounted) {
-      await _updateDailyWorkouts(
-          enableRetry:
-              false); // Normal refresh doesn't need aggressive retry usually, but maybe?
+      await _updateDailyWorkouts(enableRetry: false);
     }
   }
 
@@ -417,24 +410,35 @@ class WorkoutPageState extends State<WorkoutPage> {
   }
 
   Future<void> _checkPlanStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _hasPlan = prefs.getBool('has_workout_plan') ?? false;
-    });
+    // CLOUD CHECK: use Supabase — local SharedPreferences is unreliable on new devices.
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('ai_plans')
+          .select('id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+      if (mounted) setState(() => _hasPlan = row != null);
+      debugPrint('[WorkoutPage] _checkPlanStatus: hasPlan=${row != null}');
+    } catch (e) {
+      debugPrint('[WorkoutPage] _checkPlanStatus error: $e');
+    }
   }
 
   // Fetch all exercises once and cache them
   Future<void> _initializeExercises() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String gender = prefs.getString('profile_gender') ?? 'Male';
+      final stats = await SupabaseService().getProfileStats();
+      final String gender = (stats?['gender']?.toString() ?? 'male').toLowerCase();
 
       var query = Supabase.instance.client.from('exercises').select(
           'is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
 
-      if (gender == 'Male') {
+      if (gender == 'male') {
         query = query.eq('is_male', true);
-      } else if (gender == 'Female') {
+      } else if (gender == 'female') {
         query = query.eq('is_female', true);
       }
 
@@ -477,14 +481,11 @@ class WorkoutPageState extends State<WorkoutPage> {
 
     setState(() => _isLoading = true);
 
-    // Fix: Sync completed exercises for this specific day
+    // Sync local completion state from the map
     final dateKey = _getDateKey(_selectedDay);
     final completedForDay = _completedExercisesByDay[dateKey] ?? {};
     _completedExercises.clear();
     _completedExercises.addAll(completedForDay);
-
-    // Check if we need to mark as a fully completed workout day
-    _saveCompletedWorkoutDayIfFinished(dateKey);
 
     // MANDATORY: STRICT INDEX CALCULATION
     int globalDayIndex = _getCurrentGlobalDayIndex();
@@ -605,6 +606,11 @@ class WorkoutPageState extends State<WorkoutPage> {
           _isLoading = false;
         });
       }
+      
+      // Now that _exercises is fully populated, evaluate and persist completion state
+      final isCompletedDay = completedForDay.length >= orderedExercises.length && orderedExercises.isNotEmpty;
+      SupabaseService().updateCompletedExercises(dateKey, completedForDay.toList(), isCompletedDay);
+      
     } catch (e) {
       print('ERROR fetching exercises: $e');
       if (mounted) setState(() => _isLoading = false);
@@ -612,59 +618,52 @@ class WorkoutPageState extends State<WorkoutPage> {
   }
 
   void _markExerciseComplete(String exerciseName) async {
+    // Capture dateKey BEFORE setState so it is accessible in the async block below.
+    final dateKey = _getDateKey(_selectedDay);
+
     setState(() {
       _completedExercises.add(exerciseName);
-
-      // Also track per-day completion
-      final dateKey = _getDateKey(_selectedDay);
       _completedExercisesByDay.putIfAbsent(dateKey, () => {});
       _completedExercisesByDay[dateKey]!.add(exerciseName);
     });
 
-    // Save to SharedPreferences
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user != null) {
-      final prefs = await SharedPreferences.getInstance();
-      final Map<String, List<String>> jsonMap = {};
-      _completedExercisesByDay.forEach((k, v) {
-        jsonMap[k] = v.toList();
-      });
-      await prefs.setString(
-          'completed_exercises_${user.id}', jsonEncode(jsonMap));
+    // Save to Supabase Cloud
+    final isCompletedDay = (_completedExercisesByDay[dateKey]?.length ?? 0) >= _exercises.length
+        && _exercises.isNotEmpty;
+    final listToSave = _completedExercisesByDay[dateKey]!.toList();
 
-      // Also update the general completed workout days list for ProgressPage
-      _saveCompletedWorkoutDayIfFinished(_getDateKey(_selectedDay));
-    }
-  }
-
-  void _saveCompletedWorkoutDayIfFinished(String dateKey) async {
-    if (_exercises.isEmpty) return;
-
-    final completedCount = _completedExercisesByDay[dateKey]?.length ?? 0;
-    if (completedCount >= _exercises.length) {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final key = 'completed_workout_days_${user.id}';
-        final List<String> days = prefs.getStringList(key) ?? [];
-        if (!days.contains(dateKey)) {
-          days.add(dateKey);
-          await prefs.setStringList(key, days);
-        }
-      }
-    }
+    await SupabaseService().updateCompletedExercises(
+      dateKey,
+      listToSave,
+      isCompletedDay,
+    );
   }
 
   int get _completedCount => _completedExercises.length;
   int get _totalCount => _exercises.length;
 
   Future<void> _createPlan() async {
-    final prefs = await SharedPreferences.getInstance();
-    final quizCompleted = prefs.getBool('quiz_completed') ?? false;
+    // CLOUD CHECK: Only push to quiz if user has NO profile in Supabase.
+    // Never rely on local SharedPreferences for this gate.
+    final user = Supabase.instance.client.auth.currentUser;
+    bool hasProfile = false;
+    
+    if (user != null) {
+      try {
+        final response = await Supabase.instance.client
+            .from('user_preferences')
+            .select('user_id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+        hasProfile = response != null;
+        debugPrint('[WorkoutPage] _createPlan: user=${user.id}, hasProfile=$hasProfile');
+      } catch (e) {
+        debugPrint('[WorkoutPage] Error checking profile: $e');
+      }
+    }
 
-    // Check if quiz is completed
-    if (!quizCompleted && mounted) {
-      // Navigate to quiz
+    if (!hasProfile && mounted) {
+      // No profile → send to onboarding quiz
       final completed = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -672,27 +671,18 @@ class WorkoutPageState extends State<WorkoutPage> {
         ),
       );
 
-      // If quiz was completed, create the plan
       if (completed is Map && completed['completed'] == true) {
-        await prefs.setBool('has_workout_plan', true);
-        setState(() {
-          _hasPlan = true;
-        });
-
-        // STRICT RELOAD TRIGGER
-        print('DEBUG: Quiz Completed -> Triggering Strict Refresh');
+        setState(() => _hasPlan = true);
+        debugPrint('[WorkoutPage] Quiz completed → triggering plan refresh');
         await _refresh();
       } else if (completed is Map && completed.containsKey('navIndex')) {
-        // Handle navigation
         final mainState = context.findAncestorStateOfType<MainScaffoldState>();
         mainState?.changeTab(completed['navIndex']);
       }
     } else {
-      // Quiz already completed, create plan directly
-      await prefs.setBool('has_workout_plan', true);
-      setState(() {
-        _hasPlan = true;
-      });
+      // Profile exists → go straight to plan generation
+      setState(() => _hasPlan = true);
+      await _refresh();
     }
   }
 
@@ -709,8 +699,12 @@ class WorkoutPageState extends State<WorkoutPage> {
       );
     }
 
+    if (!_hasPlan) {
+      return _buildSetupView(isDarkMode);
+    }
+
     // Use desktop layout for screens wider than 800px
-    if (screenWidth > 800) {
+    if (screenWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android) {
       return _buildDesktopLayout(isDarkMode);
     }
 
@@ -1863,45 +1857,47 @@ class WorkoutPageState extends State<WorkoutPage> {
             ),
           ),
         ),
-        padding: const EdgeInsets.all(4),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final double circleWidth = constraints.maxWidth;
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    'Day $dayNumber',
-                    style: TextStyle(
-                      fontSize: circleWidth * 0.30, // 30% responsive scaling
-                      fontWeight: FontWeight.w900,
-                      color: isCompleted 
-                          ? Colors.white 
-                          : (isDarkMode ? Colors.white : Colors.black),
-                      letterSpacing: -0.5,
-                      height: 1.0,
+            return Padding(
+              padding: EdgeInsets.all(circleWidth * 0.15),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Day $dayNumber',
+                      style: TextStyle(
+                        fontSize: circleWidth * 0.35,
+                        fontWeight: FontWeight.w900,
+                        color: isCompleted 
+                            ? Colors.white 
+                            : (isDarkMode ? Colors.white : Colors.black),
+                        letterSpacing: -0.5,
+                        height: 1.0,
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(height: circleWidth * 0.05),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    isRest ? 'Rest' : (isCompleted ? '100%' : '$progressPercent%'),
-                    style: TextStyle(
-                      fontSize: circleWidth * 0.18,
-                      fontWeight: FontWeight.bold,
-                      color: isCompleted
-                          ? Colors.white // White text on green background
-                          : (isRest
-                              ? const Color(0xFFFF0000)
-                              : const Color(0xFF4CAF50)),
+                  SizedBox(height: circleWidth * 0.05),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      isRest ? 'Rest' : (isCompleted ? '100%' : '$progressPercent%'),
+                      style: TextStyle(
+                        fontSize: circleWidth * 0.22,
+                        fontWeight: FontWeight.bold,
+                        color: isCompleted
+                            ? Colors.white // White text on green background
+                            : (isRest
+                                ? const Color(0xFFFF0000)
+                                : const Color(0xFF4CAF50)),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             );
           },
         ),

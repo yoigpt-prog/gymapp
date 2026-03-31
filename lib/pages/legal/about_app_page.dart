@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class AboutAppPage extends StatelessWidget {
   final VoidCallback? toggleTheme;
@@ -52,79 +53,126 @@ class AboutAppPage extends StatelessWidget {
                 child: Column(
                   children: [
                     // ── Hero card ──────────────────────────────────
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 36, horizontal: 24),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFF0000), Color(0xFFCC0000)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: red.withOpacity(0.35),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 76,
-                            height: 76,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
+                    Stack(
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 40, horizontal: 24),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFFF0D0D), Color(0xFFB30000)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
                             ),
-                            child: const Icon(
-                              Icons.fitness_center_rounded,
-                              color: Colors.white,
-                              size: 38,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'GymGuide',
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'Version 1.0.0',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
+                            borderRadius: BorderRadius.circular(32),
+                            boxShadow: [
+                              BoxShadow(
+                                color: red.withOpacity(0.4),
+                                blurRadius: 24,
+                                offset: const Offset(0, 12),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            'Your AI-powered personal fitness coach',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white70,
-                              height: 1.4,
-                            ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Positioned(
+                                right: -40,
+                                top: -20,
+                                child: Icon(
+                                  Icons.fitness_center_rounded,
+                                  size: 140,
+                                  color: Colors.white.withOpacity(0.06),
+                                ),
+                              ),
+                              Positioned(
+                                left: -30,
+                                bottom: -30,
+                                child: Icon(
+                                  Icons.bar_chart_rounded,
+                                  size: 100,
+                                  color: Colors.white.withOpacity(0.06),
+                                ),
+                              ),
+                              Column(
+                                children: [
+                                  Container(
+                                    width: 84,
+                                    height: 84,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.3),
+                                        width: 1.5,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.1),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(18.0),
+                                      child: Image.asset(
+                                        'assets/svg/logo/logoaboutpg.png',
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  const Text(
+                                    'Gym Guide',
+                                    style: TextStyle(
+                                      fontSize: 32,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.1),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Version 1.0.0',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  const Text(
+                                    'Your Personal App Fitness Coach',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white,
+                                      letterSpacing: 0.2,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
 
                     const SizedBox(height: 24),
@@ -132,14 +180,11 @@ class AboutAppPage extends StatelessWidget {
                     // ── Feature pills ──────────────────────────────
                     Row(
                       children: [
-                        _pill(Icons.bolt_rounded, 'AI Powered', red, cardBg,
-                            textColor),
-                        const SizedBox(width: 10),
-                        _pill(Icons.restaurant_menu_rounded, 'Meal Plans', red,
-                            cardBg, textColor),
-                        const SizedBox(width: 10),
-                        _pill(Icons.fitness_center_rounded, 'Workouts', red,
-                            cardBg, textColor),
+                        _pill(Icons.bolt_rounded, 'AI Powered', red, cardBg, textColor, isDark),
+                        const SizedBox(width: 12),
+                        _pill(Icons.restaurant_menu_rounded, 'Meal Plans', red, cardBg, textColor, isDark),
+                        const SizedBox(width: 12),
+                        _pill(Icons.fitness_center_rounded, 'Workouts', red, cardBg, textColor, isDark),
                       ],
                     ),
 
@@ -198,7 +243,7 @@ class AboutAppPage extends StatelessWidget {
                           _infoTile(
                             icon: Icons.tag_rounded,
                             label: 'Build',
-                            value: '2024.1.0',
+                            value: '2026/01/05',
                             textColor: textColor,
                             subColor: subColor,
                             isDark: isDark,
@@ -241,7 +286,7 @@ class AboutAppPage extends StatelessWidget {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                'About GymGuide',
+                                'About Gym Guide',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
@@ -252,10 +297,9 @@ class AboutAppPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'GymGuide is your AI-powered personal fitness coach. '
-                            'Get custom workout and meal plans tailored to your goals in minutes. '
-                            'Whether you want to lose weight, build muscle, or improve your overall '
-                            'fitness, GymGuide is here to guide you every step of the way.',
+                            'Gym Guide is your all-in-one fitness app designed to help you train smarter and stay consistent.\n\n'
+                            'Get personalized workout plans, track your progress, and manage your nutrition — all in one place.\n\n'
+                            'Whether your goal is to lose weight, build muscle, or stay fit, Gym Guide guides you every step of the way.',
                             style: TextStyle(
                               fontSize: 14,
                               height: 1.7,
@@ -289,31 +333,41 @@ class AboutAppPage extends StatelessWidget {
   }
 
   Widget _pill(IconData icon, String label, Color accent, Color cardBg,
-      Color textColor) {
+      Color textColor, bool isDark) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         decoration: BoxDecoration(
           color: cardBg,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: isDark ? Colors.white12 : Colors.black.withOpacity(0.05)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
+              color: isDark ? Colors.black26 : Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Column(
           children: [
-            Icon(icon, color: accent, size: 22),
-            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: accent, size: 24),
+            ),
+            const SizedBox(height: 12),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
                 color: textColor,
+                height: 1.2,
               ),
             ),
           ],

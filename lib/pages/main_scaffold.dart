@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
@@ -45,6 +46,15 @@ class MainScaffoldState extends State<MainScaffold> {
   final GlobalKey<ProgressPageState> _progressKey = GlobalKey<ProgressPageState>();
   final GlobalKey<ProfilePageState> _profileKey = GlobalKey<ProfilePageState>();
 
+  // Keys to prevent unnecessary state destruction on theme toggle
+  final GlobalKey _homeKey = GlobalKey();
+  final GlobalKey _settingsKey = GlobalKey();
+  final GlobalKey _bmiKey = GlobalKey();
+  final GlobalKey _calorieKey = GlobalKey();
+  final GlobalKey _macroKey = GlobalKey();
+  final GlobalKey _bodyFatKey = GlobalKey();
+  final GlobalKey _oneRmKey = GlobalKey();
+
   // Auth Timer State
   Timer? _authTimer;
   bool _isAuthModalOpen = false;
@@ -65,6 +75,7 @@ class MainScaffoldState extends State<MainScaffold> {
   void _initializePages() {
      _pages = [
       HomePage(
+        key: _homeKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
@@ -89,26 +100,32 @@ class MainScaffoldState extends State<MainScaffold> {
         isDarkMode: widget.isDarkMode,
       ),
       SettingsPage(
+        key: _settingsKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       BmiCalculatorPage(
+        key: _bmiKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       CalorieCalculatorPage(
+        key: _calorieKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       MacroCalculatorPage(
+        key: _macroKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       BodyFatCalculatorPage(
+        key: _bodyFatKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
       OneRmCalculatorPage(
+        key: _oneRmKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
       ),
@@ -127,6 +144,10 @@ class MainScaffoldState extends State<MainScaffold> {
         
         if (event == AuthChangeEvent.signedOut) {
           // User explicitly logged out: jump to Home and clear pages
+          SharedPreferences.getInstance().then((prefs) {
+            prefs.remove('has_workout_plan');
+            prefs.remove('has_meal_plan');
+          });
           setState(() {
             _currentIndex = 0;
           });
@@ -180,40 +201,41 @@ class MainScaffoldState extends State<MainScaffold> {
   Future<void> _checkAuthStatus() async {
     final session = Supabase.instance.client.auth.currentSession;
     final user = Supabase.instance.client.auth.currentUser;
-    
-    // Attempt local state sync if user is authenticated
+
     if (session != null && user != null) {
+      debugPrint('[MainScaffold] Auth check: user=${user.id}');
       try {
-        final prefs = await SharedPreferences.getInstance();
-        final hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
-        final hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
+        // ALWAYS check Supabase — never skip based on local flags.
+        // This is the only reliable gate for cross-device sessions.
+        final response = await Supabase.instance.client
+            .from('user_preferences')
+            .select('user_id')
+            .eq('user_id', user.id)
+            .maybeSingle();
 
-        // If local flags are missing, check DB to see if they're actually a returning user
-        if (!hasWorkoutPlan || !hasMealPlan) {
-          final response = await Supabase.instance.client
-              .from('user_preferences')
-              .select('user_id')
-              .eq('user_id', user.id)
-              .maybeSingle();
-
-          if (response != null) {
-            // User exists in DB! Sync local flags to prevent Quiz loops.
-            await prefs.setBool('has_workout_plan', true);
-            await prefs.setBool('has_meal_plan', true);
-            print('DEBUG: Returning user detected. Synced SharedPreferences.');
-          }
+        if (response != null) {
+          // User has a profile — keep local flags in sync as a convenience.
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('has_workout_plan', true);
+          await prefs.setBool('has_meal_plan', true);
+          debugPrint('[MainScaffold] Returning user confirmed. Flags synced.');
+        } else {
+          debugPrint('[MainScaffold] No user_preferences row found for user.');
         }
       } catch (e) {
-        print('DEBUG: Error syncing auth state preferences: $e');
+        debugPrint('[MainScaffold] Error in _checkAuthStatus: $e');
       }
+    } else {
+      debugPrint('[MainScaffold] No active session.');
     }
 
     if (mounted) {
       setState(() {
         if (session != null && user != null) {
-           _isEmailVerified = user.emailConfirmedAt != null || (user.appMetadata['provider'] != 'email');
+          _isEmailVerified = user.emailConfirmedAt != null ||
+              (user.appMetadata['provider'] != 'email');
         } else {
-           _isEmailVerified = true;
+          _isEmailVerified = true;
         }
         _isLoadingAuth = false;
       });
@@ -309,9 +331,9 @@ class MainScaffoldState extends State<MainScaffold> {
   Future<void> changeTab(int index) async {
      if (index == 1 || index == 2) {
       final prefs = await SharedPreferences.getInstance();
-      final hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
-      final hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
-      
+      bool hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
+      bool hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
+
       if (!hasWorkoutPlan && !hasMealPlan) {
         if (mounted) {
           final result = await Navigator.push(
@@ -449,7 +471,7 @@ class MainScaffoldState extends State<MainScaffold> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             // ... (Rest of build methods) ...
-            final isDesktop = constraints.maxWidth > 800;
+            final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
         
               if (isDesktop) {
                 return Scaffold(

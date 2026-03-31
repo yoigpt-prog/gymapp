@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'main_layout_wrapper.dart';
 import 'red_header.dart';
@@ -38,7 +39,7 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth > 800;
+        final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
 
         if (isDesktop) {
           // Responsive ad panel: 22% of screen width, clamped to [200, 320]
@@ -197,15 +198,6 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
               icon: const Icon(Icons.arrow_back),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            actions: [
-              if (widget.onToggleTheme != null)
-                IconButton(
-                  icon: Icon(widget.isDarkMode
-                      ? Icons.dark_mode
-                      : Icons.wb_sunny_outlined),
-                  onPressed: widget.onToggleTheme,
-                ),
-            ],
           ),
           body: SizedBox(
             width: double.infinity,

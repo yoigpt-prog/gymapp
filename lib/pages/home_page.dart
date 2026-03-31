@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../widgets/red_header.dart';
 import '../widgets/auth/auth_modal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/supabase_service.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -165,9 +166,8 @@ class _HomePageState extends State<HomePage> {
       if (_filterFavorites) {
         final user = Supabase.instance.client.auth.currentUser;
         if (user != null) {
-          final prefs = await SharedPreferences.getInstance();
-          favoriteIds = prefs.getStringList('favorites_${user.id}') ?? [];
-          if (favoriteIds.isEmpty) {
+          favoriteIds = await SupabaseService().getFavorites();
+          if (favoriteIds == null || favoriteIds.isEmpty) {
             setState(() {
               _exercises.clear();
               _isLoading = false;
@@ -303,7 +303,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth > 800) {
+        if (constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android) {
           return _buildDesktopLayout();
         }
         return _buildMobileLayout();
@@ -332,52 +332,41 @@ class _HomePageState extends State<HomePage> {
                 isDarkMode: widget.isDarkMode,
               ),
 
+            _buildMobileSearchAndFilters(isDark, textColor),
             Expanded(
               child: (_selectedMuscle == null && !_isSearchMode && !_filterFavorites)
-                  ? Column(
-                      children: [
-                        _buildMobileSearchAndFilters(isDark, textColor),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: FittedBox(
-                              fit: BoxFit.contain,
-                              child: SizedBox(
-                                width: 1080,
-                                height: 1920,
-                                child: Transform.scale(
-                                  scale: 1.08,
-                                  child: MuscleMap(
-                                    gender: _gender,
-                                    side: _side,
-                                    highlightedMuscle: _highlightedMuscle,
-                                    isDarkMode: isDark,
-                                    onTapMuscle: (m) {
-                                      setState(() {
-                                        if (_highlightedMuscle == m) {
-                                          _selectedMuscle = m;
-                                          _resetExercises(); // Load exercises for selected muscle
-                                        } else {
-                                          _highlightedMuscle = m;
-                                        }
-                                      });
-                                    },
-                                  ),
-                                ),
-                              ),
+                  ? Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: 1080,
+                          height: 1920,
+                          child: Transform.scale(
+                            scale: 1.08,
+                            child: MuscleMap(
+                              gender: _gender,
+                              side: _side,
+                              highlightedMuscle: _highlightedMuscle,
+                              isDarkMode: isDark,
+                              onTapMuscle: (m) {
+                                setState(() {
+                                  if (_highlightedMuscle == m) {
+                                    _selectedMuscle = m;
+                                    _resetExercises(); // Load exercises for selected muscle
+                                  } else {
+                                    _highlightedMuscle = m;
+                                  }
+                                });
+                              },
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     )
                   : CustomScrollView(
                       controller: _scrollController,
                       slivers: [
-                        SliverToBoxAdapter(
-                          child:
-                              _buildMobileSearchAndFilters(isDark, textColor),
-                        ),
-
                         // Exercise List Header
                         SliverToBoxAdapter(
                           child: Padding(
@@ -903,16 +892,19 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               const SizedBox(width: 8),
-              Text(
-                _selectedMuscle != null
-                    ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
-                    : _filterFavorites
-                        ? 'My Favorites'
-                        : 'Search Results',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+              Expanded(
+                child: Text(
+                  _selectedMuscle != null
+                      ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
+                      : _filterFavorites
+                          ? 'My Favorites'
+                          : 'Search Results',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1262,13 +1254,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showFilterModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        // 1. Initialize local state based on current filters
-        bool localFilterFavorites = _filterFavorites;
+    final isWide = MediaQuery.of(context).size.width > 600;
+
+    // 1. Initialize local state based on current filters
+    bool localFilterFavorites = _filterFavorites;
         Set<String> localDifficulties = Set.from(_selectedDifficulties);
         Set<String> localWorkoutTypes = Set.from(_selectedWorkoutTypes);
         Set<String> localEquipment = Set.from(_selectedEquipment);
@@ -1285,7 +1274,7 @@ class _HomePageState extends State<HomePage> {
           'Smith machine'
         ];
 
-        return StatefulBuilder(
+        final builder = (BuildContext builderContext) => StatefulBuilder(
           builder: (context, setModalState) {
             // Helper to remove an active filter via chip
             void removeFilter(String type, String value) {
@@ -1297,52 +1286,40 @@ class _HomePageState extends State<HomePage> {
               });
             }
 
-            return DraggableScrollableSheet(
-              initialChildSize: 0.85, // Slightly taller default
-              minChildSize: 0.5,
-              maxChildSize: 0.95,
-              builder: (context, scrollController) {
-                // Build list of active filter chips
-                List<Widget> activeFilterChips = [];
-                if (localFilterFavorites) {
-                  activeFilterChips.add(_buildActiveFilterChip(
-                      'Favorites', () => removeFilter('favorite', '')));
-                }
-                for (var d in localDifficulties) {
-                  activeFilterChips.add(_buildActiveFilterChip(
-                      d, () => removeFilter('difficulty', d)));
-                }
-                for (var w in localWorkoutTypes) {
-                  activeFilterChips.add(_buildActiveFilterChip(
-                      w, () => removeFilter('workout_type', w)));
-                }
-                for (var e in localEquipment) {
-                  activeFilterChips.add(_buildActiveFilterChip(
-                      e, () => removeFilter('equipment', e)));
-                }
+            List<Widget> activeFilterChips = [];
+            if (localFilterFavorites) {
+              activeFilterChips.add(_buildActiveFilterChip(
+                  'Favorites', () => removeFilter('favorite', '')));
+            }
+            for (var d in localDifficulties) {
+              activeFilterChips.add(_buildActiveFilterChip(
+                  d, () => removeFilter('difficulty', d)));
+            }
+            for (var w in localWorkoutTypes) {
+              activeFilterChips.add(_buildActiveFilterChip(
+                  w, () => removeFilter('workout_type', w)));
+            }
+            for (var e in localEquipment) {
+              activeFilterChips.add(_buildActiveFilterChip(
+                  e, () => removeFilter('equipment', e)));
+            }
 
-                return Container(
-                  decoration: BoxDecoration(
-                    color: widget.isDarkMode
-                        ? const Color(0xFF1E1E1E)
-                        : Colors.white,
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  child: Column(
+            Widget content = ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 600,
+                maxHeight: MediaQuery.of(context).size.height * 0.9,
+              ),
+              child: Container(
+                width: isWide ? 600 : double.infinity,
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                  borderRadius: isWide 
+                      ? BorderRadius.circular(24)
+                      : const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Handle
-                      const SizedBox(height: 12),
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
 
                       // Active Filters Summary
                       if (activeFilterChips.isNotEmpty)
@@ -1375,9 +1352,9 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
 
-                      Expanded(
+                      Flexible(
                         child: ListView(
-                          controller: scrollController,
+                          shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           children: [
                             const SizedBox(height: 24),
@@ -1557,9 +1534,6 @@ class _HomePageState extends State<HomePage> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: widget.isDarkMode
-                              ? const Color(0xFF1E1E1E)
-                              : Colors.white,
                           border: Border(
                             top: BorderSide(
                               color: widget.isDarkMode
@@ -1640,15 +1614,35 @@ class _HomePageState extends State<HomePage> {
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                );
-              },
+                ],
+              ),
+              ),
             );
+            if (isWide) {
+              return Dialog(
+                backgroundColor: Colors.transparent,
+                insetPadding: const EdgeInsets.all(24),
+                child: content,
+              );
+            } else {
+              return Padding(
+                padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                child: content,
+              );
+            }
           },
         );
-      },
-    );
+
+    if (isWide) {
+      showDialog(context: context, builder: builder);
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: builder,
+      );
+    }
   }
 
   // Helper for active filter chips
@@ -1982,13 +1976,11 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
     // Favorites are keyed by exercise_name for cross-source consistency.
     if (widget.exercise.name.isEmpty) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final favList = prefs.getStringList('favorites_${user.id}') ?? [];
+      final favList = await SupabaseService().getFavorites();
       if (mounted) {
         setState(() {
-          // Match by name (stored key), or legacy id key
-          _isFavorite = favList.contains(widget.exercise.name) ||
-              favList.contains(widget.exercise.id);
+          // Match by exactly what is stored in Supabase
+          _isFavorite = favList.contains(widget.exercise.name);
         });
       }
     } catch (e) {
@@ -2062,22 +2054,7 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     });
 
                     try {
-                      final prefs = await SharedPreferences.getInstance();
-                      final key = 'favorites_${user.id}';
-                      final favList = prefs.getStringList(key) ?? [];
-
-                      // Always use exercise_name as the canonical key so that
-                      // the "Show Favorites Only" query (filtered by name) matches.
-                      final favKey = widget.exercise.name;
-                      if (_isFavorite) {
-                        if (!favList.contains(favKey)) favList.add(favKey);
-                        // Remove any legacy id-based entry to avoid duplicates
-                        favList.remove(widget.exercise.id == favKey ? null : widget.exercise.id);
-                      } else {
-                        favList.remove(favKey);
-                        favList.remove(widget.exercise.id); // also remove legacy
-                      }
-                      await prefs.setStringList(key, favList);
+                      await SupabaseService().toggleFavorite(widget.exercise.name, _isFavorite);
                     } catch (e) {
                       debugPrint('Error saving favorite: $e');
                     }

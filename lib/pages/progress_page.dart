@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/supabase_service.dart';
 import '../widgets/red_header.dart';
 
 // ---------------------------------------------------------------------------
@@ -27,7 +28,9 @@ class _ProgressData {
   // Body metrics
   final double? startWeightKg;
   final double? currentWeightKg;
+  final double? targetWeightKg;
   final double? heightCm;
+  final String weightUnit;
 
   // Weekly weights map
   final Map<int, double> weekWeights;
@@ -46,7 +49,9 @@ class _ProgressData {
     required this.currentWeekEaten,
     required this.startWeightKg,
     required this.currentWeightKg,
+    required this.targetWeightKg,
     required this.heightCm,
+    required this.weightUnit,
     required this.weekWeights,
   });
 }
@@ -146,6 +151,9 @@ class ProgressPageState extends State<ProgressPage> {
         _signedIn = true;
       });
 
+    final prefs = await SharedPreferences.getInstance();
+    final String weightUnit = prefs.getString('weight_unit') ?? 'kg';
+
     // ── 1. User preferences ─────────────────────────────────────────────────
     int durationWeeksFromPrefs = 4;
     String goalLabel = 'Custom Plan';
@@ -173,52 +181,72 @@ class ProgressPageState extends State<ProgressPage> {
     DateTime? planStartFromPlan;
 
     try {
-      // Try with is_eaten first — also fetch created_at to get the actual plan start
-      final mealRows = await _supabase
-          .from('user_meal_plan')
-          .select('day, is_eaten, created_at')
+      // 1. Fetch the user's active plan
+      final planResponse = await _supabase
+          .from('user_meal_plans')
+          .select('id, created_at')
           .eq('user_id', user.id)
-          .order('day', ascending: true);
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
 
-      DateTime? firstCreatedAt;
-      for (final r in (mealRows as List)) {
-        final int day = (r['day'] as int?) ?? 0;
-        if (day <= 0) continue;
-        allDays.add(day);
-        if (r['is_eaten'] == true) eatenDays.add(day);
-        // Capture the earliest created_at
-        if (r['created_at'] != null && firstCreatedAt == null) {
-          final parsed = DateTime.tryParse(r['created_at'].toString());
-          if (parsed != null) firstCreatedAt = parsed;
+      if (planResponse != null) {
+        if (planResponse['created_at'] != null) {
+          final parsed = DateTime.tryParse(planResponse['created_at'].toString());
+          if (parsed != null) {
+            planStartFromPlan = DateTime(parsed.year, parsed.month, parsed.day);
+          }
         }
-      }
-      if (firstCreatedAt != null) {
-        // Normalise to midnight
-        planStartFromPlan = DateTime(
-            firstCreatedAt.year, firstCreatedAt.month, firstCreatedAt.day);
+
+        final String activePlanId = planResponse['id'].toString();
+
+        // 2. Fetch pivot meals for this plan
+        final mealRows = await _supabase
+            .from('user_meal_plan_meals')
+            .select('week_number, day_number, is_eaten')
+            .eq('plan_id', activePlanId);
+
+        final Map<int, int> totalMealsMap = {};
+        final Map<int, int> eatenMealsMap = {};
+
+        for (final r in (mealRows as List)) {
+          final int dtWeek = (r['week_number'] as int?) ?? 1;
+          final int dtDay = (r['day_number'] as int?) ?? 1;
+          if (dtDay <= 0) continue;
+          
+          final int globalDay = (dtWeek - 1) * 7 + dtDay;
+          allDays.add(globalDay);
+          
+          totalMealsMap[globalDay] = (totalMealsMap[globalDay] ?? 0) + 1;
+          
+          if (r['is_eaten'] == true) {
+            eatenMealsMap[globalDay] = (eatenMealsMap[globalDay] ?? 0) + 1;
+          }
+        }
+        
+        // Only count the day as COMPLETED if every meal for that day was eaten
+        for (final day in allDays) {
+           final total = totalMealsMap[day] ?? 0;
+           final eaten = eatenMealsMap[day] ?? 0;
+           if (total > 0 && total == eaten) {
+              eatenDays.add(day);
+           }
+        }
       }
     } catch (_) {
-      // is_eaten column may not exist yet — fallback to just day
-      try {
-        final mealRows = await _supabase
-            .from('user_meal_plan')
-            .select('day')
-            .eq('user_id', user.id);
-        for (final r in (mealRows as List)) {
-          final int day = (r['day'] as int?) ?? 0;
-          if (day > 0) allDays.add(day);
-        }
-      } catch (_) {}
+      // Ignore if table doesn't exist yet
     }
 
     // Derive actual duration from the actual max day in the plan (same logic as MealPlanPage)
     final int maxDay =
         allDays.isEmpty ? 0 : allDays.reduce((a, b) => a > b ? a : b);
     final int durationWeeksFromPlan = maxDay > 0 ? (maxDay / 7).ceil() : 0;
-    // Use the higher of the two: DB actual plan OR user preference
-    final int durationWeeks = (durationWeeksFromPlan > durationWeeksFromPrefs)
-        ? durationWeeksFromPlan
-        : durationWeeksFromPrefs;
+    // Only apply prefs fallback if we actually have plan data — otherwise keep 0
+    final int durationWeeks = allDays.isEmpty
+        ? 0
+        : (durationWeeksFromPlan > durationWeeksFromPrefs)
+            ? durationWeeksFromPlan
+            : durationWeeksFromPrefs;
 
     // Prefer plan start date from actual plan rows (more accurate) over created_at from prefs
     final DateTime? planStart = planStartFromPlan ?? planStartFromPrefs;
@@ -228,7 +256,7 @@ class ProgressPageState extends State<ProgressPage> {
         ? (now.difference(planStart).inDays + 1).clamp(0, durationWeeks * 7)
         : 0;
     final int currentWeek = planStart != null
-        ? ((elapsedDays - 1) ~/ 7 + 1).clamp(1, durationWeeks)
+        ? ((elapsedDays - 1) ~/ 7 + 1).clamp(1, durationWeeks > 0 ? durationWeeks : 1)
         : 1;
     final int weekStart = (currentWeek - 1) * 7 + 1;
     final int weekEnd = weekStart + 6;
@@ -268,18 +296,25 @@ class ProgressPageState extends State<ProgressPage> {
       }
     } catch (_) {} // table may not exist yet — silently skip
 
-    // ── 6. Body metrics + Workout completion (SharedPreferences) ─────────────
-    double? startW, curW, heightCm;
+    // ── 6. Body metrics + Workout completion (Supabase Cloud) ─────────────
+    double? startW, curW, heightCm, targetW;
     List<String> completedWorkoutDays = [];
     try {
-      final prefs = await SharedPreferences.getInstance();
-      completedWorkoutDays =
-          prefs.getStringList('completed_workout_days_${user.id}') ?? [];
-      final wStr = prefs.getString('profile_weight') ?? '';
-      final wNum = double.tryParse(wStr.replaceAll(RegExp(r'[^\d.]'), ''));
-      if (wNum != null && wNum > 0) {
-        startW = wNum;
-        curW = wNum;
+      final supabaseService = SupabaseService();
+      completedWorkoutDays = await supabaseService.getCompletedWorkoutDays();
+      
+      final profileStats = await supabaseService.getProfileStats();
+      if (profileStats != null) {
+        if (profileStats['weight_kg'] != null) {
+          startW = (profileStats['weight_kg'] as num).toDouble();
+          curW = startW;
+        }
+        if (profileStats['target_weight_kg'] != null) {
+          targetW = (profileStats['target_weight_kg'] as num).toDouble();
+        }
+        if (profileStats['height_cm'] != null) {
+          heightCm = (profileStats['height_cm'] as num).toDouble();
+        }
       }
 
       if (weekWeights.isNotEmpty) {
@@ -287,9 +322,6 @@ class ProgressPageState extends State<ProgressPage> {
         if (startW == null) startW = weekWeights[sorted.first];
         curW = weekWeights[sorted.last];
       }
-      final hStr = prefs.getString('profile_height') ?? '';
-      final hNum = double.tryParse(hStr.replaceAll(RegExp(r'[^\d.]'), ''));
-      if (hNum != null && hNum > 0) heightCm = hNum;
     } catch (_) {}
 
     if (mounted) {
@@ -309,7 +341,9 @@ class ProgressPageState extends State<ProgressPage> {
           currentWeekEaten: weekEaten,
           startWeightKg: startW,
           currentWeightKg: curW,
+          targetWeightKg: targetW,
           heightCm: heightCm,
+          weightUnit: weightUnit,
           weekWeights: weekWeights,
         );
         _loading = false;
@@ -347,7 +381,7 @@ class ProgressPageState extends State<ProgressPage> {
     final bgColor = widget.isDarkMode ? const Color(0xFF121212) : const Color(0xFFFFFFFF);
     final screenWidth = MediaQuery.of(context).size.width;
 
-    if (screenWidth > 800) {
+    if (screenWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android) {
       return _buildDesktopLayout(context, bgColor);
     }
 
@@ -1090,17 +1124,23 @@ class _BodyMetricsCard extends StatelessWidget {
 
     // Weight change
     final change = (startW != null && curW != null) ? curW - startW : null;
-    final weeks = data?.durationWeeks ?? 1;
+    final int w = data?.durationWeeks ?? 0;
+    final int weeks = w > 0 ? w : 1;
     final elapsedWks = data?.elapsedDays != null
         ? (data!.elapsedDays / 7.0).clamp(1, weeks)
         : 1.0;
     final rate = change != null ? change / elapsedWks : null;
 
+    final String unit = data?.weightUnit ?? 'kg';
+    final double multiplier = unit == 'lbs' ? 2.20462 : 1.0;
+
+    final displayStartW = startW != null ? startW * multiplier : null;
+    final displayCurW = curW != null ? curW * multiplier : null;
 
     final changeStr =
-        change != null ? '${change >= 0 ? '+' : ''}${_fmt(change)} kg' : '—';
+        change != null ? '${change >= 0 ? '+' : ''}${_fmt(change * multiplier, dp: 1)} $unit' : '—';
     final rateStr =
-        rate != null ? '${rate >= 0 ? '+' : ''}${_fmt(rate)} kg/week' : '—';
+        rate != null ? '${rate >= 0 ? '+' : ''}${_fmt(rate * multiplier, dp: 1)} $unit/week' : '—';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1132,54 +1172,45 @@ class _BodyMetricsCard extends StatelessWidget {
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: isDarkMode ? Colors.white : Colors.black)),
-          if (data == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text('Log your weekly weight to see body metrics.',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: isDarkMode ? Colors.white38 : Colors.grey)),
-            )
-          else
-            ...([
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _WeightStat(
-                      label: 'Start',
-                      value: startW != null ? '${_fmt(startW, dp: 1)} kg' : '—',
-                      isDarkMode: isDarkMode),
-                  _WeightStat(
-                      label: 'Current',
-                      value: curW != null ? '${_fmt(curW, dp: 1)} kg' : '—',
-                      isDarkMode: isDarkMode,
-                      isHighlight: true),
-                  _WeightStat(
-                      label: 'Target', value: '—', isDarkMode: isDarkMode),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Container(
-                height: 40,
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: CustomPaint(
-                    painter: _MiniChartPainter(color: const Color(0xFFFF0000))),
-              ),
-              const SizedBox(height: 12),
-              Row(children: [
-                Text(changeStr,
-                    style: const TextStyle(
-                        color: Color(0xFFFF0000),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
-                Text(rateStr.isNotEmpty ? ' • $rateStr' : '',
-                    style: TextStyle(
-                        color: isDarkMode ? Colors.white54 : Colors.grey,
-                        fontSize: 13)),
-              ]),
-            ]),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _WeightStat(
+                  label: 'Start',
+                  value: displayStartW != null ? '${_fmt(displayStartW, dp: 1)} $unit' : '—',
+                  isDarkMode: isDarkMode),
+              _WeightStat(
+                  label: 'Current',
+                  value: displayCurW != null ? '${_fmt(displayCurW, dp: 1)} $unit' : '—',
+                  isDarkMode: isDarkMode,
+                  isHighlight: true),
+              _WeightStat(
+                  label: 'Target', 
+                  value: data?.targetWeightKg != null ? '${_fmt(data!.targetWeightKg! * multiplier, dp: 1)} $unit' : '—', 
+                  isDarkMode: isDarkMode),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: 40,
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: CustomPaint(
+                painter: _MiniChartPainter(color: const Color(0xFFFF0000))),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Text(changeStr,
+                style: const TextStyle(
+                    color: Color(0xFFFF0000),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14)),
+            Text(rateStr.isNotEmpty ? ' • $rateStr' : '',
+                style: TextStyle(
+                    color: isDarkMode ? Colors.white54 : Colors.grey,
+                    fontSize: 13)),
+          ]),
         ],
       ),
     );

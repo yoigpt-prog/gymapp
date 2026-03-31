@@ -43,27 +43,32 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Video/Image demonstration
-            Container(
-              width: double.infinity,
-              height: 250,
-              color: widget.isDarkMode ? Colors.black26 : Colors.grey.shade300,
-              child: widget.exercise.imagePath.isNotEmpty
-                  ? _buildMediaPreview(widget.exercise.imagePath)
-                  : Center(
-                      child: Container(
-                        width: 80,
-                        height: 80,
-                        decoration: const BoxDecoration(
-                          color: const Color(0xFFFF0000),
-                          shape: BoxShape.circle,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final videoHeight = (constraints.maxWidth * 9 / 16).clamp(220.0, 420.0);
+                return Container(
+                  width: double.infinity,
+                  height: videoHeight,
+                  color: widget.isDarkMode ? Colors.black26 : Colors.grey.shade300,
+                  child: widget.exercise.imagePath.isNotEmpty
+                      ? _buildMediaPreview(widget.exercise.imagePath, videoHeight)
+                      : Center(
+                          child: Container(
+                            width: 80,
+                            height: 80,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFFF0000),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow,
+                              color: Colors.white,
+                              size: 48,
+                            ),
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                          size: 48,
-                        ),
-                      ),
-                    ),
+                );
+              },
             ),
 
             // Track Your Sets (between video and instructions)
@@ -229,14 +234,14 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
   );
 }
 
-  Widget _buildMediaPreview(String url) {
+  Widget _buildMediaPreview(String url, [double? height]) {
     final cleanUrl = url.trim();
     final isVideo = cleanUrl.toLowerCase().endsWith('.mp4') ||
         cleanUrl.toLowerCase().endsWith('.mov') ||
         cleanUrl.toLowerCase().endsWith('.webm');
 
     if (isVideo) {
-      return VideoPlayerWidget(videoUrl: cleanUrl);
+      return VideoPlayerWidget(videoUrl: cleanUrl, height: height);
     } else {
       return Image.network(
         cleanUrl,
@@ -368,8 +373,9 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
 // VideoPlayerWidget from home_page.dart
 class VideoPlayerWidget extends StatefulWidget {
   final String videoUrl;
+  final double? height;
 
-  const VideoPlayerWidget({Key? key, required this.videoUrl}) : super(key: key);
+  const VideoPlayerWidget({Key? key, required this.videoUrl, this.height}) : super(key: key);
 
   @override
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
@@ -411,10 +417,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final h = widget.height ?? 250;
     if (_isInitialized) {
       return SizedBox(
         width: double.infinity,
-        height: 250,
+        height: h,
         child: FittedBox(
           fit: BoxFit.cover,
           child: SizedBox(
@@ -425,9 +432,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         ),
       );
     } else {
-      return const SizedBox(
-        height: 250,
-        child: Center(child: CircularProgressIndicator()),
+      return SizedBox(
+        height: h,
+        child: const Center(child: CircularProgressIndicator()),
       );
     }
   }

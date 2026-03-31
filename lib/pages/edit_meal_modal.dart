@@ -18,7 +18,10 @@ class EditMealModal extends StatefulWidget {
 class _EditMealModalState extends State<EditMealModal> {
   late TextEditingController _nameController;
   late TextEditingController _caloriesController;
-  late List<MealIngredient> _ingredients;
+  late TextEditingController _proteinController;
+  late TextEditingController _carbsController;
+  late TextEditingController _fatsController;
+  late List<_MutableIngredient> _ingredients;
 
   @override
   void initState() {
@@ -26,9 +29,15 @@ class _EditMealModalState extends State<EditMealModal> {
     _nameController = TextEditingController(text: widget.meal.name);
     _caloriesController =
         TextEditingController(text: widget.meal.calories.toString());
+    _proteinController =
+        TextEditingController(text: widget.meal.protein.toString());
+    _carbsController =
+        TextEditingController(text: widget.meal.carbs.toString());
+    _fatsController =
+        TextEditingController(text: widget.meal.fats.toString());
     // Create a deep copy of ingredients to avoid modifying the original list directly
     _ingredients = widget.meal.ingredients
-        .map((i) => MealIngredient(i.name, i.amount, i.calories))
+        .map((i) => _MutableIngredient(MealIngredient(i.name, i.amount, i.calories)))
         .toList();
   }
 
@@ -36,18 +45,32 @@ class _EditMealModalState extends State<EditMealModal> {
   void dispose() {
     _nameController.dispose();
     _caloriesController.dispose();
+    _proteinController.dispose();
+    _carbsController.dispose();
+    _fatsController.dispose();
     super.dispose();
+  }
+
+  void _updateTotalCalories() {
+    int total = 0;
+    for (var item in _ingredients) {
+      total += item.ingredient.calories;
+    }
+    setState(() {
+      _caloriesController.text = total.toString();
+    });
   }
 
   void _addIngredient() {
     setState(() {
-      _ingredients.add(MealIngredient('', '', 0));
+      _ingredients.add(_MutableIngredient(MealIngredient('', '', 0)));
     });
   }
 
   void _removeIngredient(int index) {
     setState(() {
       _ingredients.removeAt(index);
+      _updateTotalCalories();
     });
   }
 
@@ -58,37 +81,43 @@ class _EditMealModalState extends State<EditMealModal> {
       icon: widget.meal.icon,
       name: _nameController.text,
       calories: int.tryParse(_caloriesController.text) ?? 0,
-      protein: widget.meal.protein,
-      carbs: widget.meal.carbs,
-      fats: widget.meal.fats,
+      protein: int.tryParse(_proteinController.text) ?? 0,
+      carbs: int.tryParse(_carbsController.text) ?? 0,
+      fats: int.tryParse(_fatsController.text) ?? 0,
       eaten: widget.meal.eaten,
       planId: widget.meal.planId,
-      ingredients: _ingredients,
+      ingredients: _ingredients.map((i) => i.ingredient).toList(),
     );
     widget.onSave(updatedMeal);
     Navigator.pop(context);
   }
+
+
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black;
+    final isWide = MediaQuery.of(context).size.width > 600;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
+    Widget content = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: 600,
+        maxHeight: MediaQuery.of(context).size.height * 0.9,
+      ),
+      child: Container(
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-        border: Border.all(
-          color: isDarkMode ? Colors.white : Colors.black,
-          width: 0.3,
-        ),
+        borderRadius: isWide 
+            ? BorderRadius.circular(24)
+            : const BorderRadius.only(
+                topLeft: Radius.circular(24),
+                topRight: Radius.circular(24),
+              ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Header
           Padding(
@@ -114,7 +143,7 @@ class _EditMealModalState extends State<EditMealModal> {
           const Divider(height: 1),
 
           // Content
-          Expanded(
+          Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -160,8 +189,10 @@ class _EditMealModalState extends State<EditMealModal> {
                   const SizedBox(height: 12),
                   ..._ingredients.asMap().entries.map((entry) {
                     final index = entry.key;
-                    final ingredient = entry.value;
+                    final item = entry.value;
+                    final ingredient = item.ingredient;
                     return Padding(
+                      key: item.key,
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Row(
                         children: [
@@ -170,9 +201,9 @@ class _EditMealModalState extends State<EditMealModal> {
                             child: _IngredientInput(
                               initialValue: ingredient.name,
                               hint: 'Name',
-                              onChanged: (val) => _ingredients[index] =
-                                  MealIngredient(val, ingredient.amount,
-                                      ingredient.calories),
+                              onChanged: (val) => _ingredients[index].ingredient =
+                                  MealIngredient(val, _ingredients[index].ingredient.amount,
+                                      _ingredients[index].ingredient.calories),
                               isDarkMode: isDarkMode,
                             ),
                           ),
@@ -182,27 +213,27 @@ class _EditMealModalState extends State<EditMealModal> {
                             child: _IngredientInput(
                               initialValue: ingredient.amount,
                               hint: 'Amount',
-                              onChanged: (val) => _ingredients[index] =
-                                  MealIngredient(ingredient.name, val,
-                                      ingredient.calories),
+                              onChanged: (val) => _ingredients[index].ingredient =
+                                  MealIngredient(_ingredients[index].ingredient.name, val,
+                                      _ingredients[index].ingredient.calories),
                               isDarkMode: isDarkMode,
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 14),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFE5E5),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '${ingredient.calories} kcal',
-                              style: const TextStyle(
-                                color: const Color(0xFFFF0000),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
+                          Expanded(
+                            flex: 2,
+                            child: _IngredientInput(
+                              initialValue: ingredient.calories.toString(),
+                              hint: 'kcal',
+                              onChanged: (val) {
+                                _ingredients[index].ingredient = MealIngredient(
+                                    _ingredients[index].ingredient.name,
+                                    _ingredients[index].ingredient.amount,
+                                    int.tryParse(val) ?? 0);
+                                _updateTotalCalories();
+                              },
+                              isDarkMode: isDarkMode,
+                              isNumber: true,
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -245,67 +276,6 @@ class _EditMealModalState extends State<EditMealModal> {
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // AI Estimate Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {}, // Mock functionality
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF0000),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.auto_awesome,
-                              color: Colors.white, size: 18),
-                          SizedBox(width: 8),
-                          Text(
-                            'Estimate Calories with AI',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Total Calories
-                  Text(
-                    'Total Calories',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _caloriesController,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: textColor),
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -363,7 +333,24 @@ class _EditMealModalState extends State<EditMealModal> {
           ),
         ],
       ),
+    ),
     );
+
+    if (isWide) {
+      return Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: content,
+      );
+    } else {
+      return Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: content,
+        ),
+      );
+    }
   }
 }
 
@@ -372,12 +359,14 @@ class _IngredientInput extends StatelessWidget {
   final String hint;
   final Function(String) onChanged;
   final bool isDarkMode;
+  final bool isNumber;
 
   const _IngredientInput({
     required this.initialValue,
     required this.hint,
     required this.onChanged,
     required this.isDarkMode,
+    this.isNumber = false,
   });
 
   @override
@@ -385,6 +374,7 @@ class _IngredientInput extends StatelessWidget {
     return TextFormField(
       initialValue: initialValue,
       onChanged: onChanged,
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
       style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
       decoration: InputDecoration(
         hintText: hint,
@@ -402,4 +392,11 @@ class _IngredientInput extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MutableIngredient {
+  final UniqueKey key;
+  MealIngredient ingredient;
+
+  _MutableIngredient(this.ingredient) : key = UniqueKey();
 }

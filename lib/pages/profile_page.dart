@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +11,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/supabase_service.dart';
+import '../main.dart';
 import '../widgets/red_header.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
@@ -23,6 +26,11 @@ import 'legal/ai_transparency_page.dart';
 import 'legal/contact_support_page.dart';
 import 'legal/about_app_page.dart';
 import '../widgets/desktop_right_panel.dart';
+import 'calculators/bmi_calculator_page.dart';
+import 'calculators/calorie_calculator_page.dart';
+import 'calculators/macro_calculator_page.dart';
+import 'calculators/body_fat_calculator_page.dart';
+import 'calculators/one_rm_calculator_page.dart';
 
 class ProfilePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -91,64 +99,34 @@ class ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
     final user = Supabase.instance.client.auth.currentUser;
 
-    // 1. Apply whatever we have locally first (instant render)
     setState(() {
-      _userName = prefs.getString('profile_name') ??
-          user?.userMetadata?['full_name'] ??
-          'Guest User';
+      _userName = user?.userMetadata?['full_name'] ?? 'Guest User';
       _userEmail = user?.email ?? 'guest@gymguide.co';
-      _userStats['height'] = prefs.getString('profile_height') ?? '';
-      _userStats['weight'] = prefs.getString('profile_weight') ?? '';
-      _userStats['age'] = prefs.getString('profile_age') ?? '';
-      _userStats['gender'] = prefs.getString('profile_gender') ?? '';
-      _userStats['goal'] = prefs.getString('profile_goal') ?? '';
 
       // Member Since: derive from user creation date
       if (user?.createdAt != null) {
         try {
           final dt = DateTime.parse(user!.createdAt);
           const months = [
-            'Jan',
-            'Feb',
-            'Mar',
-            'Apr',
-            'May',
-            'Jun',
-            'Jul',
-            'Aug',
-            'Sep',
-            'Oct',
-            'Nov',
-            'Dec'
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
           ];
           _memberSince = '${months[dt.month - 1]} ${dt.year}';
         } catch (_) {}
       }
     });
 
-    // 2. Pull from Supabase to fill gaps for goal / gender only
     if (user != null) {
       try {
-        final rows = await Supabase.instance.client
-            .from('user_preferences')
-            .select('goal, gender')
-            .eq('user_id', user.id)
-            .limit(1);
-
-        if (rows.isNotEmpty) {
-          final row = Map<String, dynamic>.from(rows.first);
-
+        final profileStats = await SupabaseService().getProfileStats();
+        if (profileStats != null) {
           String goalDisplay(String? g) {
             switch (g) {
-              case 'fat_loss':
-                return 'Lose Weight';
-              case 'muscle_gain':
-                return 'Build Muscle';
-              default:
-                return g ?? '';
+              case 'fat_loss': return 'Lose Weight';
+              case 'muscle_gain': return 'Build Muscle';
+              default: return g ?? '';
             }
           }
 
@@ -156,15 +134,34 @@ class ProfilePageState extends State<ProfilePage> {
               ? s[0].toUpperCase() + s.substring(1)
               : '';
 
-          if (!mounted) return;
-          setState(() {
-            if (_userStats['goal']!.isEmpty && row['goal'] != null) {
-              _userStats['goal'] = goalDisplay(row['goal'] as String?);
-            }
-            if (_userStats['gender']!.isEmpty && row['gender'] != null) {
-              _userStats['gender'] = cap(row['gender'] as String?);
-            }
-          });
+          if (mounted) {
+            final prefs = await SharedPreferences.getInstance();
+            final unit = prefs.getString('weight_unit') ?? 'kg';
+            final multiplier = unit == 'lbs' ? 2.20462 : 1.0;
+
+            setState(() {
+              if (profileStats['height_cm'] != null) {
+                _userStats['height'] = profileStats['height_cm'].toString();
+              }
+              if (profileStats['weight_kg'] != null) {
+                final w = (profileStats['weight_kg'] as num).toDouble() * multiplier;
+                _userStats['weight'] = '${w.toStringAsFixed(1)} $unit';
+              }
+              if (profileStats['target_weight_kg'] != null) {
+                final tw = (profileStats['target_weight_kg'] as num).toDouble() * multiplier;
+                _userStats['target_weight'] = '${tw.toStringAsFixed(1)} $unit';
+              }
+              if (profileStats['age'] != null) {
+                _userStats['age'] = profileStats['age'].toString();
+              }
+              if (profileStats['goal'] != null) {
+                _userStats['goal'] = goalDisplay(profileStats['goal'] as String?);
+              }
+              if (profileStats['gender'] != null) {
+                _userStats['gender'] = cap(profileStats['gender'] as String?);
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('[PROFILE] Could not fetch user_preferences: $e');
@@ -176,6 +173,7 @@ class ProfilePageState extends State<ProfilePage> {
       setState(() {
         if (_userStats['height']!.isEmpty) _userStats['height'] = '— cm';
         if (_userStats['weight']!.isEmpty) _userStats['weight'] = '— kg';
+        if (_userStats['target_weight']!.isEmpty) _userStats['target_weight'] = '— kg';
         if (_userStats['age']!.isEmpty) _userStats['age'] = '—';
         if (_userStats['gender']!.isEmpty) _userStats['gender'] = '—';
         if (_userStats['goal']!.isEmpty) _userStats['goal'] = '—';
@@ -375,8 +373,9 @@ class ProfilePageState extends State<ProfilePage> {
 
   void _showEditProfileDialog() {
     final nameController = TextEditingController(text: _userName);
-    final heightController = TextEditingController(text: _userStats['height']);
-    final weightController = TextEditingController(text: _userStats['weight']);
+    final heightController = TextEditingController(text: _userStats['height']?.replaceAll(' cm', ''));
+    final weightController = TextEditingController(text: _userStats['weight']?.replaceAll(RegExp(r' (kg|lbs)'), ''));
+    final targetWeightController = TextEditingController(text: _userStats['target_weight']?.replaceAll(RegExp(r' (kg|lbs)'), ''));
     final ageController = TextEditingController(text: _userStats['age']);
     const genderOptions = ['Male', 'Female', 'Other'];
     const goalOptions = [
@@ -422,7 +421,15 @@ class ProfilePageState extends State<ProfilePage> {
                 TextField(
                   controller: weightController,
                   decoration: const InputDecoration(
-                    labelText: 'Weight (e.g., 75 kg)',
+                    labelText: 'Weight (e.g., 75)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: targetWeightController,
+                  decoration: const InputDecoration(
+                    labelText: 'Target Weight (e.g., 70)',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -475,20 +482,40 @@ class ProfilePageState extends State<ProfilePage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                // Save to SharedPreferences
                 final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('profile_name', nameController.text);
-                await prefs.setString('profile_height', heightController.text);
-                await prefs.setString('profile_weight', weightController.text);
-                await prefs.setString('profile_age', ageController.text);
-                await prefs.setString('profile_gender', selectedGender);
-                await prefs.setString('profile_goal', selectedGoal);
+                final unit = prefs.getString('weight_unit') ?? 'kg';
+                final saveMultiplier = unit == 'lbs' ? 0.453592 : 1.0;
+
+                // Save to Supabase
+                final hNum = double.tryParse(heightController.text.replaceAll(RegExp(r'[^\d.]'), ''));
+                final wNumRaw = double.tryParse(weightController.text.replaceAll(RegExp(r'[^\d.]'), ''));
+                final wNum = wNumRaw != null ? wNumRaw * saveMultiplier : null;
+                
+                final aNum = int.tryParse(ageController.text.replaceAll(RegExp(r'[^\d.]'), ''));
+                
+                final twNumRaw = double.tryParse(targetWeightController.text.replaceAll(RegExp(r'[^\d.]'), ''));
+                final twNum = twNumRaw != null ? twNumRaw * saveMultiplier : null;
+
+                String dbGoal = selectedGoal;
+                if (selectedGoal == 'Lose Weight') dbGoal = 'fat_loss';
+                if (selectedGoal == 'Build Muscle') dbGoal = 'muscle_gain';
+
+                await SupabaseService().updateProfileStats(
+                  name: nameController.text,
+                  height: hNum,
+                  weight: wNum,
+                  targetWeight: twNum,
+                  age: aNum,
+                  gender: selectedGender.toLowerCase(), // Store lowercase standard
+                  goal: dbGoal,
+                );
 
                 setState(() {
                   _userName = nameController.text;
-                  _userStats['height'] = heightController.text;
-                  _userStats['weight'] = weightController.text;
-                  _userStats['age'] = ageController.text;
+                  _userStats['height'] = '${hNum ?? '—'} cm';
+                  _userStats['weight'] = '${wNum ?? '—'} kg';
+                  _userStats['target_weight'] = '${twNum ?? '—'} kg';
+                  _userStats['age'] = '${aNum ?? '—'}';
                   _userStats['gender'] = selectedGender;
                   _userStats['goal'] = selectedGoal;
                 });
@@ -517,7 +544,7 @@ class ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth > 800;
+        final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
 
         if (isDesktop) {
           return _buildDesktopLayout();
@@ -590,6 +617,8 @@ class ProfilePageState extends State<ProfilePage> {
                                                 _buildSectionTitle('Goals & Preferences'),
                                                 const SizedBox(height: 16),
                                                 _buildGoalsGrid(),
+                                                const SizedBox(height: 24),
+                                                _buildResetPlanCard(),
                                               ],
                                             ),
                                           ),
@@ -738,6 +767,50 @@ class ProfilePageState extends State<ProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      
+                      // ── FITNESS CALCULATORS ───────────────────────
+                      _buildMobileSectionHeader('Fitness Calculators'),
+                      const SizedBox(height: 12),
+                      _buildMobileLegalItem(
+                        icon: Icons.monitor_weight_outlined,
+                        title: 'BMI Calculator',
+                        subtitle: 'Body mass index',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => BmiCalculatorPage(toggleTheme: widget.toggleTheme, isDarkMode: widget.isDarkMode))),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.local_fire_department_outlined,
+                        title: 'Calorie Calculator',
+                        subtitle: 'Daily calorie needs',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => CalorieCalculatorPage(toggleTheme: widget.toggleTheme, isDarkMode: widget.isDarkMode))),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.pie_chart_outline,
+                        title: 'Macro Calculator',
+                        subtitle: 'Protein, carbs & fats',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => MacroCalculatorPage(toggleTheme: widget.toggleTheme, isDarkMode: widget.isDarkMode))),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.accessibility_new_outlined,
+                        title: 'Body Fat Calculator',
+                        subtitle: 'Estimate body fat %',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => BodyFatCalculatorPage(toggleTheme: widget.toggleTheme, isDarkMode: widget.isDarkMode))),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.fitness_center_outlined,
+                        title: '1RM Calculator',
+                        subtitle: 'One rep max estimator',
+                        onTap: () => Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => OneRmCalculatorPage(toggleTheme: widget.toggleTheme, isDarkMode: widget.isDarkMode))),
+                      ),
+                      const SizedBox(height: 24),
 
                       // ── LEGAL & PRIVACY ──────────────────────────
                       _buildMobileSectionHeader('Legal & Privacy'),
@@ -793,6 +866,8 @@ class ProfilePageState extends State<ProfilePage> {
 
                       // ── DATA & TRANSPARENCY ───────────────────────
                       _buildMobileSectionHeader('Data & Transparency'),
+                      const SizedBox(height: 12),
+                      _buildResetPlanCard(),
                       const SizedBox(height: 12),
                       _buildMobileLegalItem(
                         icon: Icons.download_outlined,
@@ -1286,5 +1361,215 @@ class ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+
+  Widget _buildResetPlanCard() {
+    final cardColor = widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
+    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
+    final subTextColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: widget.isDarkMode ? Colors.white : Colors.black,
+          width: 1,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // If the available width is small, we wrap the button to the next line
+          final isNarrow = constraints.maxWidth < 340;
+
+          final iconWidget = Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF0000).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.refresh_rounded,
+              color: Color(0xFFFF0000),
+              size: 24,
+            ),
+          );
+
+          final textSection = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Reset Your Plan',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              Text(
+                'Start fresh and generate a new plan',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: subTextColor,
+                ),
+              ),
+            ],
+          );
+
+          final buttonWidget = ElevatedButton(
+            onPressed: _showResetConfirmationDialog,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF0000),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: const Text('Create New Plan', style: TextStyle(fontWeight: FontWeight.bold)),
+          );
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  iconWidget,
+                  const SizedBox(width: 16),
+                  Expanded(child: textSection),
+                  if (!isNarrow) ...[
+                    const SizedBox(width: 12),
+                    buttonWidget,
+                  ],
+                ],
+              ),
+              if (isNarrow) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: buttonWidget,
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showResetConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        final controller = TextEditingController();
+        bool canConfirm = false;
+        return StatefulBuilder(
+          builder: (ctx, setStateSB) {
+            return AlertDialog(
+              title: const Text('⚠️ Reset Your Plan'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'This will permanently delete your current workout plan, meal plan, and progress. This cannot be undone.',
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Type RESET to confirm:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: controller,
+                    onChanged: (val) {
+                      setStateSB(() {
+                        canConfirm = val.trim() == 'RESET';
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'RESET',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    autocorrect: false,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: canConfirm
+                      ? () {
+                          Navigator.pop(dialogContext);
+                          _resetUserPlan();
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF0000),
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                  ),
+                  child: const Text('Create New Plan', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _resetUserPlan() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Delete user plan data from Supabase in the correct cascade order
+      // Fetch the user's plan IDs first, then delete pivot rows
+      final planRows = await Supabase.instance.client
+          .from('user_meal_plans')
+          .select('id')
+          .eq('user_id', user.id);
+      final planIds = (planRows as List).map<String>((r) => r['id'].toString()).toList();
+      if (planIds.isNotEmpty) {
+        await Supabase.instance.client
+            .from('user_meal_plan_meals')
+            .delete()
+            .inFilter('plan_id', planIds);
+      }
+
+      await Supabase.instance.client.from('user_meal_plans').delete().eq('user_id', user.id);
+      await Supabase.instance.client.from('user_workout_progress').delete().eq('user_id', user.id);
+      await Supabase.instance.client.from('user_weekly_weights').delete().eq('user_id', user.id);
+      // Also clear the user_preferences row so the app treats them as a new user
+      await Supabase.instance.client.from('user_preferences').delete().eq('user_id', user.id);
+
+      // 2. Clear local auth flags
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('has_workout_plan');
+      await prefs.remove('has_meal_plan');
+      await prefs.remove('meal_plan_cache_${user.id}');
+      await prefs.remove('plan_duration');
+      await prefs.remove('weight_unit');
+
+      if (mounted) {
+        // 3. Navigate back to root (GymGuideApp will restart the full auth/onboarding flow)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const GymGuideApp()),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('[PROFILE] Error resetting plan: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to reset plan: $e')),
+        );
+      }
+    }
   }
 }

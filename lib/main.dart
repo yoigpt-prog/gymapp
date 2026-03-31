@@ -53,6 +53,21 @@ class GymGuideApp extends StatefulWidget {
   State<GymGuideApp> createState() => _GymGuideAppState();
 }
 
+class NoTransitionsBuilder extends PageTransitionsBuilder {
+  const NoTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return child; // Return child directly with no animation
+  }
+}
+
 class _GymGuideAppState extends State<GymGuideApp> {
   ThemeMode _themeMode = ThemeMode.light; // Default to Light (White)
 
@@ -73,6 +88,14 @@ class _GymGuideAppState extends State<GymGuideApp> {
 
   @override
   Widget build(BuildContext context) {
+    const pageTransitionsTheme = PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: NoTransitionsBuilder(),
+        TargetPlatform.iOS: NoTransitionsBuilder(),
+        TargetPlatform.macOS: NoTransitionsBuilder(),
+      },
+    );
+
     return MaterialApp(
       title: 'GymGuide',
       debugShowCheckedModeBanner: false,
@@ -81,11 +104,13 @@ class _GymGuideAppState extends State<GymGuideApp> {
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFFFFFFF),
         primarySwatch: Colors.red,
+        pageTransitionsTheme: pageTransitionsTheme,
       ),
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF121212),
         primarySwatch: Colors.red,
+        pageTransitionsTheme: pageTransitionsTheme,
       ),
       initialRoute: '/',
       onGenerateRoute: (settings) {
@@ -181,9 +206,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
   @override
   void initState() {
     super.initState();
-    
-    // Listen for auth state changes (will fire initially and on any login/logout)
+
+    // Listen for auth state changes.
+    // On Flutter Web the initial session is restored asynchronously —
+    // this stream fires once with AuthChangeEvent.initialSession when ready.
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      debugPrint('[AuthWrapper] Event: ${data.event}  user=${data.session?.user.id}');
+      // Skip events that don't affect the user session state
+      if (data.event == AuthChangeEvent.passwordRecovery) return;
       _checkAuthState();
     });
   }
@@ -199,6 +229,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final user = Supabase.instance.client.auth.currentUser;
 
     if (session == null || user == null) {
+      debugPrint('[AuthWrapper] No session — showing AuthPage.');
       if (mounted) {
         setState(() {
           _isAuthenticated = false;
@@ -209,7 +240,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return;
     }
 
-    // User is authenticated, now check if they have a profile (user_preferences)
+    debugPrint('[AuthWrapper] Session confirmed for user: ${user.id}');
+
+    // Always query Supabase to determine profile state. Never skip.
     try {
       final response = await Supabase.instance.client
           .from('user_preferences')
@@ -217,10 +250,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
           .eq('user_id', user.id)
           .maybeSingle();
 
+      final hasProfile = response != null;
+      debugPrint('[AuthWrapper] has_profile=$hasProfile for user=${user.id}');
+
       if (mounted) {
-        if (response != null) {
-          // Sync missing SharedPreferences for returning users on new devices
-          // to prevent them from being forced into the onboarding quiz.
+        if (hasProfile) {
+          // Sync convenience flags for use by local code paths.
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('has_workout_plan', true);
           await prefs.setBool('has_meal_plan', true);
@@ -228,16 +263,16 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         setState(() {
           _isAuthenticated = true;
-          _hasProfile = response != null;
+          _hasProfile = hasProfile;
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint('[Auth] Error checking profile: $e');
+      debugPrint('[AuthWrapper] Error checking profile: $e');
       if (mounted) {
         setState(() {
           _isAuthenticated = true;
-          _hasProfile = false;
+          _hasProfile = false; // Default to safe: show onboarding check
           _isLoading = false;
         });
       }

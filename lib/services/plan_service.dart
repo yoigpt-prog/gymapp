@@ -164,20 +164,43 @@ class PlanService {
 
     // 1. CHECK IF PLAN EXISTS
     final existing = await _supabase
-        .from('user_meal_plan')
+        .from('user_meal_plans')
         .select('id')
         .eq('user_id', user.id)
         .limit(1);
 
     // 2. GENERATE IF EMPTY OR FORCED
     if (existing.isEmpty || forceRegenerate) {
-      print('DEBUG: Generating meal plan via generate_user_meal_plan...');
+      print('DEBUG: Generating meal plan via new pivot RPC...');
+      
+      // Fetch user preferences to build the template key
+      final prefs = await _supabase
+          .from('user_preferences')
+          .select('goal, diet_type, duration_weeks')
+          .eq('user_id', user.id)
+          .maybeSingle();
+          
+      String diet = 'balanced';
+      String g = 'fat_loss';
+      int weeks = 1;
+      
+      if (prefs != null) {
+          diet = prefs['diet_type'] ?? 'balanced';
+          g = prefs['goal'] ?? 'fat_loss';
+          weeks = (prefs['duration_weeks'] as int?) ?? 1;
+      }
+      
+      final String templateKey = resolveTemplateKey(goal: g, diet: diet);
 
       final response = await _supabase.rpc(
-        'generate_user_meal_plan',
-        params: {'p_user_id': user.id},
+        'generate_user_meal_plan_from_template',
+        params: {
+            'p_user_id': user.id,
+            'p_template_key': templateKey,
+            'p_duration_weeks': weeks,
+        },
       );
-      print('DEBUG: generate_user_meal_plan response: $response');
+      print('DEBUG: generate_user_meal_plan_from_template ($templateKey) response: $response');
     } else {
       print('DEBUG: Meal plan already exists. Skipping generation.');
     }
@@ -211,13 +234,72 @@ class PlanService {
       durationWeeks: durationWeeks,
     );
 
-    // 2. Call RPC – the function reads preferences (incl. duration_weeks)
-    //    directly from the user_preferences table.
-    print('DEBUG: Calling generate_user_meal_plan RPC for user ${user.id} (${durationWeeks}w)');
+    // 2. Call RPC – using the new pivot function
+    final String templateKey = resolveTemplateKey(goal: mainGoal, diet: dietType);
+    print('DEBUG: Calling generate_user_meal_plan_from_template ($templateKey) RPC for user ${user.id}');
+    
     final response = await _supabase.rpc(
-      'generate_user_meal_plan',
-      params: {'p_user_id': user.id},
+      'generate_user_meal_plan_from_template',
+      params: {
+          'p_user_id': user.id,
+          'p_template_key': templateKey,
+          'p_duration_weeks': durationWeeks,
+      },
     );
     print('DEBUG: generate_user_meal_plan response: $response');
+  }
+
+  // ----------------------------------------------------------------
+  // ✅ TEMPLATE KEY RESOLVER
+  // ----------------------------------------------------------------
+  
+  /// Generates a valid template_key matching the `meal_templates` DB table.
+  /// Enforces safe fallbacks to guarantee the RPC will never fail due to
+  /// a missing key configuration.
+  String resolveTemplateKey({
+    required String goal,
+    required String diet,
+  }) {
+    // 1. Normalize
+    String nGoal = goal.toLowerCase().trim();
+    String nDiet = diet.toLowerCase().trim();
+
+    // Normalize unknown goals to default
+    if (nGoal != 'fat_loss' && nGoal != 'muscle_gain') {
+      nGoal = 'fat_loss';
+    }
+
+    // Normalize unknown diets to default
+    final validDiets = {'balanced', 'plant_based', 'low_carb', 'special'};
+    if (!validDiets.contains(nDiet)) {
+      nDiet = 'balanced';
+    }
+
+    // 2. Build key (goal_diet)
+    String key = '${nGoal}_$nDiet';
+
+    // 3. Final safety check against hardcoded DB list
+    const allowedKeys = [
+      'fat_loss_balanced',
+      'fat_loss_plant_based',
+      'fat_loss_low_carb',
+      'fat_loss_special',
+      'muscle_gain_balanced',
+      'muscle_gain_plant_based',
+      'muscle_gain_low_carb',
+      'muscle_gain_special',
+    ];
+
+    if (!allowedKeys.contains(key)) {
+      key = '${nGoal}_balanced';
+      
+      // Ultimate fallback
+      if (!allowedKeys.contains(key)) {
+        key = 'fat_loss_balanced';
+      }
+    }
+
+    print('TEMPLATE KEY SELECTED: $key');
+    return key;
   }
 }

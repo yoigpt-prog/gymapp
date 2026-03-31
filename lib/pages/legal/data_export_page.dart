@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../widgets/legal_page_layout.dart';
 
 class DataExportPage extends StatelessWidget {
@@ -11,7 +12,7 @@ class DataExportPage extends StatelessWidget {
     
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth > 800;
+        final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
         
         if (isDesktop) {
           return LegalPageLayout(

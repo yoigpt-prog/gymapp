@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'sidebar_drawer.dart';
 import 'web_footer.dart';
 import '../pages/main_scaffold.dart';
@@ -28,7 +29,7 @@ class _MainLayoutWrapperState extends State<MainLayoutWrapper> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth > 800;
+        final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
 
         if (isDesktop) {
           return Scaffold(
