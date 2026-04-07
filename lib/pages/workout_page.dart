@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/revenue_cat_service.dart';
+import '../services/analytics_service.dart';
 import 'exercise_detail_page.dart';
 import 'dart:async'; // Required for StreamSubscription
 import 'dart:convert';
@@ -109,7 +113,56 @@ class WorkoutPageState extends State<WorkoutPage> {
 
     // Start refresh — completed exercises are loaded inside refresh after plan loads
     _refresh();
+
+    // Check subscription access after the first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkSubscriptionAccess();
+    });
   }
+
+  // ── Subscription Guard ───────────────────────────────────────────────────
+  /// Called on every page visit. Shows the paywall if the user has completed
+  /// the quiz but does NOT have an active "premium" subscription.
+  /// On dismiss/cancel → hard redirect to Home via [MainScaffoldState].
+  Future<void> _checkSubscriptionAccess() async {
+    if (kIsWeb || !mounted) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
+      if (!hasCompletedQuiz) return; // First-time user — let quiz handle it.
+
+      final isPro = await RevenueCatService().isProUser();
+      if (isPro || !mounted) return; // Subscribed — all good.
+
+      debugPrint('[WorkoutPage] Not subscribed — showing paywall gate.');
+      AnalyticsService().trackPaywallViewed(source: 'workout_page');
+
+      final result = await RevenueCatService().showPaywall();
+
+      final isProAfter = await RevenueCatService().isProUser();
+      if (isProAfter) {
+          final customerInfo = await RevenueCatService().getCustomerInfo();
+          String planId = 'unknown';
+          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
+             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
+          }
+          AnalyticsService().trackPurchaseSuccess(plan: planId);
+      }
+
+      final didSubscribe =
+          result == PaywallResult.purchased || result == PaywallResult.restored || isProAfter;
+
+      if (!didSubscribe && mounted) {
+        // Hard gate: redirect to Home.
+        debugPrint('[WorkoutPage] Paywall dismissed — redirecting to Home.');
+        final scaffold = context.findAncestorStateOfType<MainScaffoldState>();
+        scaffold?.changeTab(0);
+      }
+    } catch (e) {
+      debugPrint('[WorkoutPage] _checkSubscriptionAccess error: $e');
+    }
+  }
+  // ────────────────────────────────────────────────────────────────
 
   Future<void> _loadCompletedExercises() async {
     final user = Supabase.instance.client.auth.currentUser;

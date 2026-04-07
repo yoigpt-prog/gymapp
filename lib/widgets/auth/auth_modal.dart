@@ -80,8 +80,8 @@ class _AuthModalState extends State<AuthModal> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: kIsWeb ? null : 'io.supabase.flutterquickstart://login-callback/',
-        authScreenLaunchMode: LaunchMode.externalNonBrowserApplication,
+        redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
+        authScreenLaunchMode: LaunchMode.inAppBrowserView,
       );
     } catch (e) {
       if (mounted) _showError(e.toString());
@@ -95,8 +95,8 @@ class _AuthModalState extends State<AuthModal> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.apple,
-        redirectTo: kIsWeb ? null : 'io.supabase.flutterquickstart://login-callback/',
-        authScreenLaunchMode: LaunchMode.externalNonBrowserApplication,
+        redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
+        authScreenLaunchMode: LaunchMode.inAppBrowserView,
       );
     } catch (e) {
       final msg = e.toString().toLowerCase();

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'dart:async';
 import 'home_page.dart';
 import 'workout_page.dart';
@@ -19,6 +21,8 @@ import 'calculators/macro_calculator_page.dart';
 import 'calculators/body_fat_calculator_page.dart';
 import 'calculators/one_rm_calculator_page.dart';
 import '../widgets/auth/auth_modal.dart'; // Import AuthModal
+import '../services/revenue_cat_service.dart';
+import '../services/analytics_service.dart';
 
 class MainScaffold extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -70,6 +74,13 @@ class MainScaffoldState extends State<MainScaffold> {
     _currentIndex = widget.initialIndex;
     _initializePages();
     _initAuthLogic();
+    
+    // Track initial screen
+    _trackCurrentScreen();
+  }
+
+  void _trackCurrentScreen() {
+    // Screen tracking removed per minimal analytics strategy
   }
 
   void _initializePages() {
@@ -138,46 +149,55 @@ class MainScaffoldState extends State<MainScaffold> {
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final session = data.session;
       final event = data.event;
-      
+
       if (mounted) {
         _checkAuthStatus();
-        
+
         if (event == AuthChangeEvent.signedOut) {
-          // User explicitly logged out: jump to Home and clear pages
+          // LOGOUT: clear all identity and flags
+          AnalyticsService().reset();
           SharedPreferences.getInstance().then((prefs) {
             prefs.remove('has_workout_plan');
             prefs.remove('has_meal_plan');
           });
-          setState(() {
-            _currentIndex = 0;
-          });
+          setState(() => _currentIndex = 0);
           _workoutKey.currentState?.refresh(force: true);
           _mealPlanKey.currentState?.refresh();
           _progressKey.currentState?.refresh(force: true);
           _profileKey.currentState?.refresh();
+
         } else if (session != null) {
+          // AUTHENTICATED: login / token restore / token refresh
+          // Step 1: identify with real UUID (no-op if same user already identified)
+          AnalyticsService().identifyUser(session.user.id);
+          // Step 2: App Open - fires once per cold start, deduplicated by flag
+          AnalyticsService().trackAppOpen();
+
           _cancelAuthTimer();
-          // Refresh all pages so new account data shows immediately
           _workoutKey.currentState?.refresh(force: true);
           _mealPlanKey.currentState?.refresh();
           _progressKey.currentState?.refresh(force: true);
           _profileKey.currentState?.refresh();
+
           if (_isAuthModalOpen && !AuthModal.isInMultiStep && AuthModal.isVisible) {
-            // Only auto-close if NOT in the middle of OTP → Password signup steps
             AuthModal.isVisible = false;
             Navigator.of(context, rootNavigator: true).pop();
             _isAuthModalOpen = false;
           }
+
+        } else if (event == AuthChangeEvent.initialSession) {
+          // GUEST: initialSession fired with session==null means user is not logged in.
+          // This is the correct deterministic place to fire App Open for guests.
+          // The 500ms fallback timer has been removed - it caused duplicate fires
+          // on real devices when the auth stream arrived after the timer.
+          AnalyticsService().trackAppOpen();
+
         } else {
-          // Some Supabase events (userUpdated, tokenRefreshed) can fire with a null
-          // session even when the user is still authenticated. Always recheck the
-          // live session before restarting the timer so we don't re-pop the modal
-          // in the middle of the OTP / set-password flow.
+          // OTHER NULL-SESSION EVENTS: tokenRefreshed, userUpdated, etc.
           final liveSession = Supabase.instance.client.auth.currentSession;
           if (liveSession == null && _hasInteracted) {
             _startAuthTimer();
           } else if (liveSession != null) {
-            // User is still authenticated – cancel any pending timer.
             _cancelAuthTimer();
           }
         }
@@ -185,7 +205,17 @@ class MainScaffoldState extends State<MainScaffold> {
     });
 
     _checkAuthStatus();
-    // Do NOT start timer here automatically. Wait for interaction.
+
+    // Safety fallback for guest App Open on real Android devices.
+    // The AuthChangeEvent.initialSession may not fire on all Android versions.
+    // This fires after 2s ONLY if App Open was not already tracked by the stream.
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        AnalyticsService().trackAppOpen(); // no-op if already tracked (deduped by flag)
+      }
+    });
+
+    // Do NOT start auth prompt timer here - wait for first user interaction.
   }
 
   void _onUserInteraction() {
@@ -204,6 +234,12 @@ class MainScaffoldState extends State<MainScaffold> {
 
     if (session != null && user != null) {
       debugPrint('[MainScaffold] Auth check: user=${user.id}');
+
+      // Safety net: identify the user here in case the auth stream event
+      // was missed on real Android devices. identifyUser() is idempotent —
+      // it skips if the same userId is already identified.
+      AnalyticsService().identifyUser(user.id);
+
       try {
         // ALWAYS check Supabase — never skip based on local flags.
         // This is the only reliable gate for cross-device sessions.
@@ -329,8 +365,42 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   Future<void> changeTab(int index) async {
-     if (index == 1 || index == 2) {
+    if (index == 1 || index == 2) {
       final prefs = await SharedPreferences.getInstance();
+
+      // ── Subscription gate (returning users) ─────────────────────────────────
+      // Only activate after the quiz has been completed once.
+      // First-time users go through the quiz which handles its own paywall.
+      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
+      if (hasCompletedQuiz && !kIsWeb) {
+        final isPro = await RevenueCatService().isProUser();
+        if (!isPro && mounted) {
+          debugPrint('[MainScaffold] Not subscribed — showing paywall gate for tab $index.');
+          // Track paywall view before showing it
+          AnalyticsService().trackPaywallViewed(source: index == 1 ? 'workout_tab' : 'meal_tab');
+          final result = await RevenueCatService().showPaywall();
+          final didSubscribe =
+              result == PaywallResult.purchased || result == PaywallResult.restored;
+          if (didSubscribe && result == PaywallResult.purchased) {
+            // Track successful purchase (not restore)
+            final customerInfo = await RevenueCatService().getCustomerInfo();
+            String planId = 'unknown';
+            if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
+              planId = customerInfo.entitlements.active['premium']!.productIdentifier;
+            }
+            AnalyticsService().trackPurchaseSuccess(plan: planId);
+          }
+          if (!didSubscribe) {
+            // Hard gate: cancel/dismiss → redirect to Home.
+            debugPrint('[MainScaffold] Paywall dismissed — redirecting to Home.');
+            if (mounted) setState(() => _currentIndex = 0);
+            return;
+          }
+          debugPrint('[MainScaffold] Subscription confirmed — continuing to tab $index.');
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────
+
       bool hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
       bool hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
 
@@ -388,6 +458,7 @@ class MainScaffoldState extends State<MainScaffold> {
     
     if (mounted) {
       setState(() => _currentIndex = index);
+      _trackCurrentScreen();
     }
   }
 

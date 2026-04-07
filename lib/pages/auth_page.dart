@@ -16,7 +16,7 @@ class _AuthPageState extends State<AuthPage> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: 'io.supabase.flutterquickstart://login-callback/',
+        redirectTo: 'com.gymguide.app://login-callback/',
       );
     } catch (e) {
       debugPrint('[AUTH ERROR] Google sign-in: $e');
@@ -30,7 +30,7 @@ class _AuthPageState extends State<AuthPage> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.apple,
-        redirectTo: 'io.supabase.flutterquickstart://login-callback/',
+        redirectTo: 'com.gymguide.app://login-callback/',
       );
     } catch (e) {
       debugPrint('[AUTH ERROR] Apple sign-in: $e');

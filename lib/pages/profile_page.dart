@@ -10,6 +10,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart';
+import 'dart:io' show Platform;
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/supabase_service.dart';
 import '../main.dart';
@@ -137,11 +139,20 @@ class ProfilePageState extends State<ProfilePage> {
           if (mounted) {
             final prefs = await SharedPreferences.getInstance();
             final unit = prefs.getString('weight_unit') ?? 'kg';
+            final hUnit = prefs.getString('height_unit') ?? 'cm';
             final multiplier = unit == 'lbs' ? 2.20462 : 1.0;
 
             setState(() {
               if (profileStats['height_cm'] != null) {
-                _userStats['height'] = profileStats['height_cm'].toString();
+                final h = (profileStats['height_cm'] as num).toDouble();
+                if (hUnit == 'ft') {
+                  final totalInches = (h / 2.54).round();
+                  final feet = totalInches ~/ 12;
+                  final inches = totalInches % 12;
+                  _userStats['height'] = '${feet}ft ${inches}in';
+                } else {
+                  _userStats['height'] = '${h.round()} cm';
+                }
               }
               if (profileStats['weight_kg'] != null) {
                 final w = (profileStats['weight_kg'] as num).toDouble() * multiplier;
@@ -215,6 +226,33 @@ class ProfilePageState extends State<ProfilePage> {
       }
     } catch (e) {
       debugPrint('[PROFILE ERROR] Signing out: $e');
+    }
+  }
+
+  void _rateApp() async {
+    const androidPackageName = 'com.gymguide.app';
+    const iOSAppId = '1234567890'; // Replace with Apple App ID when available
+
+    if (kIsWeb) return;
+
+    try {
+      if (Platform.isAndroid) {
+        final url = Uri.parse("market://details?id=$androidPackageName");
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url);
+        } else {
+          await launchUrl(Uri.parse("https://play.google.com/store/apps/details?id=$androidPackageName"));
+        }
+      } else if (Platform.isIOS) {
+        final url = Uri.parse("itms-apps://itunes.apple.com/app/id$iOSAppId?action=write-review");
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url);
+        } else {
+          await launchUrl(Uri.parse("https://apps.apple.com/app/id$iOSAppId?action=write-review"));
+        }
+      }
+    } catch (e) {
+      debugPrint('[PROFILE] Could not launch store rating: $e');
     }
   }
 
@@ -303,6 +341,17 @@ class ProfilePageState extends State<ProfilePage> {
                       Navigator.pop(context);
                       _openShareUrl(
                         'https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(appUrl)}',
+                      );
+                    },
+                  ),
+                  _buildShareOption(
+                    icon: FontAwesomeIcons.whatsapp,
+                    label: 'WhatsApp',
+                    color: const Color(0xFF25D366),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openShareUrl(
+                        'whatsapp://send?text=${Uri.encodeComponent(shareText)}',
                       );
                     },
                   ),
@@ -413,7 +462,7 @@ class ProfilePageState extends State<ProfilePage> {
                 TextField(
                   controller: heightController,
                   decoration: const InputDecoration(
-                    labelText: 'Height (e.g., 180 cm)',
+                    labelText: 'Height (e.g., 180 or 5ft 10in)',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -429,7 +478,7 @@ class ProfilePageState extends State<ProfilePage> {
                 TextField(
                   controller: targetWeightController,
                   decoration: const InputDecoration(
-                    labelText: 'Target Weight (e.g., 70)',
+                    labelText: 'Target Weight',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -484,10 +533,25 @@ class ProfilePageState extends State<ProfilePage> {
               onPressed: () async {
                 final prefs = await SharedPreferences.getInstance();
                 final unit = prefs.getString('weight_unit') ?? 'kg';
+                final hUnit = prefs.getString('height_unit') ?? 'cm';
                 final saveMultiplier = unit == 'lbs' ? 0.453592 : 1.0;
 
                 // Save to Supabase
-                final hNum = double.tryParse(heightController.text.replaceAll(RegExp(r'[^\d.]'), ''));
+                double? hNum;
+                final hText = heightController.text;
+                if (hText.contains('ft') || hText.contains('in')) {
+                  final ftMatch = RegExp(r'(\d+)ft').firstMatch(hText);
+                  final inMatch = RegExp(r'(\d+)in').firstMatch(hText);
+                  if (ftMatch != null && inMatch != null) {
+                    final feet = int.parse(ftMatch.group(1)!);
+                    final inches = int.parse(inMatch.group(1)!);
+                    final totalInches = (feet * 12) + inches;
+                    hNum = totalInches * 2.54;
+                  }
+                } else {
+                  hNum = double.tryParse(hText.replaceAll(RegExp(r'[^\d.]'), ''));
+                }
+                
                 final wNumRaw = double.tryParse(weightController.text.replaceAll(RegExp(r'[^\d.]'), ''));
                 final wNum = wNumRaw != null ? wNumRaw * saveMultiplier : null;
                 
@@ -512,9 +576,22 @@ class ProfilePageState extends State<ProfilePage> {
 
                 setState(() {
                   _userName = nameController.text;
-                  _userStats['height'] = '${hNum ?? '—'} cm';
-                  _userStats['weight'] = '${wNum ?? '—'} kg';
-                  _userStats['target_weight'] = '${twNum ?? '—'} kg';
+                  
+                  if (hNum != null) {
+                    if (hUnit == 'ft') {
+                      final totalInches = (hNum / 2.54).round();
+                      final feet = totalInches ~/ 12;
+                      final inches = totalInches % 12;
+                      _userStats['height'] = '${feet}ft ${inches}in';
+                    } else {
+                      _userStats['height'] = '${hNum.round()} cm';
+                    }
+                  } else {
+                    _userStats['height'] = '— cm';
+                  }
+
+                  _userStats['weight'] = wNumRaw != null ? '${wNumRaw.toStringAsFixed(1)} $unit' : '— $unit';
+                  _userStats['target_weight'] = twNumRaw != null ? '${twNumRaw.toStringAsFixed(1)} $unit' : '— $unit';
                   _userStats['age'] = '${aNum ?? '—'}';
                   _userStats['gender'] = selectedGender;
                   _userStats['goal'] = selectedGoal;
@@ -726,6 +803,32 @@ class ProfilePageState extends State<ProfilePage> {
                             ),
                             child: const Text(
                               'Share',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                                            // Rate App Card
+                      _buildMobileSettingsCard(
+                        icon: Icons.star_rate_rounded,
+                        title: 'Rate App',
+                        subtitle: 'Enjoying it? Leave a review!',
+                        trailing: GestureDetector(
+                          onTap: _rateApp,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFF0000),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Rate',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,

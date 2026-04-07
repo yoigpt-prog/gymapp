@@ -14,6 +14,7 @@ import '../services/supabase_service.dart';
 import '../widgets/auth/auth_modal.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/revenue_cat_service.dart';
+import '../services/analytics_service.dart';
 
 class CustomPlanQuizPage extends StatefulWidget {
   final String quizType; // 'workout' or 'meal'
@@ -144,45 +145,55 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     });
   }
 
-  /// Presents the RevenueCat paywall on iOS/Android; on Web skips it.
-  /// Returns true when the user has (or already had) an active entitlement.
+  /// Presents the RevenueCat paywall on iOS/Android.
+  /// Returns [true] ONLY when the user successfully purchases or restores.
+  /// Returns [false] on cancel, dismiss, error, or unavailable store.
+  /// On Web, always returns [true] so development flow continues.
   Future<bool> _presentRevenueCatPaywall() async {
-    if (kIsWeb) {
-      // Web: SDK not supported — treat as already subscribed so flow continues
+    if (kIsWeb) return true;
+
+    // First check if user is already subscribed — skip paywall if so.
+    final alreadyPro = await RevenueCatService().isProUser();
+    if (alreadyPro) {
+      debugPrint('[RevenueCat] User already has premium — skipping paywall.');
       return true;
     }
+
     try {
+      AnalyticsService().trackPaywallViewed(source: 'quiz_completion');
+      
       final result = await RevenueCatService().showPaywall();
       debugPrint('[RevenueCat] Paywall result: $result');
-      
-      if (result == null) {
-         if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Store unavailable — bypassing paywall for testing'),
-                duration: Duration(seconds: 3),
-              ),
-            );
-         }
-         return true; // Bypass
-      }
 
-      final success = result == PaywallResult.purchased || result == PaywallResult.restored;
-      if (!success && result != PaywallResult.cancelled) {
-        // Show what result we got so we can debug
+      if (result == null) {
+        // Store unavailable (emulator / billing not configured).
+        // Do NOT bypass — treat as cancelled so the user cannot access plans.
+        debugPrint('[RevenueCat] Store unavailable — denying access.');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Paywall closed: ${result.name}'),
-              duration: const Duration(seconds: 3),
+            const SnackBar(
+              content: Text('Subscription required. Please try again later.'),
+              duration: Duration(seconds: 3),
             ),
           );
         }
+        return false;
       }
-      return success;
+
+      // Track successful purchase
+      if (result == PaywallResult.purchased) {
+          final customerInfo = await RevenueCatService().getCustomerInfo();
+          String planId = 'unknown';
+          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
+             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
+          }
+          AnalyticsService().trackPurchaseSuccess(plan: planId);
+      }
+
+      // Only grant access on explicit purchase or restore.
+      return result == PaywallResult.purchased || result == PaywallResult.restored;
     } catch (e) {
       debugPrint('[RevenueCat] presentPaywall error: $e');
-      // Show the error so the developer/user can see what went wrong
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -245,8 +256,19 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           durationWeeks = val <= 52 ? val : (val / 7).round();
         }
       }
-
-      final double? hNum = double.tryParse(height.replaceAll(RegExp(r'[^\d.]'), ''));
+      double? hNum;
+      if (heightUnit == 'ft') {
+        final ftMatch = RegExp(r'(\d+)ft').firstMatch(height);
+        final inMatch = RegExp(r'(\d+)in').firstMatch(height);
+        if (ftMatch != null && inMatch != null) {
+          final feet = int.parse(ftMatch.group(1)!);
+          final inches = int.parse(inMatch.group(1)!);
+          final totalInches = (feet * 12) + inches;
+          hNum = totalInches * 2.54;
+        }
+      } else {
+        hNum = double.tryParse(height.replaceAll(RegExp(r'[^\d.]'), ''));
+      }
       double? wNum = double.tryParse(weight.replaceAll(RegExp(r'[^\d.]'), ''));
       if (wNum != null && weightUnit == 'lbs') {
         wNum = wNum * 0.453592;
@@ -307,6 +329,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       await prefs.setString('plan_duration', planDuration);
       await prefs.setString('weight_unit', weightUnit);
       await prefs.setString('height_unit', heightUnit);
+      // Mark quiz as completed so subscription guards activate on later visits.
+      await prefs.setBool('hasCompletedQuiz', true);
 
       final userId = supabaseService.client.auth.currentUser?.id;
       if (userId != null) {
@@ -314,6 +338,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       }
 
       if (mounted) {
+        AnalyticsService().trackQuizCompleted();
         setState(() {
           progressPercent = 100;
           progressStatus = 'Setup complete!';
@@ -621,6 +646,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                                 } catch (_) {}
                               }
                               
+                              AnalyticsService().trackQuizStarted();
                               nextScreen(1);
                             },
                             style: ElevatedButton.styleFrom(
@@ -2057,10 +2083,20 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                                     final purchased = await _presentRevenueCatPaywall();
                                     if (!mounted) return;
                                     if (purchased) {
-                                      // Data was already generated, just navigate instantly!
+                                      // Subscription confirmed — persist flag and go to plans.
+                                      final prefs = await SharedPreferences.getInstance();
+                                      await prefs.setBool('hasCompletedQuiz', true);
+                                      if (!mounted) return;
                                       Navigator.pop(context, {
                                         'completed': true,
-                                        'navIndex': 1,
+                                        'navIndex': 1, // Workout tab
+                                      });
+                                    } else {
+                                      // User dismissed paywall — hard gate: send to Home.
+                                      if (!mounted) return;
+                                      Navigator.pop(context, {
+                                        'completed': false,
+                                        'navIndex': 0, // Home tab
                                       });
                                     }
                                   },
@@ -2084,7 +2120,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                                           ),
                                         )
                                       : const Text(
-                                          'Start My Program 🚀',
+                                          'Start My Program',
                                           style: TextStyle(
                                             fontSize: 17,
                                             fontWeight: FontWeight.bold,

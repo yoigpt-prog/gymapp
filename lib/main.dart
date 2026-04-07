@@ -24,6 +24,7 @@ import 'pages/auth_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/main_scaffold.dart';
 import 'services/revenue_cat_service.dart';
+import 'services/analytics_service.dart';
 import 'pages/calculators/bmi_calculator_page.dart';
 import 'pages/calculators/calorie_calculator_page.dart';
 import 'pages/calculators/macro_calculator_page.dart';
@@ -41,6 +42,12 @@ Future<void> main() async {
 
   // Initialize RevenueCat (no-op on Web)
   await RevenueCatService().initialize();
+
+  // Initialize Mixpanel analytics SDK only — no identity or event tracking here.
+  // Supabase session is NOT guaranteed to be restored by this point on real devices.
+  // All identity (identifyUser) and tracking (trackAppOpen) happen inside
+  // MainScaffold._initAuthLogic() via the Supabase auth state stream.
+  await AnalyticsService().initialize();
 
   runApp(const GymGuideApp());
 }
@@ -74,10 +81,6 @@ class _GymGuideAppState extends State<GymGuideApp> {
   @override
   void initState() {
     super.initState();
-    // Check if the user needs to see the paywall on app start
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      RevenueCatService().presentPaywallIfNeeded();
-    });
   }
 
   void _toggleTheme() {
@@ -214,7 +217,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       debugPrint('[AuthWrapper] Event: ${data.event}  user=${data.session?.user.id}');
       // Skip events that don't affect the user session state
       if (data.event == AuthChangeEvent.passwordRecovery) return;
-      _checkAuthState();
+      _checkAuthState(event: data.event);
     });
   }
 
@@ -224,7 +227,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     super.dispose();
   }
 
-  Future<void> _checkAuthState() async {
+  Future<void> _checkAuthState({AuthChangeEvent? event}) async {
     final session = Supabase.instance.client.auth.currentSession;
     final user = Supabase.instance.client.auth.currentUser;
 
@@ -254,6 +257,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
       debugPrint('[AuthWrapper] has_profile=$hasProfile for user=${user.id}');
 
       if (mounted) {
+        if (event == AuthChangeEvent.signedOut) {
+          AnalyticsService().reset();
+        }
+
         if (hasProfile) {
           // Sync convenience flags for use by local code paths.
           final prefs = await SharedPreferences.getInstance();

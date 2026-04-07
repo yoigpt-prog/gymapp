@@ -84,6 +84,7 @@ class DeleteAccountPage extends StatelessWidget {
             _buildSection(
               'To delete your account:',
               '• Go to Settings → Delete Account\n'
+              '• Via Web: https://gymguide.co/delete-account\n'
               '• Or email: support@gymguide.co',
               isDarkMode,
             ),

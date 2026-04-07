@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'meal_plan_modal.dart' hide Meal; // Hide Meal to avoid conflict
@@ -11,9 +13,12 @@ import 'main_scaffold.dart';
 import '../models/meal_model.dart';
 import '../services/supabase_service.dart';
 import '../services/plan_service.dart';
+import '../services/revenue_cat_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/red_header.dart';
 
 import '../widgets/polygon_border.dart';
+import '../widgets/meal_image_widget.dart';
 
 class MealPlanPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -53,8 +58,57 @@ class MealPlanPageState extends State<MealPlanPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadMeals();
+
+    // Check subscription access after the first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkSubscriptionAccess();
+    });
   }
   
+  // ── Subscription Guard ───────────────────────────────────────────────────
+  /// Called on every page visit. Shows the paywall if the user has completed
+  /// the quiz but does NOT have an active "premium" subscription.
+  /// On dismiss/cancel → hard redirect to Home via [MainScaffoldState].
+  Future<void> _checkSubscriptionAccess() async {
+    if (kIsWeb || !mounted) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
+      if (!hasCompletedQuiz) return; // First-time user — let quiz handle it.
+
+      final isPro = await RevenueCatService().isProUser();
+      if (isPro || !mounted) return; // Subscribed — all good.
+
+      debugPrint('[MealPlanPage] Not subscribed — showing paywall gate.');
+      AnalyticsService().trackPaywallViewed(source: 'meal_plan');
+      
+      final result = await RevenueCatService().showPaywall();
+      
+      final isProAfter = await RevenueCatService().isProUser();
+      if (isProAfter) {
+          final customerInfo = await RevenueCatService().getCustomerInfo();
+          String planId = 'unknown';
+          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
+             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
+          }
+          AnalyticsService().trackPurchaseSuccess(plan: planId);
+      }
+
+      final didSubscribe =
+          result == PaywallResult.purchased || result == PaywallResult.restored || isProAfter;
+
+      if (!didSubscribe && mounted) {
+        // Hard gate: redirect to Home.
+        debugPrint('[MealPlanPage] Paywall dismissed — redirecting to Home.');
+        final scaffold = context.findAncestorStateOfType<MainScaffoldState>();
+        scaffold?.changeTab(0);
+      }
+    } catch (e) {
+      debugPrint('[MealPlanPage] _checkSubscriptionAccess error: $e');
+    }
+  }
+  // ─────────────────────────────────────────────────────
+
   // Public refresh method
   Future<void> refresh() async {
     await _loadMeals(clearData: true);
@@ -931,35 +985,14 @@ class MealPlanPageState extends State<MealPlanPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Image first - Mobile Only with eaten badge overlay
+          // Meal image with floating camera edit button
           if (isMobile) ...[
-            Stack(
-              children: [
-                AspectRatio(
-                  aspectRatio: 1,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: (meal.imageUrl != null && meal.imageUrl!.isNotEmpty) 
-                      ? Image.network(
-                          meal.imageUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey[200],
-                              child: const Center(
-                                child: Icon(Icons.broken_image, color: Colors.grey, size: 32),
-                              ),
-                            );
-                          },
-                        )
-                      : Container(
-                          color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.grey[200],
-                          child: const Center(
-                            child: Icon(Icons.restaurant, color: Colors.grey, size: 48),
-                          ),
-                        ),
-                  ),
-                ),
+            MealImageWidget(
+              mealId: meal.id,
+              defaultImageUrl: meal.imageUrl,
+              isDarkMode: isDarkMode,
+              overlays: [
+                // Eaten badge overlay
                 if (meal.eaten)
                   Positioned(
                     top: 12,
