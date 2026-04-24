@@ -12,8 +12,8 @@ class DesktopRightPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final adAsset = isDarkMode
-        ? 'assets/banner/adblackmode.svg'
-        : 'assets/banner/adwhitemode.svg';
+        ? 'assets/banner/adblackmode.png'
+        : 'assets/banner/adwhitemode.png';
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 50),
@@ -23,7 +23,7 @@ class DesktopRightPanel extends StatelessWidget {
         builder: (context, constraints) {
           return AnimatedSwitcher(
             duration: const Duration(milliseconds: 50),
-            child: SvgPicture.asset(
+            child: Image.asset(
               adAsset,
               key: ValueKey(adAsset),
               fit: BoxFit.fill,

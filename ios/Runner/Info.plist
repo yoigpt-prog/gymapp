@@ -41,6 +41,11 @@
 	<string>GymGuide needs camera access so you can take and set custom photos for your meals.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>GymGuide needs photo library access so you can choose custom photos for your meals.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

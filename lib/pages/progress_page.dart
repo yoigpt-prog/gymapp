@@ -359,11 +359,6 @@ class ProgressPageState extends State<ProgressPage> {
 
   List<Widget> _buildCards() {
     final d = widget.isDarkMode;
-    if (!_signedIn) {
-      return [
-        _NotSignedInBanner(isDarkMode: d),
-      ];
-    }
     return [
       _ProgramCompletionCard(isDarkMode: d, data: _data, loading: _loading),
       const SizedBox(height: 16),
@@ -503,42 +498,7 @@ class ProgressPageState extends State<ProgressPage> {
 }
 
 // ---------------------------------------------------------------------------
-// Not signed in banner
-// ---------------------------------------------------------------------------
-class _NotSignedInBanner extends StatelessWidget {
-  final bool isDarkMode;
-  const _NotSignedInBanner({required this.isDarkMode});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
-      ),
-      child: Column(children: [
-        Icon(Icons.lock_outline,
-            size: 40, color: isDarkMode ? Colors.white38 : Colors.black38),
-        const SizedBox(height: 12),
-        Text('Sign in to view your progress',
-            style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: isDarkMode ? Colors.white70 : Colors.black87)),
-        const SizedBox(height: 4),
-        Text('Complete the quiz to generate your personalised plan.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 12,
-                color: isDarkMode ? Colors.white38 : Colors.grey)),
-      ]),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Program Completion Card
+// Program Completion Card  — PREMIUM REDESIGN
 // ---------------------------------------------------------------------------
 class _ProgramCompletionCard extends StatelessWidget {
   final bool isDarkMode;
@@ -554,274 +514,365 @@ class _ProgramCompletionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width <= 800;
-    final cardColor = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
+
+    // ── Workout stats ──────────────────────────────────────────────────────
+    final int trainingDays = data?.trainingDaysPerWeek ?? 4;
+    final int wTotal = (data?.durationWeeks ?? 0) * trainingDays;
+    final int wCompleted = data?.completedWorkoutDays.length ?? 0;
+    final double wPct =
+        wTotal > 0 ? (wCompleted / wTotal).clamp(0.0, 1.0) : 0.0;
+
+    // ── Meal stats ─────────────────────────────────────────────────────────
+    final int mTotal = data?.totalMealDays ?? 0;
+    final int mCompleted = data?.eatenDays.length ?? 0;
+    final double mPct =
+        mTotal > 0 ? (mCompleted / mTotal).clamp(0.0, 1.0) : 0.0;
+
+    final cardBg = isDarkMode ? const Color(0xFF141414) : Colors.white;
     final borderColor = isMobile
         ? (isDarkMode ? Colors.white : Colors.black)
         : (isDarkMode ? Colors.white12 : Colors.black12);
 
-    // Derive stats from data
-    final int totalDays = data != null ? data!.durationWeeks * 7 : 0;
-    final int elapsedDays = data?.elapsedDays ?? 0;
-
-    // ── Workout stats ──────────────────────────────────────────────────────
-    final int trainingDays = data?.trainingDaysPerWeek ?? 4;
-    final int restDaysPerWeek = 7 - trainingDays;
-
-    // Exact counts
-    final int wTotal = (data?.durationWeeks ?? 0) * trainingDays;
-    final int totalRestDays = (data?.durationWeeks ?? 0) * restDaysPerWeek;
-
-    final int wCompleted = data?.completedWorkoutDays.length ?? 0;
-
-    // ── Meal stats ─────────────────────────────────────────────────────────
-    // totalMealDays is always durationWeeks * 7 (fixed in _loadAll)
-    final int mTotal = data?.totalMealDays ?? 0;
-    final int mCompleted = data?.eatenDays.length ?? 0;
-
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        color: cardBg,
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
             color: isDarkMode
-                ? Colors.white.withOpacity(0.03)
+                ? Colors.black.withOpacity(0.5)
                 : Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text('Program Completion',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDarkMode ? Colors.white : Colors.black)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Gradient header banner ────────────────────────────────────
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDarkMode
+                      ? [
+                          const Color(0xFF1F1F1F),
+                          const Color(0xFF2A1A1A),
+                        ]
+                      : [
+                          const Color(0xFFFFF0F0),
+                          const Color(0xFFFFF8F0),
+                        ],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
               ),
-              if (loading)
-                const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Color(0xFFFF0000))),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _SectionLabel(
-              icon: Icons.fitness_center,
-              label: 'Workout Plan',
-              color: const Color(0xFFFF0000),
-              isDarkMode: isDarkMode),
-          const SizedBox(height: 12),
-          _MetricGrid(isDarkMode: isDarkMode, metrics: [
-            _MetricData(
-                label: 'Total Days',
-                value: loading ? '--' : '$wTotal',
-                subtext: '(no rest days)',
-                icon: Icons.calendar_month,
-                color: const Color(0xFFFF0000)),
-            _MetricData(
-                label: 'Completed',
-                value: loading ? '--' : '$wCompleted',
-                icon: Icons.check_circle,
-                color: Colors.green),
-          ]),
-          const SizedBox(height: 16),
-          _buildProgressBar('Workout Completion', wCompleted, wTotal,
-              const Color(0xFFFF0000), isDarkMode),
-          const SizedBox(height: 20),
-          Divider(
-              height: 1,
-              color: isDarkMode ? Colors.white12 : Colors.grey.shade200),
-          const SizedBox(height: 20),
-          _SectionLabel(
-              icon: Icons.restaurant_menu,
-              label: 'Meal Plan',
-              color: Colors.orange,
-              isDarkMode: isDarkMode),
-          const SizedBox(height: 12),
-          _MetricGrid(isDarkMode: isDarkMode, metrics: [
-            _MetricData(
-                label: 'Total Days',
-                value: loading ? '--' : '$mTotal',
-                icon: Icons.calendar_month,
-                color: Colors.orange),
-            _MetricData(
-                label: 'Completed',
-                value: loading ? '--' : '$mCompleted',
-                icon: Icons.check_circle,
-                color: Colors.green),
-          ]),
-          const SizedBox(height: 16),
-          _buildProgressBar('Meal Plan Completion', mCompleted, mTotal,
-              Colors.orange, isDarkMode),
-        ],
+              child: Row(
+                children: [
+                  // Stacked icon with gradient ring
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF4444), Color(0xFFFF8C00)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFF4444).withOpacity(0.4),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.military_tech_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Program Completion',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: isDarkMode ? Colors.white : Colors.black,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Track your workout & meal progress',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDarkMode
+                                ? Colors.white38
+                                : Colors.grey.shade500,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (loading)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Color(0xFFFF4444)),
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Body ─────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  // ── Workout section ─────────────────────────────────────
+                  _PremiumSection(
+                    isDarkMode: isDarkMode,
+                    icon: Icons.fitness_center_rounded,
+                    label: 'Workout Plan',
+                    accentColor: const Color(0xFFFF4444),
+                    accentEnd: const Color(0xFFFF6B6B),
+                    totalDays: wTotal,
+                    completedDays: wCompleted,
+                    pct: wPct,
+                    loading: loading,
+                    subtext: 'training days',
+                  ),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            height: 1,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.transparent,
+                                  isDarkMode
+                                      ? Colors.white12
+                                      : Colors.grey.shade200,
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // ── Meal section ────────────────────────────────────────
+                  _PremiumSection(
+                    isDarkMode: isDarkMode,
+                    icon: Icons.restaurant_menu_rounded,
+                    label: 'Meal Plan',
+                    accentColor: const Color(0xFFFF8C00),
+                    accentEnd: const Color(0xFFFFB347),
+                    totalDays: mTotal,
+                    completedDays: mCompleted,
+                    pct: mPct,
+                    loading: loading,
+                    subtext: 'total days',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
 
-  Widget _buildProgressBar(
-      String title, int completed, int total, Color color, bool isDark) {
-    final pct = total > 0 ? (completed / total).clamp(0.0, 1.0) : 0.0;
+/// A single plan section: header, stat tiles, and progress bar.
+class _PremiumSection extends StatelessWidget {
+  final bool isDarkMode;
+  final IconData icon;
+  final String label;
+  final Color accentColor;
+  final Color accentEnd;
+  final int totalDays;
+  final int completedDays;
+  final double pct;
+  final bool loading;
+  final String subtext;
+
+  const _PremiumSection({
+    required this.isDarkMode,
+    required this.icon,
+    required this.label,
+    required this.accentColor,
+    required this.accentEnd,
+    required this.totalDays,
+    required this.completedDays,
+    required this.pct,
+    required this.loading,
+    required this.subtext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Section header
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(title,
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accentColor, accentEnd],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: 15, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+                color: isDarkMode ? Colors.white : Colors.black87,
+              ),
+            ),
+            const Spacer(),
+            // Percent badge
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: accentColor.withOpacity(isDarkMode ? 0.18 : 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: accentColor.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                loading ? '--%' : '${(pct * 100).round()}%',
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.black87)),
-            Text('${(pct * 100).round()}%',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: isDark ? Colors.white : Colors.black)),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: accentColor,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: pct,
-            backgroundColor: isDark ? Colors.white10 : Colors.grey[200],
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-            minHeight: 8,
-          ),
+        const SizedBox(height: 14),
+
+        // Stat tiles row
+        Row(
+          children: [
+            Expanded(
+              child: _StatTile(
+                isDarkMode: isDarkMode,
+                icon: Icons.calendar_month_rounded,
+                value: loading ? '--' : '$totalDays',
+                label: subtext,
+                accentColor: accentColor,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _StatTile(
+                isDarkMode: isDarkMode,
+                icon: Icons.check_circle_rounded,
+                value: loading ? '--' : '$completedDays',
+                label: 'completed',
+                accentColor: const Color(0xFFFF4444),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        // Progress bar
+        _PremiumProgressBar(
+          pct: pct,
+          accentColor: accentColor,
+          accentEnd: accentEnd,
+          isDarkMode: isDarkMode,
         ),
       ],
     );
   }
 }
 
-// Helper section label row
-class _SectionLabel extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
+/// A premium stat tile (icon + big number + label).
+class _StatTile extends StatelessWidget {
   final bool isDarkMode;
-  const _SectionLabel({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.isDarkMode,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 16, color: color),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: isDarkMode ? Colors.white70 : Colors.black87,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// Data class for a metric tile
-class _MetricData {
-  final String label;
+  final IconData icon;
   final String value;
-  final String? subtext;
-  final IconData icon;
-  final Color color;
-  const _MetricData({
-    required this.label,
-    required this.value,
-    this.subtext,
+  final String label;
+  final Color accentColor;
+
+  const _StatTile({
+    required this.isDarkMode,
     required this.icon,
-    required this.color,
+    required this.value,
+    required this.label,
+    required this.accentColor,
   });
-}
-
-// 2x2 grid of metric cards
-class _MetricGrid extends StatelessWidget {
-  final bool isDarkMode;
-  final List<_MetricData> metrics;
-  const _MetricGrid({required this.isDarkMode, required this.metrics});
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final aspectRatio = screenWidth < 360 ? 1.7 : (screenWidth < 400 ? 1.9 : 2.2);
-    
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: metrics.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: aspectRatio,
-      ),
-      itemBuilder: (_, i) => _MetricTile(
-        data: metrics[i],
-        isDarkMode: isDarkMode,
-      ),
-    );
-  }
-}
-
-// Single metric tile
-class _MetricTile extends StatelessWidget {
-  final _MetricData data;
-  final bool isDarkMode;
-  const _MetricTile({required this.data, required this.isDarkMode});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: isDarkMode
-            ? Colors.white.withOpacity(0.05)
-            : data.color.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(14),
+            ? accentColor.withOpacity(0.07)
+            : accentColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDarkMode ? Colors.white10 : data.color.withOpacity(0.2),
+          color: accentColor.withOpacity(isDarkMode ? 0.2 : 0.15),
+          width: 1,
         ),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: data.color.withOpacity(0.15),
-              shape: BoxShape.circle,
+              color: accentColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(data.icon, size: 16, color: data.color),
+            child: Icon(icon, size: 17, color: accentColor),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,43 +882,100 @@ class _MetricTile extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    data.value,
+                    value,
                     style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
                       color: isDarkMode ? Colors.white : Colors.black,
-                      height: 1.1,
+                      height: 1.0,
+                      letterSpacing: -0.5,
                     ),
                   ),
                 ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    data.label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDarkMode ? Colors.white54 : Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                    letterSpacing: 0.2,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                if (data.subtext != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    data.subtext!,
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w500,
-                      color: isDarkMode ? Colors.white38 : Colors.grey[500],
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A premium gradient progress bar with pill shape and glow.
+class _PremiumProgressBar extends StatelessWidget {
+  final double pct;
+  final Color accentColor;
+  final Color accentEnd;
+  final bool isDarkMode;
+
+  const _PremiumProgressBar({
+    required this.pct,
+    required this.accentColor,
+    required this.accentEnd,
+    required this.isDarkMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final fillWidth = (pct * totalWidth).clamp(0.0, totalWidth);
+        return Stack(
+          children: [
+            // Track
+            Container(
+              height: 10,
+              width: totalWidth,
+              decoration: BoxDecoration(
+                color: isDarkMode
+                    ? Colors.white.withOpacity(0.07)
+                    : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isDarkMode
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.grey.shade200,
+                  width: 1,
+                ),
+              ),
+            ),
+            // Fill
+            if (fillWidth > 0)
+              Container(
+                height: 10,
+                width: fillWidth,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [accentColor, accentEnd],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accentColor.withOpacity(0.5),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -999,7 +1107,7 @@ class _BarColumn extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Streak Card
+// 5. Streak Card — PREMIUM REDESIGN
 // ---------------------------------------------------------------------------
 class _StreakCard extends StatelessWidget {
   final bool isDarkMode;
@@ -1012,61 +1120,202 @@ class _StreakCard extends StatelessWidget {
     final streak = data?.streakDays ?? 0;
     final eaten = data?.currentWeekEaten ?? {};
     final dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final hasStreak = streak > 0;
+    final borderColor = isMobile
+        ? (isDarkMode ? Colors.white : Colors.black)
+        : (isDarkMode ? Colors.white12 : Colors.black12);
 
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isMobile
-              ? (isDarkMode ? Colors.white : Colors.black)
-              : (isDarkMode ? Colors.white12 : Colors.black12),
-          width: 1,
-        ),
+        color: isDarkMode ? const Color(0xFF141414) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
             color: isDarkMode
-                ? Colors.white.withOpacity(0.03)
-                : Colors.black.withOpacity(0.12),
+                ? Colors.black.withOpacity(0.5)
+                : Colors.black.withOpacity(0.08),
             blurRadius: 24,
             offset: const Offset(0, 8),
-            spreadRadius: 0,
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Consistency Streak',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDarkMode ? Colors.white : Colors.black)),
-          const SizedBox(height: 8),
-          Text('$streak ${streak == 1 ? 'day' : 'days'}',
-              style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: isDarkMode ? Colors.white : Colors.black)),
-          Text(
-              streak > 0
-                  ? 'Meals logged consecutively. Keep it up! 🔥'
-                  : 'Log a meal today to start your streak.',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: isDarkMode ? Colors.white54 : Colors.grey)),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(
-                7,
-                (i) => _StreakBubble(
-                      day: dayLabels[i],
-                      isActive: (eaten[i + 1] ?? 0) > 0,
-                    )),
-          ),
-        ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Gradient header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDarkMode
+                      ? [const Color(0xFF1F1F1F), const Color(0xFF1A1A2A)]
+                      : [const Color(0xFFFFF8EC), const Color(0xFFFFF3F0)],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFF6B00).withOpacity(0.4),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.local_fire_department_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Consistency Streak',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                          color: isDarkMode ? Colors.white : Colors.black,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Meals logged this week',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Streak number + label row
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '$streak',
+                        style: TextStyle(
+                          fontSize: 52,
+                          fontWeight: FontWeight.w900,
+                          height: 1.0,
+                          letterSpacing: -2,
+                          foreground: Paint()
+                            ..shader = const LinearGradient(
+                              colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
+                            ).createShader(
+                              const Rect.fromLTWH(0, 0, 80, 60),
+                            ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              streak == 1 ? 'day' : 'days',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: isDarkMode ? Colors.white70 : Colors.black87,
+                              ),
+                            ),
+                            Text(
+                              'streak',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      // Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: hasStreak
+                              ? const Color(0xFFFF6B00).withOpacity(isDarkMode ? 0.18 : 0.1)
+                              : (isDarkMode ? Colors.white10 : Colors.grey.shade100),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: hasStreak
+                                ? const Color(0xFFFF6B00).withOpacity(0.35)
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Text(
+                          hasStreak ? '🔥 On fire!' : 'Get started',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: hasStreak
+                                ? const Color(0xFFFF6B00)
+                                : (isDarkMode ? Colors.white38 : Colors.grey),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    hasStreak
+                        ? 'Meals logged consecutively. Keep it up!'
+                        : 'Log a meal today to start your streak.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  // Day bubbles
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(
+                      7,
+                      (i) => _StreakBubble(
+                        day: dayLabels[i],
+                        isActive: (eaten[i + 1] ?? 0) > 0,
+                        isDarkMode: isDarkMode,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1075,30 +1324,60 @@ class _StreakCard extends StatelessWidget {
 class _StreakBubble extends StatelessWidget {
   final String day;
   final bool isActive;
+  final bool isDarkMode;
 
-  const _StreakBubble({required this.day, required this.isActive});
+  const _StreakBubble({
+    required this.day,
+    required this.isActive,
+    required this.isDarkMode,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: isActive ? const Color(0xFFFF0000) : Colors.transparent,
-        shape: BoxShape.circle,
-        border: isActive
-            ? null
-            : Border.all(color: Colors.grey.withOpacity(0.3), width: 1),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        day,
-        style: TextStyle(
-          color: isActive ? Colors.white : Colors.grey,
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
+    return Column(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            gradient: isActive
+                ? const LinearGradient(
+                    colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            color: isActive ? null : (isDarkMode ? Colors.white.withOpacity(0.07) : Colors.grey.shade100),
+            shape: BoxShape.circle,
+            boxShadow: isActive
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFFFF6B00).withOpacity(0.4),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    )
+                  ]
+                : null,
+            border: isActive
+                ? null
+                : Border.all(
+                    color: isDarkMode ? Colors.white12 : Colors.grey.shade200,
+                    width: 1,
+                  ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            day,
+            style: TextStyle(
+              color: isActive
+                  ? Colors.white
+                  : (isDarkMode ? Colors.white38 : Colors.grey.shade400),
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -1625,7 +1904,7 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Weight logged successfully!'),
-            backgroundColor: Color(0xFF4CAF50),
+            backgroundColor: Color(0xFFCC0A16),
           ),
         );
         
@@ -1658,309 +1937,416 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width <= 800;
-    final dimColor = widget.isDarkMode ? Colors.white12 : Colors.black12;
-    final subColor = widget.isDarkMode ? Colors.white38 : Colors.grey;
+    final subColor = widget.isDarkMode ? Colors.white38 : Colors.grey.shade500;
+    final borderColor = isMobile
+        ? (widget.isDarkMode ? Colors.white : Colors.black)
+        : (widget.isDarkMode ? Colors.white12 : Colors.black12);
 
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isMobile
-              ? (widget.isDarkMode ? Colors.white : Colors.black)
-              : (widget.isDarkMode ? Colors.white12 : Colors.black12),
-          width: 1,
-        ),
+        color: widget.isDarkMode ? const Color(0xFF141414) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
             color: widget.isDarkMode
-                ? Colors.white.withOpacity(0.03)
+                ? Colors.black.withOpacity(0.5)
                 : Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Log Weekly Metrics',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white : Colors.black,
-            ),
-          ),
-          if (_durationWeeks > 0) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Logging for Week $_selectedWeek of $_durationWeeks',
-              style: TextStyle(fontSize: 12, color: subColor),
-            ),
-          ],
-          const SizedBox(height: 16),
-          // Weight input row with unit toggle
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    _showWeightPicker(context);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Gradient header ───────────────────────────────────────────
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: widget.isDarkMode
+                      ? [const Color(0xFF1F1F1F), const Color(0xFF1A2020)]
+                      : [const Color(0xFFF0FFF8), const Color(0xFFF0F8FF)],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
-                      border: Border.all(
-                        color: widget.isDarkMode
-                            ? Colors.white24
-                            : Colors.grey[300]!,
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _weightController.text.isEmpty
-                          ? 'Weight'
-                          : _weightController.text,
-                      style: TextStyle(
-                        color: _weightController.text.isEmpty
-                            ? subColor
-                            : (widget.isDarkMode ? Colors.white : Colors.black),
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode
-                      ? Colors.white10
-                      : const Color(0xFFF0F0F0),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => setState(() => _isKg = true),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: _isKg
-                              ? const Color(0xFFFF0000)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFF4444).withOpacity(0.4),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
                         ),
-                        child: Text(
-                          'kg',
+                      ],
+                    ),
+                    child: const Icon(Icons.monitor_weight_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Log Weekly Metrics',
                           style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: _isKg
-                                ? Colors.white
-                                : (widget.isDarkMode
-                                    ? Colors.white54
-                                    : Colors.grey),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: widget.isDarkMode ? Colors.white : Colors.black,
                           ),
                         ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () => setState(() => _isKg = false),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: !_isKg
-                              ? const Color(0xFFFF0000)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'lbs',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: !_isKg
-                                ? Colors.white
-                                : (widget.isDarkMode
-                                    ? Colors.white54
-                                    : Colors.grey),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Log button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _saving ? null : _logWeight,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF0000),
-                disabledBackgroundColor: Colors.red.withOpacity(0.5),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                elevation: 0,
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Text(
-                      'Log',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-            ),
-          ),
-
-          // ── Weekly weights list ──────────────────────────────────────────
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.only(top: 20),
-              child: Center(
-                  child: CircularProgressIndicator(
-                      color: Color(0xFFFF0000), strokeWidth: 2)),
-            )
-          else if (_durationWeeks > 0) ...[
-            const SizedBox(height: 20),
-            Divider(color: dimColor, height: 1),
-            const SizedBox(height: 12),
-            Text(
-              'Each Week Weight',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: widget.isDarkMode ? Colors.white70 : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 10),
-            ...List.generate(_durationWeeks, (i) {
-              final weekNum = i + 1;
-              final hasWeight = _weekWeights.containsKey(weekNum);
-              final isSelected = _selectedWeek == weekNum;
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedWeek = weekNum;
-                    if (hasWeight) {
-                      final val = _isKg
-                          ? _weekWeights[weekNum]!
-                          : _weekWeights[weekNum]! * 2.20462;
-                      _weightController.text = val.toStringAsFixed(1);
-                    } else {
-                      _weightController.clear();
-                    }
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFFFF0000).withOpacity(0.08)
-                        : (widget.isDarkMode
-                            ? Colors.white.withOpacity(0.04)
-                            : const Color(0xFFF8F8F8)),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFFFF0000)
-                          : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? const Color(0xFFFF0000)
-                              : (hasWeight
-                                  ? const Color(0xFFFF0000).withOpacity(0.12)
-                                  : (widget.isDarkMode
-                                      ? Colors.white10
-                                      : Colors.grey.withOpacity(0.15))),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '$weekNum',
+                        const SizedBox(height: 2),
+                        Text(
+                          _durationWeeks > 0
+                              ? 'Week $_selectedWeek of $_durationWeeks'
+                              : 'Track your weight each week',
                           style: TextStyle(
                             fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isSelected
-                                ? Colors.white
-                                : (hasWeight
-                                    ? const Color(0xFFFF0000)
-                                    : (widget.isDarkMode
-                                        ? Colors.white38
-                                        : Colors.grey)),
+                            color: subColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Body ─────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Weight input + unit toggle
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _showWeightPicker(context),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: widget.isDarkMode
+                                  ? Colors.white.withOpacity(0.05)
+                                  : Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: widget.isDarkMode
+                                    ? Colors.white12
+                                    : Colors.grey.shade200,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.scale_rounded,
+                                  size: 16,
+                                  color: _weightController.text.isEmpty
+                                      ? subColor
+                                      : const Color(0xFFFF4444),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  _weightController.text.isEmpty
+                                      ? 'Tap to enter weight'
+                                      : _weightController.text,
+                                  style: TextStyle(
+                                    color: _weightController.text.isEmpty
+                                        ? subColor
+                                        : (widget.isDarkMode
+                                            ? Colors.white
+                                            : Colors.black),
+                                    fontSize: 15,
+                                    fontWeight: _weightController.text.isEmpty
+                                        ? FontWeight.w400
+                                        : FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Text(
-                        'Week $weekNum',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              isSelected ? FontWeight.w600 : FontWeight.w400,
+                      // Unit toggle pills
+                      Container(
+                        decoration: BoxDecoration(
                           color: widget.isDarkMode
-                              ? Colors.white70
-                              : Colors.black87,
+                              ? Colors.white.withOpacity(0.07)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: widget.isDarkMode
+                                ? Colors.white12
+                                : Colors.grey.shade200,
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(3),
+                        child: Row(
+                          children: [
+                            _UnitPill(
+                              label: 'kg',
+                              isActive: _isKg,
+                              onTap: () => setState(() => _isKg = true),
+                              isDarkMode: widget.isDarkMode,
+                            ),
+                            _UnitPill(
+                              label: 'lbs',
+                              isActive: !_isKg,
+                              onTap: () => setState(() => _isKg = false),
+                              isDarkMode: widget.isDarkMode,
+                            ),
+                          ],
                         ),
                       ),
-                      const Spacer(),
-                      Text(
-                        hasWeight
-                            ? _displayWeight(_weekWeights[weekNum]!)
-                            : '—',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: hasWeight
-                              ? const Color(0xFFFF0000)
-                              : (widget.isDarkMode
-                                  ? Colors.white24
-                                  : Colors.black26),
-                        ),
-                      ),
-                      if (isSelected) ...[
-                        const SizedBox(width: 6),
-                        const Icon(Icons.edit_outlined,
-                            size: 14, color: Color(0xFFFF0000)),
-                      ],
                     ],
                   ),
-                ),
-              );
-            }),
+                  const SizedBox(height: 14),
+
+                  // Log button
+                  SizedBox(
+                    width: double.infinity,
+                    child: GestureDetector(
+                      onTap: _saving ? null : _logWeight,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        decoration: BoxDecoration(
+                          gradient: _saving
+                              ? null
+                              : const LinearGradient(
+                                  colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
+                                  begin: Alignment.centerLeft,
+                                  end: Alignment.centerRight,
+                                ),
+                          color: _saving ? const Color(0xFFFF4444).withOpacity(0.5) : null,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: _saving
+                              ? null
+                              : [
+                                  BoxShadow(
+                                    color: const Color(0xFFFF4444).withOpacity(0.4),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                        ),
+                        alignment: Alignment.center,
+                        child: _saving
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Log Weight',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+
+                  // Weekly weights list
+                  if (_loading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 20),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFF4444), strokeWidth: 2),
+                      ),
+                    )
+                  else if (_durationWeeks > 0) ...[
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            height: 1,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.transparent,
+                                  widget.isDarkMode ? Colors.white12 : Colors.grey.shade200,
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Container(
+                          width: 4,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF4444),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Weekly Weight Log',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...List.generate(_durationWeeks, (i) {
+                      final weekNum = i + 1;
+                      final hasWeight = _weekWeights.containsKey(weekNum);
+                      final isSelected = _selectedWeek == weekNum;
+
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedWeek = weekNum;
+                            if (hasWeight) {
+                              final val = _isKg
+                                  ? _weekWeights[weekNum]!
+                                  : _weekWeights[weekNum]! * 2.20462;
+                              _weightController.text = val.toStringAsFixed(1);
+                            } else {
+                              _weightController.clear();
+                            }
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 11),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? const Color(0xFFFF4444).withOpacity(0.08)
+                                : (widget.isDarkMode
+                                    ? Colors.white.withOpacity(0.04)
+                                    : const Color(0xFFF8F8F8)),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? const Color(0xFFFF4444)
+                                  : Colors.transparent,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  gradient: isSelected
+                                      ? const LinearGradient(
+                                          colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                        )
+                                      : null,
+                                  color: isSelected
+                                      ? null
+                                      : (hasWeight
+                                          ? const Color(0xFFFF4444).withOpacity(0.12)
+                                          : (widget.isDarkMode
+                                              ? Colors.white10
+                                              : Colors.grey.withOpacity(0.15))),
+                                  shape: BoxShape.circle,
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '$weekNum',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isSelected
+                                        ? Colors.white
+                                        : (hasWeight
+                                            ? const Color(0xFFFF4444)
+                                            : (widget.isDarkMode
+                                                ? Colors.white38
+                                                : Colors.grey)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Week $weekNum',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  color: widget.isDarkMode
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                hasWeight
+                                    ? _displayWeight(_weekWeights[weekNum]!)
+                                    : '—',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: hasWeight
+                                      ? const Color(0xFFFF4444)
+                                      : (widget.isDarkMode
+                                          ? Colors.white24
+                                          : Colors.black26),
+                                ),
+                              ),
+                              if (isSelected) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.edit_rounded,
+                                    size: 14, color: Color(0xFFFF4444)),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -2125,6 +2511,56 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
           },
         );
       },
+    );
+  }
+}
+
+class _UnitPill extends StatelessWidget {
+  const _UnitPill({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+    required this.isDarkMode,
+  });
+
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+  final bool isDarkMode;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: isActive
+              ? const Color(0xFFFF4444)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFFFF4444).withOpacity(0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  )
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: isActive
+                ? Colors.white
+                : (isDarkMode ? Colors.white38 : Colors.black45),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'main_scaffold.dart'; // Import for MainScaffold navigation
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({Key? key}) : super(key: key);
@@ -31,15 +30,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       );
 
       if (mounted) {
-        // Navigate to Home
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => MainScaffold(
-              toggleTheme: () {}, // Placeholder, will be handled by main wrapper
-              isDarkMode: false, // Default
-            ),
-          ),
-        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
       }
     } catch (e) {
       debugPrint('[ONBOARDING ERROR] Saving name: $e');

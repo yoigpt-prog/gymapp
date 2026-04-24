@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/red_header.dart';
 import 'legal/privacy_policy_page.dart';
@@ -16,7 +18,7 @@ import 'legal/ai_transparency_page.dart';
 import 'legal/ai_transparency_page.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/revenue_cat_service.dart';
-import '../widgets/desktop_right_panel.dart';
+import '../widgets/auth/auth_modal.dart';
 
 class SettingsPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -83,89 +85,45 @@ class _SettingsPageState extends State<SettingsPage> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  // Responsive ad panel: 22% of screen width, clamped to [200, 320]
-                  final adPanelWidth = (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
-
                   const double spacing = 16.0;
 
-                  return Stack(
-                    children: [
-                      // Layer 1: Scrollable Content with Scrollbar on far right
-                      Positioned.fill(
-                        child: Scrollbar(
-                          controller: _scrollController,
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.all(spacing),
-                            child: Row(
+                  return Scrollbar(
+                    controller: _scrollController,
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(spacing),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: 800,
+                            minHeight: constraints.maxHeight - (spacing * 2),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      minHeight: constraints.maxHeight - (spacing * 2),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          _sectionLabel('Account'),
-                                          _buildAccountSection(),
-                                          const SizedBox(height: 12),
-                                          _sectionLabel('Subscription'),
-                                          _buildSubscriptionSection(),
-                                          const SizedBox(height: 12),
-                                          _sectionLabel('Preferences'),
-                                          _buildPreferencesSection(),
-                                          const SizedBox(height: 12),
-                                          _sectionLabel('Legal & Support'),
-                                          _buildLegalPrivacyCard(),
-                                          const SizedBox(height: 12),
-                                          _buildSupportInfoCard(),
-                                          const SizedBox(height: 32),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: spacing),
-                                SizedBox(width: adPanelWidth), // Spacer for Ad
+                                _sectionLabel('Account'),
+                                _buildAccountSection(),
+                                const SizedBox(height: 12),
+                                _sectionLabel('Subscription'),
+                                _buildSubscriptionSection(),
+                                const SizedBox(height: 12),
+                                _sectionLabel('Preferences'),
+                                _buildPreferencesSection(),
+                                const SizedBox(height: 12),
+                                _sectionLabel('Legal & Support'),
+                                _buildLegalPrivacyCard(),
+                                const SizedBox(height: 12),
+                                _buildSupportInfoCard(),
+                                const SizedBox(height: 32),
                               ],
                             ),
                           ),
                         ),
                       ),
-
-                      // Layer 2: Fixed Ad Panel
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.all(spacing),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Expanded(child: SizedBox()), // Allows clicks to pass through
-                              const SizedBox(width: spacing),
-                              SizedBox(
-                                width: adPanelWidth,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                                    border: Border.all(
-                                      color: widget.isDarkMode ? Colors.white : Colors.black,
-                                      width: 1.0,
-                                    ),
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: DesktopRightPanel(isDarkMode: widget.isDarkMode),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   );
                 },
               ),
@@ -298,7 +256,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.workspace_premium_outlined,
                 label: 'Upgrade to Premium',
                 sub: 'Unlock personalized plans',
-                onTap: () async => await RevenueCatService().showPaywall(),
+                onTap: () async {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  if (user == null) {
+                    AuthModal.show(context);
+                    return;
+                  }
+
+                  // Go straight to RevenueCatUI — it handles store errors natively.
+                  await RevenueCatService().showPaywall();
+                },
               ),
               Divider(height: 1, indent: 52, color: widget.isDarkMode ? Colors.white12 : Colors.black12),
               mobileItem(
@@ -676,6 +643,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // ─────────────────────────────────────────────
 
   Widget _buildSubscriptionSection() {
+    // Web gets a dedicated premium download card
+    if (kIsWeb) return _buildWebSubscriptionCard();
+
+    // Mobile: original tile list
     return _card([
       _tile(
         icon: Icons.workspace_premium_outlined,
@@ -685,6 +656,13 @@ class _SettingsPageState extends State<SettingsPage> {
         iconColor: const Color(0xFFF57C00),
         trailing: const Icon(Icons.star_rounded, color: Color(0xFFF57C00), size: 22),
         onTap: () async {
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user == null) {
+            AuthModal.show(context);
+            return;
+          }
+
+          // Go straight to RevenueCatUI — it handles store errors natively.
           await RevenueCatService().showPaywall();
         },
       ),
@@ -697,7 +675,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _tile(
         icon: Icons.manage_accounts_outlined,
         label: 'Manage Subscription',
-        subtitle: kIsWeb ? 'Manage via App Store or Google Play' : 'Cancel, upgrade or view your plan',
+        subtitle: 'Cancel, upgrade or view your plan',
         onTap: _openCustomerCenter,
       ),
       _tile(
@@ -710,16 +688,299 @@ class _SettingsPageState extends State<SettingsPage> {
         icon: Icons.description_outlined,
         label: 'Subscription Terms',
         subtitle: 'View billing and auto-renewal terms',
-        onTap: () {
-          if (kIsWeb) {
-            Navigator.pushNamed(context, '/subscription-terms');
-          } else {
-            Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const SubscriptionTermsPage()));
-          }
-        },
+        onTap: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const SubscriptionTermsPage())),
       ),
     ]);
+  }
+
+  // ── Web-specific premium subscription card ──────────────────────────────
+  Widget _buildWebSubscriptionCard() {
+    final isDark = widget.isDarkMode;
+    final cardBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1A1A);
+    final textSecondary = isDark ? Colors.white60 : Colors.black54;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withOpacity(0.35)
+                : Colors.black.withOpacity(0.07),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Gradient header ──────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFFF0000), Color(0xFFB71C1C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          '⭐  PREMIUM',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Unlock Your Full\nFitness Potential',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Get personalized workout & meal plans,\nunlimited AI coaching and more.',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 13.5,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                const Icon(
+                  Icons.workspace_premium_rounded,
+                  color: Colors.white,
+                  size: 60,
+                ),
+              ],
+            ),
+          ),
+
+          // ── Features list ────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'WHAT YOU GET',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    color: textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _featureChip('🏋️  Custom Workout Plans', isDark),
+                    _featureChip('🥗  Personalised Meal Plans', isDark),
+                    _featureChip('📈  Progress Tracking', isDark),
+                    _featureChip('🤖  AI Coaching', isDark),
+                    _featureChip('🔓  1800+ Exercises', isDark),
+                    _featureChip('⚡  New Workouts Weekly', isDark),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(height: 32, indent: 24, endIndent: 24),
+
+          // ── Mobile-only notice ───────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.phone_iphone_rounded,
+                    size: 18, color: Color(0xFFFF0000)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Subscriptions are available via the mobile app (Apple Pay & Google Play). '
+                    'Download GymGuide on your phone to unlock Premium.',
+                    style: TextStyle(
+                        fontSize: 13, color: textSecondary, height: 1.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Download buttons ─────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _storeButton(
+                    label: 'App Store',
+                    sub: 'Download on the',
+                    icon: Icons.apple,
+                    url:
+                        'https://apps.apple.com/us/app/gym-guide-app/id6760553535',
+                    isDark: isDark,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _storeButton(
+                    label: 'Google Play',
+                    sub: 'Get it on',
+                    icon: Icons.android,
+                    url:
+                        'https://play.google.com/store/apps/details?id=com.gymguide.app',
+                    isDark: isDark,
+                    isPlay: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Subscription Terms link ──────────────────────
+          InkWell(
+            onTap: () => Navigator.pushNamed(context, '/subscription-terms'),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+              child: Row(
+                children: [
+                  Icon(Icons.description_outlined,
+                      size: 16, color: textSecondary),
+                  const SizedBox(width: 8),
+                  Text(
+                    'View Subscription Terms',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: textSecondary,
+                      decoration: TextDecoration.underline,
+                      decorationColor: textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _featureChip(String label, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF5F5F5),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white12 : Colors.black12,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w500,
+          color: isDark ? Colors.white : const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+  }
+
+  Widget _storeButton({
+    required String label,
+    required String sub,
+    required IconData icon,
+    required String url,
+    required bool isDark,
+    bool isPlay = false,
+  }) {
+    return GestureDetector(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? Colors.white12 : Colors.black12,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 28,
+              color: isPlay
+                  ? const Color(0xFF34A853)
+                  : (isDark ? Colors.white : Colors.black),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  sub,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : Colors.black45,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _openCustomerCenter() async {
@@ -876,6 +1137,33 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSupportInfoCard() {
     return _card([
+      // ── Share App ──────────────────────────────
+      _tile(
+        icon: Icons.share_outlined,
+        label: 'Share GymGuide',
+        subtitle: kIsWeb
+            ? 'Share the app with friends & family'
+            : 'Invite friends & family to GymGuide',
+        iconBg: widget.isDarkMode ? const Color(0xFF1A2A3A) : const Color(0xFFE3F2FD),
+        iconColor: const Color(0xFF1976D2),
+        trailing: kIsWeb
+            ? const Icon(Icons.ios_share_outlined, size: 18, color: Color(0xFF1976D2))
+            : null,
+        onTap: _shareApp,
+      ),
+      // ── Rate App ───────────────────────────────
+      _tile(
+        icon: Icons.star_outline_rounded,
+        label: 'Rate GymGuide',
+        subtitle: kIsWeb
+            ? 'Rate us on the App Store or Google Play'
+            : 'Love the app? Leave us a review ⭐',
+        iconBg: widget.isDarkMode ? const Color(0xFF2A2010) : const Color(0xFFFFF8E1),
+        iconColor: const Color(0xFFFFA000),
+        trailing: const Icon(Icons.open_in_new, size: 18, color: Color(0xFFFFA000)),
+        onTap: _rateApp,
+      ),
+      // ── Contact Support ────────────────────────
       _tile(
         icon: Icons.support_agent_outlined,
         label: 'Contact Support',
@@ -908,6 +1196,245 @@ class _SettingsPageState extends State<SettingsPage> {
         onTap: _confirmSignOut,
       ),
     ]);
+  }
+
+  // ─── Share App ──────────────────────────────────
+  Future<void> _shareApp() async {
+    const playStoreUrl =
+        'https://play.google.com/store/apps/details?id=com.gymguide.app';
+    const appStoreUrl = 'https://apps.apple.com/us/app/gym-guide-app/id6760553535';
+
+    if (kIsWeb) {
+      _showWebShareDialog(appStoreUrl: appStoreUrl, playStoreUrl: playStoreUrl);
+      return;
+    }
+
+    const message =
+        'Check out GymGuide — your AI-powered personal trainer app!\n'
+        'Download it here:\nAndroid: $playStoreUrl\niOS: $appStoreUrl';
+    try {
+      await SharePlus.instance.share(ShareParams(text: message, subject: 'Try GymGuide!'));
+    } catch (e) {
+      debugPrint('[SHARE] Error: $e');
+      _showMessage('Could not share — try again');
+    }
+  }
+
+  void _showWebShareDialog({required String appStoreUrl, required String playStoreUrl}) {
+    final isDark = widget.isDarkMode;
+    final bg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1A1A);
+    final textSecondary = isDark ? Colors.white60 : Colors.black54;
+    final fieldBg = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF5F5F5);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: EdgeInsets.zero,
+        content: Container(
+          width: 420,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Container(
+                  width: 42, height: 42,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1A2A3A) : const Color(0xFFE3F2FD),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.share_outlined, color: Color(0xFF1976D2), size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Share GymGuide', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textPrimary)),
+                  Text('Copy a link and share it anywhere', style: TextStyle(fontSize: 12, color: textSecondary)),
+                ])),
+                IconButton(
+                  icon: Icon(Icons.close, color: textSecondary, size: 20),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                ),
+              ]),
+              const SizedBox(height: 24),
+              Text('iOS — App Store', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textSecondary, letterSpacing: 0.6)),
+              const SizedBox(height: 6),
+              _webShareLinkRow(appStoreUrl, isDark, fieldBg, textSecondary),
+              const SizedBox(height: 16),
+              Text('Android — Google Play', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textSecondary, letterSpacing: 0.6)),
+              const SizedBox(height: 6),
+              _webShareLinkRow(playStoreUrl, isDark, fieldBg, textSecondary),
+              const SizedBox(height: 24),
+              Row(children: [
+                Expanded(child: _storeButton(label: 'App Store', sub: 'Download on the', icon: Icons.apple, url: appStoreUrl, isDark: isDark)),
+                const SizedBox(width: 10),
+                Expanded(child: _storeButton(label: 'Google Play', sub: 'Get it on', icon: Icons.android, url: playStoreUrl, isDark: isDark, isPlay: true)),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _webShareLinkRow(String url, bool isDark, Color fieldBg, Color textSecondary) {
+    return Container(
+      decoration: BoxDecoration(
+        color: fieldBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+      ),
+      child: Row(children: [
+        Expanded(child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Text(url, style: TextStyle(fontSize: 12, color: textSecondary), overflow: TextOverflow.ellipsis),
+        )),
+        InkWell(
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: url));
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: const Text('Link copied!'),
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: const Color(0xFF1976D2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                duration: const Duration(seconds: 2),
+              ));
+            }
+          },
+          borderRadius: const BorderRadius.only(topRight: Radius.circular(10), bottomRight: Radius.circular(10)),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1976D2).withOpacity(0.12),
+              borderRadius: const BorderRadius.only(topRight: Radius.circular(9), bottomRight: Radius.circular(9)),
+            ),
+            child: const Icon(Icons.copy_rounded, size: 18, color: Color(0xFF1976D2)),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ─── Rate App ───────────────────────────────────
+  Future<void> _rateApp() async {
+    const playStoreUrl =
+        'https://play.google.com/store/apps/details?id=com.gymguide.app&reviewId=0';
+    const appStoreUrl =
+        'https://apps.apple.com/us/app/gym-guide-app/id6760553535?action=write-review';
+
+    if (kIsWeb) {
+      _showWebRateDialog(appStoreUrl: appStoreUrl, playStoreUrl: playStoreUrl);
+      return;
+    }
+
+    final url = defaultTargetPlatform == TargetPlatform.android ? playStoreUrl : appStoreUrl;
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showMessage('Could not open store — please try manually');
+      }
+    } catch (e) {
+      debugPrint('[RATE] Error: $e');
+      _showMessage('Could not open the store');
+    }
+  }
+
+  void _showWebRateDialog({required String appStoreUrl, required String playStoreUrl}) {
+    final isDark = widget.isDarkMode;
+    final bg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1A1A);
+    final textSecondary = isDark ? Colors.white60 : Colors.black54;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: EdgeInsets.zero,
+        content: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(children: [
+                Container(
+                  width: 42, height: 42,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2A2010) : const Color(0xFFFFF8E1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.star_rounded, color: Color(0xFFFFA000), size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Rate GymGuide', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textPrimary)),
+                  Text('Your review means a lot to us', style: TextStyle(fontSize: 12, color: textSecondary)),
+                ])),
+                IconButton(
+                  icon: Icon(Icons.close, color: textSecondary, size: 20),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                ),
+              ]),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (i) => const Icon(Icons.star_rounded, color: Color(0xFFFFA000), size: 32)),
+              ),
+              const SizedBox(height: 12),
+              Text('Choose your platform to leave a review:', style: TextStyle(fontSize: 13, color: textSecondary), textAlign: TextAlign.center),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: _rateStoreButton(
+                  label: 'App Store', sub: 'Rate on', icon: Icons.apple,
+                  url: appStoreUrl, isDark: isDark, color: isDark ? Colors.white : Colors.black,
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: _rateStoreButton(
+                  label: 'Google Play', sub: 'Rate on', icon: Icons.android,
+                  url: playStoreUrl, isDark: isDark, color: const Color(0xFF34A853),
+                )),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rateStoreButton({
+    required String label, required String sub, required IconData icon,
+    required String url, required bool isDark, required Color color,
+  }) {
+    return GestureDetector(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [color.withOpacity(isDark ? 0.18 : 0.10), color.withOpacity(isDark ? 0.08 : 0.04)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Column(children: [
+          Icon(icon, size: 32, color: color),
+          const SizedBox(height: 6),
+          Text(sub, style: TextStyle(fontSize: 10, color: isDark ? Colors.white54 : Colors.black45)),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: isDark ? Colors.white : Colors.black)),
+        ]),
+      ),
+    );
   }
 
   void _showAboutDialog() {
@@ -1083,4 +1610,6 @@ class _SettingsPageState extends State<SettingsPage> {
       // TODO: call your sign-out backend
     }
   }
+
 }
+

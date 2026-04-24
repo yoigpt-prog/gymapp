@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
+import 'package:seo/seo.dart';
 
 class TermsOfServicePage extends StatelessWidget {
   final VoidCallback? toggleTheme;
@@ -9,7 +10,12 @@ class TermsOfServicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    return LegalPageLayout(
+    return Seo.head(
+      tags: const [
+        MetaTag(name: 'title', content: 'Terms of Service | GymGuide'),
+        MetaTag(name: 'description', content: 'Review the Terms of Service for GymGuide. Understand your rights and responsibilities when using our fitness app.'),
+      ],
+      child: LegalPageLayout(
       onToggleTheme: toggleTheme,
       title: 'Terms & EULA',
       isDarkMode: isDarkMode,
@@ -34,7 +40,7 @@ class TermsOfServicePage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           _buildText(
-            'By downloading or using GymGuide, you agree to these Terms.',
+            'By downloading, accessing, or using GymGuide, you agree to be bound by these Terms of Service ("Terms").',
             isDarkMode,
           ),
           const SizedBox(height: 24),
@@ -75,8 +81,8 @@ class TermsOfServicePage extends StatelessWidget {
           _buildSection(
             '5. Subscriptions',
             '• Subscriptions are processed via Apple or Google\n'
-            '• They automatically renew unless canceled\n'
-            '• Pricing is shown before purchase',
+            '• Subscriptions automatically renew unless canceled at least 24 hours before the end of the current period.\n'
+            '• Pricing is displayed in the app before purchase and may vary by region.',
             isDarkMode,
           ),
           _buildSection(
@@ -115,8 +121,14 @@ class TermsOfServicePage extends StatelessWidget {
             'Continued use means acceptance.',
             isDarkMode,
           ),
+          _buildSection(
+            '12. Apple EULA',
+            'This agreement is in addition to the Apple Standard End User License Agreement (EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/',
+            isDarkMode,
+          ),
           const SizedBox(height: 40),
         ],
+      ),
       ),
     );
   }

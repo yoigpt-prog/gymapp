@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import '../pages/main_scaffold.dart';
-import '../utils/platform_url.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Reusable red header widget used across all pages for consistency
-class RedHeader extends StatelessWidget {
+class RedHeader extends StatefulWidget {
   final String title;
   final String? subtitle;
   final Widget? rightWidget;
@@ -30,9 +28,14 @@ class RedHeader extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<RedHeader> createState() => _RedHeaderState();
+}
+
+class _RedHeaderState extends State<RedHeader> {
+  @override
   Widget build(BuildContext context) {
     final isWeb = MediaQuery.of(context).size.width > 800;
-    
+
     return SafeArea(
       bottom: false,
       child: Container(
@@ -67,10 +70,26 @@ class RedHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 20),
-        
+
         // Spacer
         const Spacer(),
-        
+
+        // App Store Icons
+        GestureDetector(
+          onTap: () => _launchStore(
+            'https://apps.apple.com/us/app/gym-guide-app/id6760553535',
+          ),
+          child: _buildAppleStoreIcon(),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () => _launchStore(
+            'https://play.google.com/store/apps/details?id=com.gymguide.app',
+          ),
+          child: _buildPlayStoreIcon(),
+        ),
+        const SizedBox(width: 20),
+
         // Search bar
         Container(
           width: 280,
@@ -80,10 +99,10 @@ class RedHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
           ),
           child: TextField(
-            controller: searchController,
-            onChanged: onSearch,
+            controller: widget.searchController,
+            onChanged: widget.onSearch,
             decoration: InputDecoration(
-              hintText: 'Search',
+              hintText: 'Explore 1800+ exercises (free & premium)',
               hintStyle: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 14,
@@ -106,10 +125,10 @@ class RedHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        
+
         // Dark mode toggle
         InkWell(
-          onTap: onToggleTheme,
+          onTap: widget.onToggleTheme,
           borderRadius: BorderRadius.circular(18),
           child: Container(
             width: 36,
@@ -119,13 +138,12 @@ class RedHeader extends StatelessWidget {
               border: Border.all(color: Colors.white, width: 2),
             ),
             child: Icon(
-              isDarkMode == true ? Icons.dark_mode : Icons.wb_sunny_outlined,
+              widget.isDarkMode == true ? Icons.dark_mode : Icons.wb_sunny_outlined,
               color: Colors.white,
               size: 20,
             ),
           ),
         ),
-
       ],
     );
   }
@@ -136,7 +154,7 @@ class RedHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Back button (if needed)
-        if (showBack)
+        if (widget.showBack)
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: IconButton(
@@ -146,52 +164,194 @@ class RedHeader extends StatelessWidget {
               constraints: const BoxConstraints(),
             ),
           ),
-        
+
         // Logo instead of title
-        GestureDetector(
-          onTap: () {
-            Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-          },
-          child: SvgPicture.asset(
-            'assets/svg/logo/gymguideicon.svg',
-            height: 40,
+        Flexible(
+          flex: 1,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+              },
+              child: SvgPicture.asset(
+                'assets/svg/logo/gymguideicon.svg',
+                height: 40,
+              ),
+            ),
           ),
         ),
-        
-        // Spacer
-        const Spacer(),
-        
-        // App Store Icons
-        _buildStoreIcon('assets/svg/logo/appleminiicon.svg', useOriginalColor: false),
-        const SizedBox(width: 8),
-        _buildStoreIcon('assets/svg/logo/playminiicon.svg', useOriginalColor: true),
-        const SizedBox(width: 12),
 
-        // Right widget (optional)
-        if (rightWidget != null)
-          Padding(
-            padding: const EdgeInsets.only(left: 0), 
-            child: rightWidget!,
+        const SizedBox(width: 8),
+
+        // App Store Icons & Right widget (responsive)
+        Expanded(
+          flex: 2,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () => _launchStore(
+                    'https://apps.apple.com/us/app/gym-guide-app/id6760553535',
+                  ),
+                  child: _buildAppleStoreIcon(),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () => _launchStore(
+                    'https://play.google.com/store/apps/details?id=com.gymguide.app',
+                  ),
+                  child: _buildPlayStoreIcon(),
+                ),
+                const SizedBox(width: 2),
+                if (widget.rightWidget != null) widget.rightWidget!,
+              ],
+            ),
           ),
+        ),
       ],
     );
   }
 
-  Widget _buildStoreIcon(String assetPath, {bool useOriginalColor = false}) {
+  /// Opens a store URL in an external browser
+  Future<void> _launchStore(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('[RedHeader] Could not launch store: $e');
+    }
+  }
+
+  /// Apple Store icon
+  Widget _buildAppleStoreIcon() {
     return Container(
-      width: 40,
-      height: 40,
-      padding: const EdgeInsets.all(8),
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.white.withOpacity(0.2), // Static glow
+            blurRadius: 10,
+            spreadRadius: 0.5,
+          ),
+        ],
       ),
-      child: Center(
-        child: SvgPicture.asset(
-          assetPath,
-          color: useOriginalColor ? null : Colors.white, 
-          fit: BoxFit.contain,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            'assets/svg/logo/appleminiicon.png',
+            color: Colors.white,
+            height: 20,
+          ),
+          const SizedBox(width: 6),
+          const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Download on the',
+                style: TextStyle(
+                  fontFamily: '.SF Pro Text',
+                  color: Colors.white,
+                  fontSize: 8,
+                  height: 1.0,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 0.1,
+                ),
+              ),
+              Text(
+                'App Store',
+                style: TextStyle(
+                  fontFamily: '.SF Pro Display',
+                  color: Colors.white,
+                  fontSize: 13,
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Play Store icon
+  Widget _buildPlayStoreIcon() {
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.white.withOpacity(0.2), // Static glow
+            blurRadius: 10,
+            spreadRadius: 0.5,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            'assets/svg/logo/playminiicon.png',
+            height: 20,
+          ),
+          const SizedBox(width: 6),
+          const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'GET IT ON',
+                style: TextStyle(
+                  fontFamily: 'Roboto',
+                  color: Colors.white,
+                  fontSize: 8,
+                  height: 1.0,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 0.1,
+                ),
+              ),
+              Text(
+                'Google Play',
+                style: TextStyle(
+                  fontFamily: 'Roboto',
+                  color: Colors.white,
+                  fontSize: 13,
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

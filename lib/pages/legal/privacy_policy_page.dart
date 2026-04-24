@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
+import 'package:seo/seo.dart';
 
 class PrivacyPolicyPage extends StatelessWidget {
   final VoidCallback? toggleTheme;
@@ -9,7 +10,12 @@ class PrivacyPolicyPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    return LegalPageLayout(
+    return Seo.head(
+      tags: const [
+        MetaTag(name: 'title', content: 'Privacy Policy | GymGuide'),
+        MetaTag(name: 'description', content: 'Read the GymGuide Privacy Policy to understand how we protect and manage your data while using our fitness app.'),
+      ],
+      child: LegalPageLayout(
       onToggleTheme: toggleTheme,
       title: 'Privacy Policy',
       isDarkMode: isDarkMode,
@@ -152,6 +158,7 @@ class PrivacyPolicyPage extends StatelessWidget {
           ),
           const SizedBox(height: 40),
         ],
+      ),
       ),
     );
   }

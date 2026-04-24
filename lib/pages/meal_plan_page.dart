@@ -6,6 +6,9 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'dart:convert';
 import 'dart:math';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/auth/auth_modal.dart';
+import 'dart:ui'; // For ImageFilter (blur)
 import 'meal_plan_modal.dart' hide Meal; // Hide Meal to avoid conflict
 import 'edit_meal_modal.dart';
 import 'custom_plan_quiz.dart';
@@ -15,8 +18,9 @@ import '../services/supabase_service.dart';
 import '../services/plan_service.dart';
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
+import '../services/subscription_state.dart';
 import '../widgets/red_header.dart';
-
+import '../widgets/promo_banner.dart';
 import '../widgets/polygon_border.dart';
 import '../widgets/meal_image_widget.dart';
 
@@ -52,72 +56,101 @@ class MealPlanPageState extends State<MealPlanPage> {
   int _weekOffset = 0;
   DateTime _selectedDay = DateTime.now();
   bool _showingDayGrid = true; // Toggle between grid view and detail view (mobile only)
+  bool _isLoadingOfferings = true;
+  bool _hasOfferings = false;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+
+    // Load preferred duration FIRST (fast DB query) so the title/grid are
+    // correct before the full meal list arrives.
+    _loadPrefDuration();
     _loadMeals();
 
-    // Check subscription access after the first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkSubscriptionAccess();
-    });
+    // Refresh subscription status for freemium gating
+    SubscriptionState().addListener(_onSubscriptionChanged);
+    SubscriptionState().refresh();
+    
+    _checkOfferings();
   }
-  
-  // ── Subscription Guard ───────────────────────────────────────────────────
-  /// Called on every page visit. Shows the paywall if the user has completed
-  /// the quiz but does NOT have an active "premium" subscription.
-  /// On dismiss/cancel → hard redirect to Home via [MainScaffoldState].
-  Future<void> _checkSubscriptionAccess() async {
-    if (kIsWeb || !mounted) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
-      if (!hasCompletedQuiz) return; // First-time user — let quiz handle it.
 
-      final isPro = await RevenueCatService().isProUser();
-      if (isPro || !mounted) return; // Subscribed — all good.
-
-      debugPrint('[MealPlanPage] Not subscribed — showing paywall gate.');
-      AnalyticsService().trackPaywallViewed(source: 'meal_plan');
-      
-      final result = await RevenueCatService().showPaywall();
-      
-      final isProAfter = await RevenueCatService().isProUser();
-      if (isProAfter) {
-          final customerInfo = await RevenueCatService().getCustomerInfo();
-          String planId = 'unknown';
-          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
-             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
-          }
-          AnalyticsService().trackPurchaseSuccess(plan: planId);
-      }
-
-      final didSubscribe =
-          result == PaywallResult.purchased || result == PaywallResult.restored || isProAfter;
-
-      if (!didSubscribe && mounted) {
-        // Hard gate: redirect to Home.
-        debugPrint('[MealPlanPage] Paywall dismissed — redirecting to Home.');
-        final scaffold = context.findAncestorStateOfType<MainScaffoldState>();
-        scaffold?.changeTab(0);
-      }
-    } catch (e) {
-      debugPrint('[MealPlanPage] _checkSubscriptionAccess error: $e');
+  Future<void> _checkOfferings() async {
+    final ready = await RevenueCatService().checkOfferingsReady();
+    if (mounted) {
+      setState(() {
+        _hasOfferings = ready;
+        _isLoadingOfferings = false;
+      });
     }
   }
-  // ─────────────────────────────────────────────────────
+
+  /// Fetches duration_weeks from user_preferences so _planDurationWeeks is
+  /// populated immediately — avoids showing "2-Week" before meals load.
+  Future<void> _loadPrefDuration() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 1. INTEGER FAST PATH — written by quiz the moment durationWeeks is computed.
+      //    No regex, no Supabase round-trip. Always wins if quiz was ever completed.
+      final intVal = prefs.getInt('duration_weeks_int');
+      if (intVal != null && intVal > 0) {
+        if (mounted) setState(() => _planDurationWeeks = intVal.clamp(1, 52));
+        return;
+      }
+
+      // 2. STRING FALLBACK — older installs that only have the string key.
+      final localDuration = prefs.getString('plan_duration');
+      if (localDuration != null && localDuration.isNotEmpty) {
+        final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(localDuration);
+        if (weekMatch != null) {
+          final val = int.parse(weekMatch.group(1)!);
+          if (mounted) setState(() => _planDurationWeeks = val.clamp(1, 52));
+          // Back-fill integer key so next launch uses the fast path.
+          await prefs.setInt('duration_weeks_int', val.clamp(1, 52));
+          return;
+        }
+      }
+
+      // 3. SUPABASE FALLBACK — covers fresh installs before quiz completes.
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      final response = await Supabase.instance.client
+          .from('user_preferences')
+          .select('duration_weeks')
+          .eq('user_id', user.id)
+          .limit(1);
+      if (response.isNotEmpty && response.first['duration_weeks'] != null && mounted) {
+        final dbVal = (response.first['duration_weeks'] as int).clamp(1, 52);
+        setState(() => _planDurationWeeks = dbVal);
+        // Back-fill so subsequent calls skip Supabase.
+        await prefs.setInt('duration_weeks_int', dbVal);
+      }
+    } catch (e) {
+      debugPrint('[MealPlanPage] _loadPrefDuration error: $e');
+    }
+  }
+
+  void _onSubscriptionChanged() {
+    if (mounted) setState(() {});
+  }
 
   // Public refresh method
   Future<void> refresh() async {
-    await _loadMeals(clearData: true);
+    // Re-read duration preference in parallel so the correct week count
+    // is shown immediately (avoids "2-Week" default after quiz completes).
+    await Future.wait([
+      _loadPrefDuration(),
+      _loadMeals(clearData: true),
+    ]);
   }
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    SubscriptionState().removeListener(_onSubscriptionChanged);
     super.dispose();
   }
 
@@ -205,9 +238,8 @@ class MealPlanPageState extends State<MealPlanPage> {
               Meal.fromJson(mealJson as Map<String, dynamic>);
         });
       });
-      if (cached['planDurationWeeks'] is int) {
-        _planDurationWeeks = cached['planDurationWeeks'] as int;
-      }
+      // We DO NOT override _planDurationWeeks from cache because it can conflict
+      // with the _loadPrefDuration which runs concurrently. Rely solely on the DB.
       setState(() {
         _mealsByDay = restored;
         _isLoading = false;
@@ -295,22 +327,21 @@ class MealPlanPageState extends State<MealPlanPage> {
              return;
           }
           // DYNAMIC DURATION CALCULATION
-          // Use MAX day_number to determine weeks (e.g. Day 21 -> 3 weeks)
-          int maxDay = 0;
-          if (userPlan.isNotEmpty) {
-             final days = userPlan.map((m) => m['plan_global_day'] as int? ?? 0);
-             if (days.isNotEmpty) {
-                maxDay = days.reduce(max);
+          // Do not override _planDurationWeeks if it was correctly loaded from preferences!
+          // We only fallback if it's 0.
+          if (_planDurationWeeks <= 0) {
+             int maxDay = 0;
+             if (userPlan.isNotEmpty) {
+                final days = userPlan.map((m) => m['plan_global_day'] as int? ?? 0);
+                if (days.isNotEmpty) {
+                   maxDay = days.reduce(max);
+                }
              }
+             final totalWeeks = (maxDay / 7).ceil();
+             _planDurationWeeks = totalWeeks > 0 ? totalWeeks : 2;
           }
           
-          // 2. Convert to weeks (ceil)
-          final totalWeeks = (maxDay / 7).ceil();
-          
-          // 3. Update state
-          _planDurationWeeks = totalWeeks > 0 ? totalWeeks : 2; // Default to 2 if 0
-          
-          print('DEBUG: [MealPlanPage] Dynamic Duration: Max Day $maxDay -> $totalWeeks weeks');
+          print('DEBUG: [MealPlanPage] Selected Duration: $_planDurationWeeks weeks');
            
           // CAPTURE CREATION DATE from the first row if available
           if (userPlan.isNotEmpty && userPlan.first['created_at'] != null) {
@@ -362,6 +393,28 @@ class MealPlanPageState extends State<MealPlanPage> {
           
           if (!deepGrouped.containsKey(gDay)) deepGrouped[gDay] = [];
           deepGrouped[gDay]!.add(item);
+      }
+      
+      // 3b. Loop template data if duration is longer than the fetched meals
+      int maxDayInTemplate = 0;
+      if (deepGrouped.isNotEmpty) {
+          maxDayInTemplate = deepGrouped.keys.reduce(max);
+      }
+      
+      if (maxDayInTemplate > 0) {
+          int targetDays = _planDurationWeeks * 7;
+          for (int gDay = 1; gDay <= targetDays; gDay++) {
+              if (!deepGrouped.containsKey(gDay)) {
+                  int srcDay = ((gDay - 1) % maxDayInTemplate) + 1;
+                  if (deepGrouped.containsKey(srcDay)) {
+                      deepGrouped[gDay] = deepGrouped[srcDay]!.map((item) {
+                          final cloned = Map<String, dynamic>.from(item);
+                          cloned['plan_global_day'] = gDay; // update for any inner usage
+                          return cloned;
+                      }).toList();
+                  }
+              }
+          }
       }
       
       // 4. Map to UI Slots
@@ -570,7 +623,9 @@ class MealPlanPageState extends State<MealPlanPage> {
               ),
               SizedBox(height: isSmallScreen ? 6 : 10),
               Text(
-                'Select a day to view your meals',
+                SubscriptionState().isPro
+                    ? 'Select a day to view your meals'
+                    : 'Enjoy free workouts · Unlock full plan with Premium',
                 style: TextStyle(
                   fontSize: 14,
                   color: isDarkMode ? Colors.white54 : const Color(0xFF666666),
@@ -579,33 +634,47 @@ class MealPlanPageState extends State<MealPlanPage> {
               
               SizedBox(height: isSmallScreen ? 16 : 30),
               
-              // Dynamic Weeks Generator
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _planDurationWeeks,
-                itemBuilder: (context, index) {
-                   final weekNum = index + 1;
-                   final startDay = (index * 7) + 1;
-                   final endDay = startDay + 6;
-                   
-                   return Column(
+              // Dynamic Weeks Generator with banners between weeks
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (int index = 0; index < _planDurationWeeks; index++) ...[
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                         Text(
-                            'Week $weekNum',
-                            style: const TextStyle(
-                               fontSize: 18,
-                               fontWeight: FontWeight.w700,
-                               color: Color(0xFFFF0000),
+                        Row(
+                          children: [
+                            Text(
+                              'Week ${index + 1}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFFF0000),
+                              ),
                             ),
-                         ),
-                         const SizedBox(height: 15),
-                         _build14DayGrid(startDay, endDay, isDarkMode), // Reusing method name but works for 7 days
-                         const SizedBox(height: 30),
+                            if (!SubscriptionState().isPro && index > 0) ...[
+                              const SizedBox(width: 8),
+                              const Icon(Icons.lock, size: 14, color: Color(0xFFFF0000)),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 15),
+                        _build14DayGrid((index * 7) + 1, (index * 7) + 7, isDarkMode),
                       ],
-                   );
-                },
+                    ),
+                    // Insert PromoBanner between weeks (not after last)
+                    if (index < _planDurationWeeks - 1) ...[
+                      if (!SubscriptionState().isPro)
+                        PromoBanner(
+                          margin: const EdgeInsets.symmetric(vertical: 8),
+                          source: 'meal_week_${index + 1}',
+                        )
+                      else
+                        SizedBox(height: isSmallScreen ? 16 : 30),
+                    ] else
+                      SizedBox(height: isSmallScreen ? 8 : 16),
+                  ],
+                ],
               ),
 
             ],
@@ -1324,7 +1393,6 @@ class MealPlanPageState extends State<MealPlanPage> {
   
   Widget _buildCircularDayIndicator(int dayNumber, bool isDarkMode) {
     // Calculate if this day is selected
-    // Calculate if this day is selected
     DateTime planStartDate;
     if (_planCreationDate != null) {
         planStartDate = _planCreationDate!;
@@ -1346,9 +1414,28 @@ class MealPlanPageState extends State<MealPlanPage> {
     final eatenMeals = dayMeals?.values.where((m) => m.eaten).length ?? 0;
     final progressPercent = totalMeals == 0 ? 0 : ((eatenMeals / totalMeals) * 100).round();
     final isCompleted = progressPercent == 100 && totalMeals > 0;
-    
+
+    // Freemium: Day 1 is always free; remaining days require subscription
+    final isPro = SubscriptionState().isPro;
+    final isLocked = !isPro && dayNumber > 1;
+
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
+        if (isLocked) {
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user == null) {
+            AuthModal.show(context);
+            return;
+          }
+
+          // Soft gate: user-initiated paywall (not forced).
+          // Go straight to RevenueCatUI — it handles store errors natively.
+          AnalyticsService()
+              .trackPaywallViewed(source: 'meal_locked_day_$dayNumber');
+          await RevenueCatService().showPaywall();
+          await SubscriptionState().refresh();
+          return;
+        }
         // Calculate Week and Day
         final globalDay = dayNumber;
         final week = ((globalDay - 1) ~/ 7) + 1;
@@ -1364,63 +1451,81 @@ class MealPlanPageState extends State<MealPlanPage> {
         // Fetch specific day's meals
         _loadMeals(week: week, day: day, clearData: false); 
       },
-      child: Container(
-        decoration: ShapeDecoration(
-          color: isCompleted 
-            ? const Color(0xFF4CAF50) 
-            : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
-          shape: PolygonBorder(
-            sides: 16,
-            borderRadius: 5.0,
-            rotate: 11.25,
-            side: BorderSide(
-              color: isDarkMode ? Colors.white : Colors.black,
-              width: 2.5,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // Main tile
+          Container(
+            decoration: ShapeDecoration(
+              color: isLocked
+                  ? (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF0F0F0))
+                  : isCompleted 
+                      ? const Color(0xFF4CAF50) 
+                      : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
+              shape: PolygonBorder(
+                sides: 16,
+                borderRadius: 5.0,
+                rotate: 11.25,
+                side: BorderSide(
+                  color: isLocked
+                      ? (isDarkMode ? Colors.white24 : Colors.black12)
+                      : (isDarkMode ? Colors.white : Colors.black),
+                  width: 2.5,
+                ),
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double circleWidth = constraints.maxWidth;
+                return Padding(
+                  padding: EdgeInsets.all(circleWidth * 0.15),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Day $dayNumber',
+                          style: TextStyle(
+                            fontSize: circleWidth * 0.35,
+                            fontWeight: FontWeight.w900,
+                            color: isLocked
+                                ? (isDarkMode ? Colors.white30 : Colors.black26)
+                                : isCompleted 
+                                    ? Colors.white 
+                                    : (isDarkMode ? Colors.white : const Color(0xFF333333)),
+                            letterSpacing: -0.5,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: circleWidth * 0.05),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: isLocked
+                            ? Icon(
+                                Icons.lock,
+                                size: circleWidth * 0.28,
+                                color: isDarkMode ? Colors.white30 : Colors.black26,
+                              )
+                            : Text(
+                                '$progressPercent%',
+                                style: TextStyle(
+                                  fontSize: circleWidth * 0.22,
+                                  fontWeight: FontWeight.bold,
+                                  color: isCompleted 
+                                      ? Colors.white 
+                                      : const Color(0xFF4CAF50), // Green for percentage
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final double circleWidth = constraints.maxWidth;
-            return Padding(
-              padding: EdgeInsets.all(circleWidth * 0.15),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'Day $dayNumber',
-                      style: TextStyle(
-                        fontSize: circleWidth * 0.35,
-                        fontWeight: FontWeight.w900,
-                        color: isCompleted 
-                          ? Colors.white 
-                          : (isDarkMode ? Colors.white : const Color(0xFF333333)),
-                        letterSpacing: -0.5,
-                        height: 1.0,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: circleWidth * 0.05),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '$progressPercent%',
-                      style: TextStyle(
-                        fontSize: circleWidth * 0.22,
-                        fontWeight: FontWeight.bold,
-                        color: isCompleted 
-                          ? Colors.white 
-                          : const Color(0xFF4CAF50), // Green for percentage
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+        ],
       ),
     );
   }
@@ -1560,3 +1665,4 @@ class MealPlanPageState extends State<MealPlanPage> {
   }
 
 }
+

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'home_page.dart'; // Import for ExerciseDetail model
+import '../services/video_cache_service.dart';
 
 class ExerciseDetailPage extends StatefulWidget {
   final ExerciseDetail exercise;
@@ -309,133 +310,203 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
   }
 
   Widget _buildSetCheckbox(int index, String label, String reps) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: widget.isDarkMode ? Colors.white : Colors.black,
-          width: 0.3,
-        ),
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _completedSets[index] = !_completedSets[index];
-              });
-            },
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: _completedSets[index] ? Colors.green : Colors.grey.shade400,
-                  width: 2,
-                ),
-                color: _completedSets[index] ? Colors.green : Colors.transparent,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        // Scale values responsively
+        final hPadding = (screenWidth * 0.045).clamp(14.0, 28.0);
+        final vPadding = (screenWidth * 0.035).clamp(12.0, 20.0);
+        final fontSize = (screenWidth * 0.042).clamp(14.0, 18.0);
+        final repsFontSize = (screenWidth * 0.036).clamp(12.0, 16.0);
+        final checkboxSize = (screenWidth * 0.065).clamp(22.0, 32.0);
+        final borderRadius = (screenWidth * 0.035).clamp(10.0, 16.0);
+        final borderWidth = (screenWidth * 0.004).clamp(1.5, 2.5);
+        final isCompleted = _completedSets[index];
+
+        // Clear, visually distinct border colors
+        final borderColor = isCompleted
+            ? Colors.green
+            : widget.isDarkMode
+                ? const Color(0xFF555555)
+                : const Color(0xFFBBBBBB);
+
+        final bgColor = isCompleted
+            ? (widget.isDarkMode
+                ? const Color(0xFF0D2E0D)
+                : const Color(0xFFEAF7EA))
+            : (widget.isDarkMode ? const Color(0xFF1A1A1A) : Colors.white);
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          margin: EdgeInsets.only(bottom: screenWidth * 0.03),
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: vPadding),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: borderColor,
+              width: borderWidth,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isCompleted
+                    ? Colors.green.withOpacity(0.12)
+                    : (widget.isDarkMode
+                        ? Colors.black.withOpacity(0.3)
+                        : Colors.black.withOpacity(0.06)),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
-              child: _completedSets[index]
-                  ? const Icon(Icons.check, size: 16, color: Colors.white)
-                  : null,
-            ),
+            ],
           ),
-          const SizedBox(width: 16),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white : Colors.black87,
-            ),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _completedSets[index] = !_completedSets[index];
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: checkboxSize,
+                  height: checkboxSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isCompleted ? Colors.green : Colors.grey.shade400,
+                      width: borderWidth,
+                    ),
+                    color: isCompleted ? Colors.green : Colors.transparent,
+                  ),
+                  child: isCompleted
+                      ? Icon(Icons.check,
+                          size: checkboxSize * 0.6, color: Colors.white)
+                      : null,
+                ),
+              ),
+              SizedBox(width: hPadding * 0.7),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                reps,
+                style: TextStyle(
+                  fontSize: repsFontSize,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red,
+                ),
+              ),
+            ],
           ),
-          const Spacer(),
-          Text(
-            reps,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.red,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   bool get _allSetsCompleted => _completedSets.every((completed) => completed);
 }
 
-// VideoPlayerWidget from home_page.dart
+/// Cached video player — delegates controller lifecycle to [VideoCacheService].
+///
+/// Key behaviours
+/// • First open  : fetches from R2, caches controller in memory.
+/// • Rebuild     : controller is reused from cache — zero extra GET requests.
+/// • Second open : controller already ready → plays instantly, no spinner.
+/// • Dispose     : does NOT dispose the controller (cache keeps it alive).
 class VideoPlayerWidget extends StatefulWidget {
   final String videoUrl;
   final double? height;
 
-  const VideoPlayerWidget({Key? key, required this.videoUrl, this.height}) : super(key: key);
+  const VideoPlayerWidget({Key? key, required this.videoUrl, this.height})
+      : super(key: key);
 
   @override
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 }
 
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _isInitialized = false;
+  bool _hasError = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() {
-            _isInitialized = true;
-          });
-          _controller.setLooping(true);
-          _controller.setVolume(0.0); // Mute for autoplay
-          _controller.play();
-        }
-      }).catchError((error) {
-        debugPrint('Video initialization failed: $error');
-        if (mounted) {
-          setState(() {
-            _isInitialized = false;
-            // You could add an error state variable here if you want to show an error icon
-          });
-        }
-      });
+    _loadFromCache();
+  }
+
+  /// Ask the cache for a ready controller.
+  /// If it already exists the future completes synchronously-ish (next microtask).
+  Future<void> _loadFromCache() async {
+    // Fast path: already initialised — skip setState overhead.
+    if (VideoCacheService.instance.isReady(widget.videoUrl)) {
+      final cached =
+          await VideoCacheService.instance.getController(widget.videoUrl);
+      if (mounted && cached != null) {
+        setState(() {
+          _controller = cached;
+          _isInitialized = true;
+        });
+      }
+      return;
+    }
+
+    // Slow path: fetch & initialise (only happens once per URL per session).
+    final controller =
+        await VideoCacheService.instance.getController(widget.videoUrl);
+    if (!mounted) return;
+    setState(() {
+      _controller = controller;
+      _isInitialized = controller != null;
+      _hasError = controller == null;
+    });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    // ⚠️  Do NOT dispose — VideoCacheService owns the controller lifetime.
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final h = widget.height ?? 250;
-    if (_isInitialized) {
+
+    if (_hasError) {
+      return SizedBox(
+        height: h,
+        child: Center(
+          child: Icon(Icons.broken_image, size: 64, color: Colors.grey.shade400),
+        ),
+      );
+    }
+
+    if (_isInitialized && _controller != null) {
       return SizedBox(
         width: double.infinity,
         height: h,
         child: FittedBox(
           fit: BoxFit.cover,
           child: SizedBox(
-            width: _controller.value.size.width,
-            height: _controller.value.size.height,
-            child: VideoPlayer(_controller),
+            width: _controller!.value.size.width,
+            height: _controller!.value.size.height,
+            child: VideoPlayer(_controller!),
           ),
         ),
       );
-    } else {
-      return SizedBox(
-        height: h,
-        child: const Center(child: CircularProgressIndicator()),
-      );
     }
+
+    return SizedBox(
+      height: h,
+      child: const Center(child: CircularProgressIndicator()),
+    );
   }
 }

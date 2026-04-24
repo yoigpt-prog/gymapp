@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import '../pages/legal/privacy_policy_page.dart';
 import '../pages/legal/terms_of_service_page.dart';
 import '../pages/legal/disclaimer_page.dart';
@@ -129,15 +128,15 @@ class WebFooterState extends State<WebFooter> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildSocialIcon('assets/svg/socialmedia/facebookicon.svg', 'https://facebook.com'),
+                _buildSocialIcon('assets/svg/socialmedia/facebookicon.png', 'https://facebook.com'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/instagramicon.svg', 'https://instagram.com'),
+                _buildSocialIcon('assets/svg/socialmedia/instagramicon.png', 'https://instagram.com'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/pinteresticon.svg', 'https://pinterest.com'),
+                _buildSocialIcon('assets/svg/socialmedia/pinteresticon.png', 'https://pinterest.com'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/tiktokicon.svg', 'https://tiktok.com'),
+                _buildSocialIcon('assets/svg/socialmedia/tiktokicon.png', 'https://tiktok.com'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/youtubeicon.svg', 'https://youtube.com'),
+                _buildSocialIcon('assets/svg/socialmedia/youtubeicon.png', 'https://youtube.com'),
               ],
             ),
           ],
@@ -170,7 +169,7 @@ class WebFooterState extends State<WebFooter> {
     );
   }
 
-  Widget _buildSocialIcon(String svgPath, String url) {
+  Widget _buildSocialIcon(String pngPath, String url) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -186,14 +185,12 @@ class WebFooterState extends State<WebFooter> {
             shape: BoxShape.circle,
           ),
           child: Center(
-            child: SvgPicture.asset(
-              svgPath,
-              width: 40,
-              height: 40,
-              colorFilter: const ColorFilter.mode(
-                Colors.white,
-                BlendMode.srcIn,
-              ),
+            child: Image.asset(
+              pngPath,
+              width: 24,
+              height: 24,
+              color: Colors.white,
+              colorBlendMode: BlendMode.srcIn,
             ),
           ),
         ),

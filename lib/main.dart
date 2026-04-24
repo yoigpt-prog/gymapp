@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:upgrader/upgrader.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -19,13 +20,16 @@ import 'pages/legal/delete_account_page.dart';
 import 'pages/legal/copyright_page.dart';
 import 'pages/legal/age_requirement_page.dart';
 import 'pages/legal/contact_support_page.dart';
+import 'pages/download_page.dart';
 import '../widgets/auth/auth_modal.dart';
 import 'pages/auth_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/main_scaffold.dart';
+import 'pages/welcome_screen.dart';
 import 'services/revenue_cat_service.dart';
 import 'services/analytics_service.dart';
 import 'pages/calculators/bmi_calculator_page.dart';
+import 'package:seo/seo.dart';
 import 'pages/calculators/calorie_calculator_page.dart';
 import 'pages/calculators/macro_calculator_page.dart';
 import 'pages/calculators/body_fat_calculator_page.dart';
@@ -99,7 +103,10 @@ class _GymGuideAppState extends State<GymGuideApp> {
       },
     );
 
-    return MaterialApp(
+    return SeoController(
+      enabled: true,
+      tree: WidgetTree(context: context),
+      child: MaterialApp(
       title: 'GymGuide',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
@@ -120,7 +127,22 @@ class _GymGuideAppState extends State<GymGuideApp> {
         WidgetBuilder? builder;
         switch (settings.name) {
           case '/':
-            builder = (context) => MainScaffold(initialIndex: 0, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+            builder = (context) => UpgradeAlert(
+                  child: MainScaffold(
+                    initialIndex: 0,
+                    toggleTheme: _toggleTheme,
+                    isDarkMode: _themeMode == ThemeMode.dark,
+                  ),
+                );
+            break;
+          case '/home':
+            builder = (context) => UpgradeAlert(
+                  child: MainScaffold(
+                    initialIndex: 0,
+                    toggleTheme: _toggleTheme,
+                    isDarkMode: _themeMode == ThemeMode.dark,
+                  ),
+                );
             break;
           case '/eula':
             builder = (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
@@ -154,6 +176,9 @@ class _GymGuideAppState extends State<GymGuideApp> {
             break;
           case '/contact':
             builder = (context) => ContactSupportPage(toggleTheme: _toggleTheme);
+            break;
+          case '/download':
+            builder = (context) => DownloadPage(toggleTheme: _toggleTheme);
             break;
           case '/calculators/bmi':
             builder = (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
@@ -189,6 +214,7 @@ class _GymGuideAppState extends State<GymGuideApp> {
         return null;
       },
       // home: const AuthWrapper(), // Disabled for now
+      ),
     );
   }
 }

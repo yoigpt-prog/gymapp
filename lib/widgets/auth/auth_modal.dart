@@ -4,7 +4,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io' show Platform;
 import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 enum AuthMode { login, signup }
 enum SignupStep { email, otp, password }
@@ -81,7 +84,7 @@ class _AuthModalState extends State<AuthModal> {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
-        authScreenLaunchMode: LaunchMode.inAppBrowserView,
+        authScreenLaunchMode: LaunchMode.externalApplication,
       );
     } catch (e) {
       if (mounted) _showError(e.toString());
@@ -93,15 +96,64 @@ class _AuthModalState extends State<AuthModal> {
   Future<void> _signInWithApple() async {
     setState(() => _isLoading = true);
     try {
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.apple,
-        redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
-        authScreenLaunchMode: LaunchMode.inAppBrowserView,
-      );
+      if (!kIsWeb && (Platform.isIOS || Platform.isMacOS)) {
+        // Native Apple Sign-In
+        try {
+          final rawNonce = Supabase.instance.client.auth.generateRawNonce();
+          final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+
+          final credential = await SignInWithApple.getAppleIDCredential(
+            scopes: [
+              AppleIDAuthorizationScopes.email,
+              AppleIDAuthorizationScopes.fullName,
+            ],
+            nonce: hashedNonce,
+          );
+
+          final idToken = credential.identityToken;
+          if (idToken == null) {
+            throw const AuthException('Could not find ID Token from Apple returned credential.');
+          }
+
+          await Supabase.instance.client.auth.signInWithIdToken(
+            provider: OAuthProvider.apple,
+            idToken: idToken,
+            nonce: rawNonce,
+          );
+
+          if (mounted) {
+            AuthModal.isVisible = false;
+            Navigator.pop(context);
+            _showSuccess('Welcome!');
+          }
+        } catch (nativeError) {
+          final errorStr = nativeError.toString().toLowerCase();
+          // If user consciously canceled, bail out
+          if (errorStr.contains('cancel') || errorStr.contains('dismiss') || errorStr.contains('user closed') || errorStr.contains('canceled')) {
+            return;
+          }
+          
+          debugPrint('[AUTH INFO] Native Apple Sign-In failed (often happens on Simulator without Apple ID), falling back to OAuth: $nativeError');
+          
+          // Fallback to web-based OAuth (which works perfectly on iOS Simulator)
+          await Supabase.instance.client.auth.signInWithOAuth(
+            OAuthProvider.apple,
+            redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
+            authScreenLaunchMode: LaunchMode.externalApplication,
+          );
+        }
+      } else {
+        // Fallback to web-based OAuth for Android/Web
+        await Supabase.instance.client.auth.signInWithOAuth(
+          OAuthProvider.apple,
+          redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
+          authScreenLaunchMode: LaunchMode.externalApplication,
+        );
+      }
     } catch (e) {
       final msg = e.toString().toLowerCase();
       // Swallow cancellation silently, show errors for everything else
-      if (!msg.contains('cancel') && !msg.contains('dismiss') && !msg.contains('user closed')) {
+      if (!msg.contains('cancel') && !msg.contains('dismiss') && !msg.contains('user closed') && !msg.contains('canceled')) {
         if (mounted) _showError('Apple sign-in failed. Please try again.');
       }
     } finally {

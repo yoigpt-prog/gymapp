@@ -101,9 +101,9 @@ class RevenueCatService {
   // ── Entitlement Checking ──────────────────────────────────────────────────────
 
   /// Returns true if the user has the "premium" entitlement active.
-  /// Always returns true on Web so development is not blocked.
+  /// Returns false on Web since RevenueCat SDK is unsupported.
   Future<bool> isProUser() async {
-    if (kIsWeb) return true;
+    if (kIsWeb) return false;
     if (!_initialized) return false;
     try {
       final info = await Purchases.getCustomerInfo();
@@ -175,6 +175,34 @@ class RevenueCatService {
     }
   }
 
+  /// Checks if offerings are currently loaded and available.
+  /// More lenient check: any offering (named, current, or any key) qualifies.
+  /// Retries up to 3 times with 1-second delays to handle slow sandbox connections.
+  Future<bool> checkOfferingsReady({int maxRetries = 3}) async {
+    if (kIsWeb || !_initialized) return false;
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final offerings = await Purchases.getOfferings();
+        // Accept if: named offering found, OR current offering exists, OR ANY offering is present
+        final namedFound = offerings.getOffering(_offeringId) != null;
+        final currentFound = offerings.current != null && offerings.current!.availablePackages.isNotEmpty;
+        final anyFound = offerings.all.isNotEmpty;
+        if (namedFound || currentFound || anyFound) {
+          debugPrint('[RC] checkOfferingsReady → true (attempt $attempt, named=$namedFound, current=$currentFound, any=$anyFound)');
+          return true;
+        }
+        debugPrint('[RC] checkOfferingsReady → no offerings on attempt $attempt.');
+      } catch (e) {
+        debugPrint('[RC] checkOfferingsReady error (attempt $attempt): $e');
+      }
+      if (attempt < maxRetries) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+    debugPrint('[RC] checkOfferingsReady → false after $maxRetries attempts.');
+    return false;
+  }
+
   // ── Paywall UI ────────────────────────────────────────────────────────────────
 
   /// Shows paywall ONLY if the user does NOT already have the premium entitlement.
@@ -200,26 +228,19 @@ class RevenueCatService {
   }
 
   /// Manually presents the paywall regardless of entitlement status.
-  /// Uses RevenueCatUI auto-resolve (no explicit offering) to avoid Error 23.
+  /// Goes directly to RevenueCatUI — it handles store errors natively.
+  /// We no longer gate on offerings checks here; the pre-check caused
+  /// "Store Unavailable" dialogs in Apple's sandbox during review.
   Future<PaywallResult?> showPaywall() async {
     if (kIsWeb || !_initialized) return null;
 
-    debugPrint('[RC] showPaywall() called — verifying offerings before presentation…');
-
+    debugPrint('[RC] showPaywall() — presenting RevenueCatUI paywall (no pre-check)…');
     try {
-      // Fetch offerings first to ensure store is available (prevents Error 2 on emulators)
-      final offerings = await Purchases.getOfferings();
-      if (offerings.current == null || offerings.current!.availablePackages.isEmpty) {
-        debugPrint('[RC] No active offerings found. Skipping Paywall to prevent Error 2.');
-        return null;
-      }
-
-      debugPrint('[RC] Offerings verified. Presenting paywall (auto-resolve)…');
       final result = await RevenueCatUI.presentPaywall();
       debugPrint('[RC] Paywall result: $result');
       return result;
     } catch (e) {
-      debugPrint('[RC] presentPaywall error (store possibly unavailable): $e');
+      debugPrint('[RC] presentPaywall error: $e');
       return null;
     }
   }

@@ -18,6 +18,9 @@ class _AuthPageState extends State<AuthPage> {
         OAuthProvider.google,
         redirectTo: 'com.gymguide.app://login-callback/',
       );
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
+      }
     } catch (e) {
       debugPrint('[AUTH ERROR] Google sign-in: $e');
     } finally {
@@ -32,6 +35,9 @@ class _AuthPageState extends State<AuthPage> {
         OAuthProvider.apple,
         redirectTo: 'com.gymguide.app://login-callback/',
       );
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
+      }
     } catch (e) {
       debugPrint('[AUTH ERROR] Apple sign-in: $e');
     } finally {

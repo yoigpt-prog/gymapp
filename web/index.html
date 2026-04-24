@@ -2,24 +2,16 @@
 <html>
 
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  
+  <!-- Default SEO Meta Tags -->
+  <title>Gym Guide – Personalized Workout & Meal Plan App (1800+ Exercises)</title>
+  <meta name="description" content="Get your custom workout and meal plan in seconds. 1800+ exercises, fat loss & muscle gain programs. Download Gym Guide now.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://www.gymguide.co/">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -27,12 +19,60 @@
   <meta name="apple-mobile-web-app-title" content="Gym Guide">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-
-  <title>Gym Guide</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="manifest" href="manifest.json">
   <script src="./assets/packages/mixpanel_flutter/assets/mixpanel.js"></script>
+
+  <!-- Lightweight SEO Route Script -->
+  <script>
+    function updateSEO() {
+      const path = window.location.pathname;
+      let title = "Gym Guide – Personalized Workout & Meal Plan App (1800+ Exercises)";
+      let description = "Get your custom workout and meal plan in seconds. 1800+ exercises, fat loss & muscle gain programs. Download Gym Guide now.";
+      let canonicalUrl = "https://www.gymguide.co" + (path === '/' ? '' : path);
+
+      if (path === '/download') {
+        title = "Download Gym Guide – Custom Workout & Meal Plan App";
+        description = "Download Gym Guide and get a personalized fitness plan based on your goals. Build muscle, lose fat, and stay fit.";
+      } else if (path === '/calculators/bmi') {
+        title = "BMI Calculator – Check Your Body Mass Index Instantly";
+        description = "Free BMI calculator. Check your body mass index instantly and get accurate results. Try it now.";
+      } else if (path === '/calculators/calorie') {
+        title = "Calorie Calculator – Daily Calories for Weight Loss & Muscle Gain";
+        description = "Calculate your daily calorie needs for weight loss or muscle gain. Fast, accurate results.";
+      } else if (path === '/calculators/macro') {
+        title = "Macro Calculator – Protein, Carbs & Fat Intake Calculator";
+        description = "Find your ideal macros for fat loss or muscle gain. Calculate protein, carbs, and fats.";
+      } else if (path === '/calculators/bodyfat') {
+        title = "Body Fat Calculator – Estimate Your Body Fat Percentage";
+        description = "Estimate your body fat percentage and track your fitness progress.";
+      } else if (path === '/calculators/onerm') {
+        title = "1RM Calculator – One Rep Max Strength Calculator";
+        description = "Calculate your one rep max and track your strength progress in the gym.";
+      }
+
+      document.title = title;
+      
+      let metaDesc = document.querySelector('meta[name="description"]');
+      if (metaDesc) metaDesc.setAttribute('content', description);
+
+      let linkCanonical = document.querySelector('link[rel="canonical"]');
+      if (linkCanonical) linkCanonical.setAttribute('href', canonicalUrl);
+    }
+
+    // Run on initial load
+    updateSEO();
+
+    // Observe changes to the URL (for Flutter web router)
+    let lastUrl = location.href; 
+    new MutationObserver(() => {
+      const url = location.href;
+      if (url !== lastUrl) {
+        lastUrl = url;
+        updateSEO();
+      }
+    }).observe(document, {subtree: true, childList: true});
+  </script>
 </head>
 
 <body>

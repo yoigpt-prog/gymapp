@@ -6,8 +6,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../widgets/red_header.dart';
 import '../widgets/auth/auth_modal.dart';
+import '../widgets/promo_banner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
+import '../services/subscription_state.dart';
+import '../services/video_cache_service.dart';
+import 'package:seo/seo.dart';
+import '../widgets/seo_footer_cta.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -152,7 +157,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadMoreExercises() async {
     // Guard: need either a muscle OR an active search query
-    if (_isLoading || !_hasMore || (_selectedMuscle == null && !_isSearchMode && !_filterFavorites))
+    if (_isLoading ||
+        !_hasMore ||
+        (_selectedMuscle == null && !_isSearchMode && !_filterFavorites))
       return;
 
     setState(() {
@@ -301,13 +308,27 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android) {
-          return _buildDesktopLayout();
-        }
-        return _buildMobileLayout();
-      },
+    return Seo.head(
+      tags: const [
+        MetaTag(
+            name: 'title',
+            content:
+                'Gym Guide – Personalized Workout & Meal Plan App (1800+ Exercises)'),
+        MetaTag(
+            name: 'description',
+            content:
+                'Get your custom workout and meal plan in seconds. 1800+ exercises, fat loss & muscle gain programs. Download Gym Guide now.'),
+      ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth > 800 &&
+              defaultTargetPlatform != TargetPlatform.iOS &&
+              defaultTargetPlatform != TargetPlatform.android) {
+            return _buildDesktopLayout();
+          }
+          return _buildMobileLayout();
+        },
+      ),
     );
   }
 
@@ -334,119 +355,184 @@ class _HomePageState extends State<HomePage> {
 
             _buildMobileSearchAndFilters(isDark, textColor),
             Expanded(
-              child: (_selectedMuscle == null && !_isSearchMode && !_filterFavorites)
-                  ? Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: FittedBox(
-                        fit: BoxFit.contain,
-                        child: SizedBox(
-                          width: 1080,
-                          height: 1920,
-                          child: Transform.scale(
-                            scale: 1.08,
-                            child: MuscleMap(
-                              gender: _gender,
-                              side: _side,
-                              highlightedMuscle: _highlightedMuscle,
-                              isDarkMode: isDark,
-                              onTapMuscle: (m) {
-                                setState(() {
-                                  if (_highlightedMuscle == m) {
-                                    _selectedMuscle = m;
-                                    _resetExercises(); // Load exercises for selected muscle
-                                  } else {
-                                    _highlightedMuscle = m;
-                                  }
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                  : CustomScrollView(
-                      controller: _scrollController,
-                      slivers: [
-                        // Exercise List Header
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  icon:
-                                      Icon(Icons.arrow_back, color: textColor),
-                                  onPressed: () {
-                                    setState(() {
-                                      _selectedMuscle = null;
-                                      _exercises.clear();
-                                      _filterFavorites = false; // Reset filterFavorites when going back
-                                    });
-                                    if (_isSearchMode) _clearSearch();
-                                  },
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    _selectedMuscle != null
-                                        ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
-                                        : _filterFavorites
-                                            ? 'My Favorites'
-                                            : 'Search Results',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: textColor,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // Exercise List
-                        SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              if (index >= _exercises.length) {
-                                return _isLoading
-                                    ? const Center(
-                                        child: Padding(
-                                            padding: EdgeInsets.all(16),
-                                            child: CircularProgressIndicator()))
-                                    : const SizedBox.shrink();
-                              }
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 16),
-                                child: ExerciseDetailCard(
-                                  exercise: _exercises[index],
+              child: ScrollConfiguration(
+                behavior:
+                    ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                child: (_selectedMuscle == null &&
+                        !_isSearchMode &&
+                        !_filterFavorites)
+                    ? Column(
+                        children: [
+                          // Body map fills ALL available vertical space.
+                          // FittedBox + BoxFit.contain preserves aspect ratio
+                          // and centres horizontally with no overflow/scroll.
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.contain,
+                              alignment: Alignment.center,
+                              child: SizedBox(
+                                width: 1080,
+                                height: 1920,
+                                child: MuscleMap(
+                                  gender: _gender,
+                                  side: _side,
+                                  highlightedMuscle: _highlightedMuscle,
                                   isDarkMode: isDark,
-                                  shouldPlay: index == _playingIndex,
-                                ),
-                              );
-                            },
-                            childCount:
-                                _exercises.length + (_isLoading ? 1 : 0),
-                          ),
-                        ),
-
-                        if (_exercises.isEmpty && !_isLoading)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.all(32),
-                              child: Center(
-                                child: Text(
-                                  'No exercises found.',
-                                  style: TextStyle(color: textColor),
+                                  onTapMuscle: (m) {
+                                    setState(() {
+                                      if (_highlightedMuscle == m) {
+                                        _selectedMuscle = m;
+                                        _resetExercises();
+                                      } else {
+                                        _highlightedMuscle = m;
+                                      }
+                                    });
+                                  },
                                 ),
                               ),
                             ),
                           ),
-                      ],
-                    ),
+                          // SEO nodes must exist in the widget tree for
+                          // crawlers but must NOT consume any visual height.
+                          // Use mainAxisSize.min + SizedBox.shrink children
+                          // so layout size = 0.
+                          if (kIsWeb)
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Seo.text(
+                                  text:
+                                      "Gym Guide: The Ultimate Fitness App & Workout Plan App",
+                                  style: TextTagStyle.h1,
+                                  child: const SizedBox.shrink(),
+                                ),
+                                Seo.text(
+                                  text:
+                                      "Get your custom workout and meal plan in seconds. Whether your goal is to build muscle, lose body fat, or improve your overall health, Gym Guide generates a personalized fitness plan tailored just for you. Explore our database of over 1800 exercises with detailed instructions and 3D muscle maps.",
+                                  style: TextTagStyle.p,
+                                  child: const SizedBox.shrink(),
+                                ),
+                                Seo.text(
+                                  text:
+                                      "Stop guessing what to do at the gym. Our smart algorithms design the perfect workout plan app experience and match it with a customized meal plan app structure. Download Gym Guide today to unlock your full potential and achieve the physique you've always wanted.",
+                                  style: TextTagStyle.p,
+                                  child: const SizedBox.shrink(),
+                                ),
+                              ],
+                            ),
+                          if (kIsWeb) SeoFooterCTA(isDarkMode: isDark),
+                        ],
+                      )
+                    : CustomScrollView(
+                        controller: _scrollController,
+                        slivers: [
+                          // Exercise List Header
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    icon: Icon(Icons.arrow_back,
+                                        color: textColor),
+                                    onPressed: () {
+                                      setState(() {
+                                        _selectedMuscle = null;
+                                        _exercises.clear();
+                                        _filterFavorites =
+                                            false; // Reset filterFavorites when going back
+                                      });
+                                      if (_isSearchMode) _clearSearch();
+                                    },
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      _selectedMuscle != null
+                                          ? '${_selectedMuscle![0].toUpperCase()}${_selectedMuscle!.substring(1)} Exercises'
+                                          : _filterFavorites
+                                              ? 'My Favorites'
+                                              : 'Search Results',
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: textColor,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Exercise List (with promotional banners every 3 items)
+                          SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                // SubscriptionState accessed per-item for live updates
+                                final isPro = SubscriptionState().isPro;
+                                const bannerInterval = 3;
+
+                                // Determine if this slot is a banner (every 4th slot = banner)
+                                if (!isPro &&
+                                    index > 0 &&
+                                    index % (bannerInterval + 1) ==
+                                        bannerInterval) {
+                                  return const PromoBanner(
+                                    margin: EdgeInsets.only(
+                                        left: 16, right: 16, bottom: 24),
+                                    source: 'exercise_list',
+                                  );
+                                }
+
+                                // Map list index to exercise index (accounting for injected banners)
+                                final exerciseIndex = isPro
+                                    ? index
+                                    : index - (index ~/ (bannerInterval + 1));
+
+                                if (exerciseIndex >= _exercises.length) {
+                                  return _isLoading
+                                      ? const Center(
+                                          child: Padding(
+                                              padding: EdgeInsets.all(16),
+                                              child:
+                                                  CircularProgressIndicator()))
+                                      : const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  child: ExerciseDetailCard(
+                                    exercise: _exercises[exerciseIndex],
+                                    isDarkMode: isDark,
+                                    shouldPlay: exerciseIndex == _playingIndex,
+                                  ),
+                                );
+                              },
+                              childCount: SubscriptionState().isPro
+                                  ? _exercises.length + (_isLoading ? 1 : 0)
+                                  : _exercises.length +
+                                      (_exercises.length ~/ 3) +
+                                      (_isLoading ? 1 : 0),
+                            ),
+                          ),
+
+                          if (_exercises.isEmpty && !_isLoading)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Center(
+                                  child: Text(
+                                    'No exercises found.',
+                                    style: TextStyle(color: textColor),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
             ),
           ],
         ),
@@ -489,7 +575,7 @@ class _HomePageState extends State<HomePage> {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: 'Search exercises, muscles, equipment...',
+                          hintText: 'Explore 1800+ exercises (free & premium)',
                           hintStyle:
                               TextStyle(color: subTextColor, fontSize: 14),
                           border: InputBorder.none,
@@ -641,7 +727,44 @@ class _HomePageState extends State<HomePage> {
                                 clipBehavior: Clip.antiAlias,
                                 child: Padding(
                                   padding: const EdgeInsets.all(24),
-                                  child: _buildDesktopMuscleMap(),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _buildDesktopMuscleMap(),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 24),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Seo.text(
+                                              text:
+                                                  "Gym Guide: The Ultimate Fitness App & Workout Plan App",
+                                              style: TextTagStyle.h1,
+                                              child: const SizedBox.shrink(),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            Seo.text(
+                                              text:
+                                                  "Get your custom workout and meal plan in seconds. Whether your goal is to build muscle, lose body fat, or improve your overall health, Gym Guide generates a personalized fitness plan tailored just for you. Explore our database of over 1800 exercises with detailed instructions and 3D muscle maps.",
+                                              style: TextTagStyle.p,
+                                              child: const SizedBox.shrink(),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            Seo.text(
+                                              text:
+                                                  "Stop guessing what to do at the gym. Our smart algorithms design the perfect workout plan app experience and match it with a customized meal plan app structure. Download Gym Guide today to unlock your full potential and achieve the physique you've always wanted.",
+                                              style: TextTagStyle.p,
+                                              child: const SizedBox.shrink(),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      SeoFooterCTA(isDarkMode: isDark),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -1194,8 +1317,8 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildDesktopRightPanel() {
     final adAsset = widget.isDarkMode
-        ? 'assets/banner/adblackmode.svg'
-        : 'assets/banner/adwhitemode.svg';
+        ? 'assets/banner/adblackmode.png'
+        : 'assets/banner/adwhitemode.png';
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 50),
@@ -1205,7 +1328,7 @@ class _HomePageState extends State<HomePage> {
         builder: (context, constraints) {
           return AnimatedSwitcher(
             duration: const Duration(milliseconds: 50),
-            child: SvgPicture.asset(
+            child: Image.asset(
               adAsset,
               key: ValueKey(adAsset),
               fit: BoxFit.fill,
@@ -1258,23 +1381,23 @@ class _HomePageState extends State<HomePage> {
 
     // 1. Initialize local state based on current filters
     bool localFilterFavorites = _filterFavorites;
-        Set<String> localDifficulties = Set.from(_selectedDifficulties);
-        Set<String> localWorkoutTypes = Set.from(_selectedWorkoutTypes);
-        Set<String> localEquipment = Set.from(_selectedEquipment);
+    Set<String> localDifficulties = Set.from(_selectedDifficulties);
+    Set<String> localWorkoutTypes = Set.from(_selectedWorkoutTypes);
+    Set<String> localEquipment = Set.from(_selectedEquipment);
 
-        bool isEquipmentExpanded = false;
+    bool isEquipmentExpanded = false;
 
-        // Common equipment list for collapsed view
-        final List<String> commonEquipment = [
-          'Body weight',
-          'Dumbbell',
-          'Barbell',
-          'Band',
-          'Cable',
-          'Smith machine'
-        ];
+    // Common equipment list for collapsed view
+    final List<String> commonEquipment = [
+      'Body weight',
+      'Dumbbell',
+      'Barbell',
+      'Band',
+      'Cable',
+      'Smith machine'
+    ];
 
-        final builder = (BuildContext builderContext) => StatefulBuilder(
+    final builder = (BuildContext builderContext) => StatefulBuilder(
           builder: (context, setModalState) {
             // Helper to remove an active filter via chip
             void removeFilter(String type, String value) {
@@ -1312,310 +1435,309 @@ class _HomePageState extends State<HomePage> {
               child: Container(
                 width: isWide ? 600 : double.infinity,
                 decoration: BoxDecoration(
-                  color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                  borderRadius: isWide 
+                  color: widget.isDarkMode
+                      ? const Color(0xFF1E1E1E)
+                      : Colors.white,
+                  borderRadius: isWide
                       ? BorderRadius.circular(24)
                       : const BorderRadius.vertical(top: Radius.circular(24)),
                 ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                    children: [
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Active Filters Summary
+                    if (activeFilterChips.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ACTIVE FILTERS',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: widget.isDarkMode
+                                    ? Colors.white54
+                                    : Colors.grey.shade600,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: activeFilterChips,
+                            ),
+                            const SizedBox(height: 16),
+                            const Divider(height: 1),
+                          ],
+                        ),
+                      ),
 
-                      // Active Filters Summary
-                      if (activeFilterChips.isNotEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                          child: Column(
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        children: [
+                          const SizedBox(height: 24),
+                          // Inlined Favorite Filter
+                          Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'ACTIVE FILTERS',
+                                'FAVORITE',
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                   color: widget.isDarkMode
-                                      ? Colors.white54
-                                      : Colors.grey.shade600,
-                                  letterSpacing: 1.0,
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                  letterSpacing: 1.2,
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: activeFilterChips,
+                              const SizedBox(height: 12),
+                              _buildToggleChip(
+                                label: 'Show Favorites Only',
+                                isSelected: localFilterFavorites,
+                                isDark: widget.isDarkMode,
+                                onTap: () {
+                                  final user =
+                                      Supabase.instance.client.auth.currentUser;
+                                  if (user == null) {
+                                    AuthModal.show(context);
+                                    return;
+                                  }
+                                  setModalState(() {
+                                    localFilterFavorites =
+                                        !localFilterFavorites;
+                                  });
+                                },
                               ),
-                              const SizedBox(height: 16),
-                              const Divider(height: 1),
                             ],
                           ),
-                        ),
+                          const SizedBox(height: 24),
 
-                      Flexible(
-                        child: ListView(
-                          shrinkWrap: true,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          children: [
-                            const SizedBox(height: 24),
-                            // Inlined Favorite Filter
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'FAVORITE',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: widget.isDarkMode
-                                        ? Colors.white70
-                                        : Colors.black54,
-                                    letterSpacing: 1.2,
-                                  ),
+                          _buildFilterSection(
+                              'DIFFICULTY',
+                              ['Beginner', 'Intermediate', 'Advanced'],
+                              localDifficulties,
+                              setModalState),
+                          const SizedBox(height: 24),
+
+                          _buildFilterSection(
+                              'WORKOUT TYPE',
+                              ['Strength', 'Stretching', 'Cardio'],
+                              localWorkoutTypes,
+                              setModalState),
+                          const SizedBox(height: 24),
+
+                          // Collapsible Equipment Section
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'EQUIPMENT',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: widget.isDarkMode
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                  letterSpacing: 1.2,
                                 ),
-                                const SizedBox(height: 12),
-                                _buildToggleChip(
-                                  label: 'Show Favorites Only',
-                                  isSelected: localFilterFavorites,
-                                  isDark: widget.isDarkMode,
-                                  onTap: () {
-                                    final user = Supabase.instance.client.auth.currentUser;
-                                    if (user == null) {
-                                      AuthModal.show(context);
-                                      return;
-                                    }
-                                    setModalState(() {
-                                      localFilterFavorites =
-                                          !localFilterFavorites;
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-
-                            _buildFilterSection(
-                                'DIFFICULTY',
-                                ['Beginner', 'Intermediate', 'Advanced'],
-                                localDifficulties,
-                                setModalState),
-                            const SizedBox(height: 24),
-
-                            _buildFilterSection(
-                                'WORKOUT TYPE',
-                                ['Strength', 'Stretching', 'Cardio'],
-                                localWorkoutTypes,
-                                setModalState),
-                            const SizedBox(height: 24),
-
-                            // Collapsible Equipment Section
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'EQUIPMENT',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: widget.isDarkMode
-                                        ? Colors.white70
-                                        : Colors.black54,
-                                    letterSpacing: 1.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 12,
-                                  children: [
-                                    // Show either full list or just common ones
-                                    ...(isEquipmentExpanded
-                                            ? [
-                                                // Full list
-                                                'Assisted', 'Band', 'Barbell',
-                                                'Battling Rope', 'Body weight',
-                                                'Bosu ball',
-                                                'Cable',
-                                                'Dumbbell',
-                                                'EZ Barbell',
-                                                'Kettlebell',
-                                                'Leverage machine',
-                                                'Medicine Ball',
-                                                'Olympic barbell',
-                                                'Pilates Machine', 'Power Sled',
-                                                'Resistance Band', 'Roll',
-                                                'Rollball', 'Rope',
-                                                'Sled machine', 'Smith machine',
-                                                'Stability ball', 'Stick',
-                                                'Suspension', 'Trap bar',
-                                                'Vibrate Plate', 'Weighted',
-                                                'Wheel roller',
-                                              ]
-                                            : commonEquipment)
-                                        .map((label) {
-                                      final isSelected =
-                                          localEquipment.contains(label);
-                                      return _buildToggleChip(
-                                        label: label,
-                                        isSelected: isSelected,
-                                        isDark: widget.isDarkMode,
-                                        onTap: () {
-                                          setModalState(() {
-                                            if (isSelected) {
-                                              localEquipment.remove(label);
-                                            } else {
-                                              localEquipment.add(label);
-                                            }
-                                          });
-                                        },
-                                      );
-                                    }).toList(),
-
-                                    // Expand/Collapse Button
-                                    GestureDetector(
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 12,
+                                children: [
+                                  // Show either full list or just common ones
+                                  ...(isEquipmentExpanded
+                                          ? [
+                                              // Full list
+                                              'Assisted', 'Band', 'Barbell',
+                                              'Battling Rope', 'Body weight',
+                                              'Bosu ball',
+                                              'Cable',
+                                              'Dumbbell',
+                                              'EZ Barbell',
+                                              'Kettlebell',
+                                              'Leverage machine',
+                                              'Medicine Ball',
+                                              'Olympic barbell',
+                                              'Pilates Machine', 'Power Sled',
+                                              'Resistance Band', 'Roll',
+                                              'Rollball', 'Rope',
+                                              'Sled machine', 'Smith machine',
+                                              'Stability ball', 'Stick',
+                                              'Suspension', 'Trap bar',
+                                              'Vibrate Plate', 'Weighted',
+                                              'Wheel roller',
+                                            ]
+                                          : commonEquipment)
+                                      .map((label) {
+                                    final isSelected =
+                                        localEquipment.contains(label);
+                                    return _buildToggleChip(
+                                      label: label,
+                                      isSelected: isSelected,
+                                      isDark: widget.isDarkMode,
                                       onTap: () {
                                         setModalState(() {
-                                          isEquipmentExpanded =
-                                              !isEquipmentExpanded;
+                                          if (isSelected) {
+                                            localEquipment.remove(label);
+                                          } else {
+                                            localEquipment.add(label);
+                                          }
                                         });
                                       },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 16, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          border: Border.all(
-                                            color: widget.isDarkMode
-                                                ? Colors.white24
-                                                : Colors.grey.shade300,
-                                          ),
-                                          borderRadius:
-                                              BorderRadius.circular(24),
+                                    );
+                                  }).toList(),
+
+                                  // Expand/Collapse Button
+                                  GestureDetector(
+                                    onTap: () {
+                                      setModalState(() {
+                                        isEquipmentExpanded =
+                                            !isEquipmentExpanded;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: widget.isDarkMode
+                                              ? Colors.white24
+                                              : Colors.grey.shade300,
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              isEquipmentExpanded
-                                                  ? 'Show Less'
-                                                  : 'Show All Equipment',
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                color: widget.isDarkMode
-                                                    ? Colors.white70
-                                                    : Colors.black87,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Icon(
-                                              isEquipmentExpanded
-                                                  ? Icons.keyboard_arrow_up
-                                                  : Icons.keyboard_arrow_down,
-                                              size: 16,
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            isEquipmentExpanded
+                                                ? 'Show Less'
+                                                : 'Show All Equipment',
+                                            style: TextStyle(
+                                              fontSize: 14,
                                               color: widget.isDarkMode
                                                   ? Colors.white70
                                                   : Colors.black87,
+                                              fontWeight: FontWeight.w500,
                                             ),
-                                          ],
-                                        ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Icon(
+                                            isEquipmentExpanded
+                                                ? Icons.keyboard_arrow_up
+                                                : Icons.keyboard_arrow_down,
+                                            size: 16,
+                                            color: widget.isDarkMode
+                                                ? Colors.white70
+                                                : Colors.black87,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
 
-                            const SizedBox(height: 100),
-                          ],
-                        ),
+                          const SizedBox(height: 100),
+                        ],
                       ),
+                    ),
 
-                      // Action Bar
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            top: BorderSide(
-                              color: widget.isDarkMode
-                                  ? Colors.white12
-                                  : Colors.black12,
-                              width: 1,
-                            ),
+                    // Action Bar
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white12
+                                : Colors.black12,
+                            width: 1,
                           ),
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              children: [
-                                // Dismiss Button (Secondary)
-                                Expanded(
-                                  flex: 1,
-                                  child: TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: widget.isDarkMode
-                                          ? Colors.white70
-                                          : Colors.black54,
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 16),
-                                    ),
-                                    child: const Text(
-                                      'Dismiss',
-                                      style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                // Apply Button (Primary)
-                                Expanded(
-                                  flex: 2,
-                                  child: ElevatedButton(
-                                    onPressed: () {
-                                      // Apply changes to main state
-                                      setState(() {
-                                        _filterFavorites = localFilterFavorites;
-                                        _selectedDifficulties =
-                                            localDifficulties;
-                                        _selectedWorkoutTypes =
-                                            localWorkoutTypes;
-                                        _selectedEquipment = localEquipment;
-
-                                        // Reset pagination and reload
-                                        _exercises.clear();
-                                        _currentPage = 0;
-                                        _hasMore = true;
-                                      });
-                                      _loadMoreExercises();
-                                      Navigator.pop(context);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFFF0000),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 16),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    child: const Text(
-                                      'Apply Filters',
-                                      style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
                       ),
-                ],
-              ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              // Dismiss Button (Secondary)
+                              Expanded(
+                                flex: 1,
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: widget.isDarkMode
+                                        ? Colors.white70
+                                        : Colors.black54,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                  ),
+                                  child: const Text(
+                                    'Dismiss',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // Apply Button (Primary)
+                              Expanded(
+                                flex: 2,
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    // Apply changes to main state
+                                    setState(() {
+                                      _filterFavorites = localFilterFavorites;
+                                      _selectedDifficulties = localDifficulties;
+                                      _selectedWorkoutTypes = localWorkoutTypes;
+                                      _selectedEquipment = localEquipment;
+
+                                      // Reset pagination and reload
+                                      _exercises.clear();
+                                      _currentPage = 0;
+                                      _hasMore = true;
+                                    });
+                                    _loadMoreExercises();
+                                    Navigator.pop(context);
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFF0000),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Apply Filters',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
             if (isWide) {
@@ -1626,7 +1748,8 @@ class _HomePageState extends State<HomePage> {
               );
             } else {
               return Padding(
-                padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).viewInsets.bottom),
                 child: content,
               );
             }
@@ -1911,11 +2034,11 @@ class ExerciseDetail {
       instructions = ['Follow the video demonstration.'];
     }
 
-      // Use 'id' when available; fall back to exercise_name to avoid the
-      // empty-string collision that makes every item look like a favourite.
-      final rawId = json['id']?.toString() ?? '';
-      final exerciseName = json['exercise_name']?.toString() ?? '';
-      final resolvedId = rawId.isNotEmpty ? rawId : exerciseName;
+    // Use 'id' when available; fall back to exercise_name to avoid the
+    // empty-string collision that makes every item look like a favourite.
+    final rawId = json['id']?.toString() ?? '';
+    final exerciseName = json['exercise_name']?.toString() ?? '';
+    final resolvedId = rawId.isNotEmpty ? rawId : exerciseName;
 
     return ExerciseDetail(
       id: resolvedId,
@@ -2054,7 +2177,8 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     });
 
                     try {
-                      await SupabaseService().toggleFavorite(widget.exercise.name, _isFavorite);
+                      await SupabaseService()
+                          .toggleFavorite(widget.exercise.name, _isFavorite);
                     } catch (e) {
                       debugPrint('Error saving favorite: $e');
                     }
@@ -2276,39 +2400,61 @@ class VideoPlayerWidget extends StatefulWidget {
 }
 
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _isInitialized = false;
+  bool _hasError = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
+    _loadFromCache();
+  }
+
+  Future<void> _loadFromCache() async {
+    // Fast path: already cached.
+    if (VideoCacheService.instance.isReady(widget.videoUrl)) {
+      final cached =
+          await VideoCacheService.instance.getController(widget.videoUrl);
+      if (mounted && cached != null) {
         setState(() {
+          _controller = cached;
           _isInitialized = true;
         });
-        _controller.setLooping(true);
-        _controller.setVolume(0.0); // Mute for autoplay
-        _controller.play();
-      });
+      }
+      return;
+    }
+
+    // Slow path: first fetch (only once per URL per session).
+    final controller =
+        await VideoCacheService.instance.getController(widget.videoUrl);
+    if (!mounted) return;
+    setState(() {
+      _controller = controller;
+      _isInitialized = controller != null;
+      _hasError = controller == null;
+    });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    // ⚠️  Do NOT dispose — VideoCacheService owns the controller lifetime.
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isInitialized) {
-      return AspectRatio(
-        aspectRatio: _controller.value.aspectRatio,
-        child: VideoPlayer(_controller),
+    if (_hasError) {
+      return const Center(
+        child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
       );
-    } else {
-      return const Center(child: CircularProgressIndicator());
     }
+    if (_isInitialized && _controller != null) {
+      return AspectRatio(
+        aspectRatio: _controller!.value.aspectRatio,
+        child: VideoPlayer(_controller!),
+      );
+    }
+    return const Center(child: CircularProgressIndicator());
   }
 }
 
@@ -2344,7 +2490,7 @@ class MuscleMap extends StatelessWidget {
             'thighs',
             'obliques',
             'traps',
-            'forarms',
+            'forearms',
             'neck'
           ]
         : [
@@ -2353,7 +2499,7 @@ class MuscleMap extends StatelessWidget {
             'traps',
             'shoulders',
             'triceps',
-            'forarms',
+            'forearms',
             'hipsandglutes',
             'hamstrings',
             'calves'
@@ -2415,14 +2561,14 @@ class MuscleMap extends StatelessWidget {
                 height: 0.12,
                 label: 'Bic'), // Right
             MuscleRegion(
-                id: 'forarms',
+                id: 'forearms',
                 left: 0.06,
                 top: 0.40,
                 width: 0.18,
                 height: 0.18,
                 label: 'Farm'), // Left
             MuscleRegion(
-                id: 'forarms',
+                id: 'forearms',
                 left: 0.76,
                 top: 0.40,
                 width: 0.18,
@@ -2508,14 +2654,14 @@ class MuscleMap extends StatelessWidget {
                 height: 0.12,
                 label: 'Tri'),
             MuscleRegion(
-                id: 'forarms',
+                id: 'forearms',
                 left: 0.06,
                 top: 0.40,
                 width: 0.18,
                 height: 0.18,
                 label: 'Farm'),
             MuscleRegion(
-                id: 'forarms',
+                id: 'forearms',
                 left: 0.76,
                 top: 0.40,
                 width: 0.18,

@@ -436,27 +436,15 @@ class SupabaseService {
     if (trainingLocation != null) upsertData['training_location'] = trainingLocation;
     if (gender != null) upsertData['gender'] = gender;
     if (trainingDays != null) upsertData['training_days'] = trainingDays;
+    // Physical stats — included in the SAME upsert so they are never skipped
+    if (height != null) upsertData['height_cm'] = height;
+    if (weight != null) upsertData['weight_kg'] = weight;
+    if (age != null) upsertData['age'] = age;
+    if (targetWeight != null) upsertData['target_weight_kg'] = targetWeight;
 
-    // Save core preferences (always available columns).
+    // Single atomic upsert — all fields together
     await _client.from('user_preferences').upsert(upsertData, onConflict: 'user_id');
-    print('DEBUG: user_preferences saved successfully.');
-
-    // Save physical stats in a separate call — these columns require the
-    // SQL migration to have been run first.  If they don't exist yet the app
-    // continues working and just skips this part silently.
-    try {
-      final statsData = <String, dynamic>{'user_id': user.id};
-      if (height != null) statsData['height_cm'] = height;
-      if (weight != null) statsData['weight_kg'] = weight;
-      if (age != null) statsData['age'] = age;
-      if (targetWeight != null) statsData['target_weight_kg'] = targetWeight;
-      if (statsData.length > 1) {
-        await _client.from('user_preferences').upsert(statsData, onConflict: 'user_id');
-        print('DEBUG: Physical stats saved successfully.');
-      }
-    } catch (e) {
-      print('DEBUG: Physical stats columns not yet available — run supabase_migration.sql. ($e)');
-    }
+    print('DEBUG: user_preferences saved successfully (single upsert).');
   }
 
   // ---------------------------------------------------------------

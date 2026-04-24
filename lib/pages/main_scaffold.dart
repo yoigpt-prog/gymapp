@@ -23,6 +23,7 @@ import 'calculators/one_rm_calculator_page.dart';
 import '../widgets/auth/auth_modal.dart'; // Import AuthModal
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
+import '../services/subscription_state.dart';
 
 class MainScaffold extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -156,9 +157,12 @@ class MainScaffoldState extends State<MainScaffold> {
         if (event == AuthChangeEvent.signedOut) {
           // LOGOUT: clear all identity and flags
           AnalyticsService().reset();
+          SubscriptionState().reset();
           SharedPreferences.getInstance().then((prefs) {
             prefs.remove('has_workout_plan');
             prefs.remove('has_meal_plan');
+            prefs.remove('plan_duration');
+            prefs.remove('duration_weeks_int');
           });
           setState(() => _currentIndex = 0);
           _workoutKey.currentState?.refresh(force: true);
@@ -172,6 +176,8 @@ class MainScaffoldState extends State<MainScaffold> {
           AnalyticsService().identifyUser(session.user.id);
           // Step 2: App Open - fires once per cold start, deduplicated by flag
           AnalyticsService().trackAppOpen();
+          // Step 3: Refresh subscription status cache
+          SubscriptionState().refresh();
 
           _cancelAuthTimer();
           _workoutKey.currentState?.refresh(force: true);
@@ -179,7 +185,7 @@ class MainScaffoldState extends State<MainScaffold> {
           _progressKey.currentState?.refresh(force: true);
           _profileKey.currentState?.refresh();
 
-          if (_isAuthModalOpen && !AuthModal.isInMultiStep && AuthModal.isVisible) {
+          if (AuthModal.isVisible && !AuthModal.isInMultiStep) {
             AuthModal.isVisible = false;
             Navigator.of(context, rootNavigator: true).pop();
             _isAuthModalOpen = false;
@@ -368,38 +374,10 @@ class MainScaffoldState extends State<MainScaffold> {
     if (index == 1 || index == 2) {
       final prefs = await SharedPreferences.getInstance();
 
-      // ── Subscription gate (returning users) ─────────────────────────────────
-      // Only activate after the quiz has been completed once.
-      // First-time users go through the quiz which handles its own paywall.
-      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
-      if (hasCompletedQuiz && !kIsWeb) {
-        final isPro = await RevenueCatService().isProUser();
-        if (!isPro && mounted) {
-          debugPrint('[MainScaffold] Not subscribed — showing paywall gate for tab $index.');
-          // Track paywall view before showing it
-          AnalyticsService().trackPaywallViewed(source: index == 1 ? 'workout_tab' : 'meal_tab');
-          final result = await RevenueCatService().showPaywall();
-          final didSubscribe =
-              result == PaywallResult.purchased || result == PaywallResult.restored;
-          if (didSubscribe && result == PaywallResult.purchased) {
-            // Track successful purchase (not restore)
-            final customerInfo = await RevenueCatService().getCustomerInfo();
-            String planId = 'unknown';
-            if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
-              planId = customerInfo.entitlements.active['premium']!.productIdentifier;
-            }
-            AnalyticsService().trackPurchaseSuccess(plan: planId);
-          }
-          if (!didSubscribe) {
-            // Hard gate: cancel/dismiss → redirect to Home.
-            debugPrint('[MainScaffold] Paywall dismissed — redirecting to Home.');
-            if (mounted) setState(() => _currentIndex = 0);
-            return;
-          }
-          debugPrint('[MainScaffold] Subscription confirmed — continuing to tab $index.');
-        }
-      }
-      // ────────────────────────────────────────────────────────────────────────
+      // ── Apple-compliant: NO hard subscription gate here ───────────────────
+      // Users can always enter Workout and Meal tabs.
+      // Subscription promotion is handled by in-page banners and soft locks.
+      // ─────────────────────────────────────────────────────────────────────
 
       bool hasWorkoutPlan = prefs.getBool('has_workout_plan') ?? false;
       bool hasMealPlan = prefs.getBool('has_meal_plan') ?? false;
@@ -460,6 +438,14 @@ class MainScaffoldState extends State<MainScaffold> {
       setState(() => _currentIndex = index);
       _trackCurrentScreen();
     }
+  }
+
+  /// Refreshes all content pages (called after quiz completion or login).
+  void refreshAllPages() {
+    _workoutKey.currentState?.refresh(force: true);
+    _mealPlanKey.currentState?.refresh();
+    _progressKey.currentState?.refresh(force: true);
+    _profileKey.currentState?.refresh();
   }
 
   @override

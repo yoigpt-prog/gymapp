@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' show pi, cos, sin;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -63,8 +62,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   // Progress & State
   double progressPercent = 0;
   String progressStatus = 'Initializing...';
+  bool _isLoadingOfferings = true;
+  bool _hasOfferings = false;
   int currentStep = 1;
   String selectedPlan = 'weekly';
+  double _targetWeightDragAccum = 0; // persistent drag state for ruler
   // Trial toggle removed
 
   // Intro progress animation state
@@ -117,6 +119,18 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       weightUnit = 'kg';
       targetWeightUnit = 'kg';
     }
+    
+    _checkOfferings();
+  }
+
+  Future<void> _checkOfferings() async {
+    final ready = await RevenueCatService().checkOfferingsReady();
+    if (mounted) {
+      setState(() {
+        _hasOfferings = ready;
+        _isLoadingOfferings = false;
+      });
+    }
   }
 
   @override
@@ -159,53 +173,39 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       return true;
     }
 
+    AnalyticsService().trackPaywallViewed(source: 'quiz_completion');
+
     try {
-      AnalyticsService().trackPaywallViewed(source: 'quiz_completion');
-      
+      // Go straight to RevenueCatUI — it handles store errors natively.
+      // We deliberately DO NOT pre-check offerings here; the old pre-check
+      // caused "Store Unavailable" dialogs in Apple's sandbox during review.
       final result = await RevenueCatService().showPaywall();
       debugPrint('[RevenueCat] Paywall result: $result');
 
-      if (result == null) {
-        // Store unavailable (emulator / billing not configured).
-        // Do NOT bypass — treat as cancelled so the user cannot access plans.
-        debugPrint('[RevenueCat] Store unavailable — denying access.');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Subscription required. Please try again later.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
+      if (result == null || result == PaywallResult.cancelled) {
+        // User dismissed or store failed silently — stay on free tier.
+        debugPrint('[RevenueCat] Paywall dismissed or unavailable — freemium access only.');
         return false;
       }
 
       // Track successful purchase
       if (result == PaywallResult.purchased) {
-          final customerInfo = await RevenueCatService().getCustomerInfo();
-          String planId = 'unknown';
-          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
-             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
-          }
-          AnalyticsService().trackPurchaseSuccess(plan: planId);
+        final customerInfo = await RevenueCatService().getCustomerInfo();
+        String planId = 'unknown';
+        if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
+          planId = customerInfo.entitlements.active['premium']!.productIdentifier;
+        }
+        AnalyticsService().trackPurchaseSuccess(plan: planId);
       }
 
       // Only grant access on explicit purchase or restore.
       return result == PaywallResult.purchased || result == PaywallResult.restored;
     } catch (e) {
       debugPrint('[RevenueCat] presentPaywall error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment error: ${e.toString()}'),
-            backgroundColor: Colors.red.shade700,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
       return false;
     }
   }
+
 
   Future<void> _startRealGenerationFlow() async {
     if (_isGenerating) return;
@@ -214,6 +214,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       _isIntroProgress = true;
       _introComplete = false;
     });
+
+    final stopwatch = Stopwatch()..start();
 
     final supabaseService = SupabaseService();
     final prefs = await SharedPreferences.getInstance();
@@ -240,7 +242,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Preparing your preferences...';
+        progressStatus = 'Analyzing your body & goals...';
         progressPercent = 15;
         currentStep = 1;
       });
@@ -256,6 +258,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           durationWeeks = val <= 52 ? val : (val / 7).round();
         }
       }
+      // Save integer immediately — WorkoutPage/_MealPlanPage read this on refresh.
+      // This is the FASTEST and most reliable path; no regex, no Supabase round-trip.
+      await prefs.setInt('duration_weeks_int', durationWeeks);
       double? hNum;
       if (heightUnit == 'ft') {
         final ftMatch = RegExp(r'(\d+)ft').firstMatch(height);
@@ -297,7 +302,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Organizing workouts...';
+        progressStatus = 'Designing your workout plan...';
         progressPercent = 45;
         currentStep = 2;
       });
@@ -312,7 +317,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (!mounted) return;
       setState(() {
-        progressStatus = 'Creating your schedule...';
+        progressStatus = 'Generating your meal plan...';
         progressPercent = 80;
         currentStep = 3;
       });
@@ -327,6 +332,9 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       await prefs.setBool('has_workout_plan', true);
       await prefs.setBool('has_meal_plan', true);
       await prefs.setString('plan_duration', planDuration);
+      // Redundant safety write — ensures the integer is always present
+      // even if the earlier write was skipped due to an early error.
+      await prefs.setInt('duration_weeks_int', durationWeeks);
       await prefs.setString('weight_unit', weightUnit);
       await prefs.setString('height_unit', heightUnit);
       // Mark quiz as completed so subscription guards activate on later visits.
@@ -339,12 +347,24 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       if (mounted) {
         AnalyticsService().trackQuizCompleted();
-        setState(() {
-          progressPercent = 100;
-          progressStatus = 'Setup complete!';
-          _introComplete = true; // Important: Make the button appear
-          _isGenerating = false;
-        });
+        final elapsed = stopwatch.elapsedMilliseconds;
+        if (elapsed < 7000) {
+          setState(() {
+            progressStatus = 'Optimizing for fastest results...';
+            progressPercent = 95;
+            currentStep = 4;
+          });
+          await Future.delayed(Duration(milliseconds: 7000 - elapsed));
+        }
+        if (mounted) {
+          setState(() {
+            progressPercent = 100;
+            progressStatus = 'Building Your Personalized Plan...';
+            _introComplete = true; // Important: Make the button appear
+            _isGenerating = false;
+            currentStep = 5;
+          });
+        }
       }
     } catch (e) {
       print('ERROR in plan generation: $e');
@@ -353,6 +373,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         setState(() {
           _isGenerating = false;
           _introComplete = true; // Let them hit the button anyway
+          currentStep = 5; // force completion to let UI unlock visually
+          progressPercent = 100;
         });
       }
     }
@@ -449,248 +471,375 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenHeight = constraints.maxHeight;
-        final isVerySmallScreen = screenHeight < 550;
-        final isSmallScreen = screenHeight < 700;
-        
-        // Responsive sizing based on screen height
-        final double imageHeight = isVerySmallScreen 
-            ? screenHeight * 0.45 
-            : (isSmallScreen ? screenHeight * 0.50 : screenHeight * 0.55);
-        final double titleSize = isVerySmallScreen ? 18 : (isSmallScreen ? 22 : 26);
-        final double subtitleSize = isVerySmallScreen ? 12 : (isSmallScreen ? 13 : 14);
-        final double badgeSize = isVerySmallScreen ? 12 : (isSmallScreen ? 14 : 16);
-        final double buttonSize = isVerySmallScreen ? 14 : (isSmallScreen ? 15 : 16);
-        final double verticalPadding = isVerySmallScreen ? 4 : (isSmallScreen ? 6 : 10);
-        final double spacing = isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 12);
-        final double smallSpacing = isVerySmallScreen ? 2 : (isSmallScreen ? 4 : 6);
-        
-        return SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight,
-            ),
-            child: Container(
+        final screenWidth  = constraints.maxWidth;
+        final isVerySmall  = screenHeight < 550;
+        final isTablet     = screenWidth  > 600;
+        final hPad         = isTablet ? 28.0 : 20.0;
+        final contentW     = isTablet ? 420.0 : screenWidth;
+        final heroH        = (screenHeight * 0.40).clamp(160.0, 280.0);
+
+        return Stack(
+          children: [
+            // ── Dark background ──────────────────────────────────────────────
+            Container(
               width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFFF0000), Color(0xFFCC0000)],
+              height: double.infinity,
+              color: const Color(0xFF0D0608),
+            ),
+            // ── Red radial glow — top right ──────────────────────────────────
+            Positioned(
+              top: -screenHeight * 0.12,
+              right: isTablet ? (screenWidth - contentW) / 2 - contentW * 0.25 : -screenWidth * 0.28,
+              child: IgnorePointer(
+                child: Container(
+                  width: contentW * 1.15,
+                  height: screenHeight * 0.62,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        Color(0xA8B5061C),
+                        Color(0x45B5061C),
+                        Colors.transparent,
+                      ],
+                      stops: [0.0, 0.42, 1.0],
+                      radius: 0.55,
+                    ),
+                  ),
                 ),
-                borderRadius: BorderRadius.circular(20),
               ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Decorative circles
-                  Positioned(
-                    top: -100,
-                    right: -100,
-                    child: Container(
-                      width: 300,
-                      height: 300,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: -50,
-                    left: -50,
-                    child: Container(
-                      width: 200,
-                      height: 200,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                  
-                  // Content
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: verticalPadding),
+            ),
+
+            // ── Content ──────────────────────────────────────────────────────
+            Positioned.fill(
+              child: Center(
+                child: SizedBox(
+                  width: contentW,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 12),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
+                        SizedBox(height: isVerySmall ? 0 : 8),
+
+                        // Top badges
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.38),
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(color: Colors.white.withOpacity(0.18)),
+                              ),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                const Text('🏆', style: TextStyle(fontSize: 11)),
+                                const SizedBox(width: 5),
+                                Text('Built for Real Results',
+                                  style: TextStyle(
+                                    fontSize: isTablet ? 11 : 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  )),
+                              ]),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.38),
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(color: Colors.white.withOpacity(0.18)),
+                              ),
+                              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                Image.asset('assets/rating4.9.png',
+                                  height: isTablet ? 18 : 15, fit: BoxFit.contain),
+                                const SizedBox(height: 2),
+                                Text('4.9 Rating',
+                                  style: TextStyle(
+                                    fontSize: isTablet ? 10 : 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  )),
+                              ]),
+                            ),
+                          ],
+                        ),
+
+                        // Hero image
+                        Expanded(
                           child: Image.asset(
                             'assets/quizimg.png',
-                            height: imageHeight,
                             fit: BoxFit.contain,
+                            alignment: Alignment.bottomCenter,
                           ),
                         ),
-                        SizedBox(height: smallSpacing),
+
+                        const SizedBox(height: 12),
+
+                        // Headline
                         Text(
-                          'Start Your Program Now.',
+                          'Build Your Dream Body',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            fontSize: titleSize,
-                            fontWeight: FontWeight.w800,
+                            fontSize: isTablet ? 32 : (isVerySmall ? 22 : 26),
+                            fontWeight: FontWeight.w900,
                             color: Colors.white,
-                            shadows: [
-                              Shadow(
-                                offset: Offset(0, 2),
-                                blurRadius: 10,
-                                color: Colors.black26,
-                              ),
-                            ],
+                            height: 1.1,
+                            letterSpacing: -0.5,
                           ),
                         ),
-                        SizedBox(height: smallSpacing),
+                        SizedBox(height: isVerySmall ? 4 : 6),
                         Text(
-                          'A simple, flexible plan to help you move better, eat smarter, and stay consistent.',
+                          'A personalized plan built just for\nyour body & goals',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            fontSize: subtitleSize,
-                            color: Colors.white,
-                            height: 1.4,
+                            fontSize: isTablet ? 14 : 12.5,
+                            color: Colors.white.withOpacity(0.58),
+                            height: 1.5,
                           ),
                         ),
-                        SizedBox(height: spacing),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: isVerySmallScreen ? 12 : 16,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Image.asset('assets/svg/mealsicons/iconfire.png', width: badgeSize + 6, height: badgeSize + 6),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Effective workouts',
-                                    style: TextStyle(
-                                      fontSize: badgeSize,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Image.asset('assets/svg/mealsicons/iconmeal.png', width: badgeSize + 6, height: badgeSize + 6),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Flexible meal ideas',
-                                    style: TextStyle(
-                                      fontSize: badgeSize,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Image.asset('assets/svg/mealsicons/iconprogress.png', width: badgeSize + 6, height: badgeSize + 6),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Easy progress tracking',
-                                    style: TextStyle(
-                                      fontSize: badgeSize,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+
+                        const SizedBox(height: 16),
+
+                        // Features row (3 columns)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _quizFeatureColumnDark('🔥', 'Personalized Workouts', isLast: false)),
+                            const SizedBox(width: 8),
+                            Expanded(child: _quizFeatureColumnDark('🥗', 'Smart Meal Plans', isLast: false)),
+                            const SizedBox(width: 8),
+                            Expanded(child: _quizFeatureColumnDark('📊', 'Track Your Progress', isLast: true)),
+                          ],
                         ),
-                        SizedBox(height: spacing),
+
+                        const SizedBox(height: 16),
+
+                        // CTA + footer
                         SizedBox(
                           width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              final supabaseService = SupabaseService();
-                              var user = supabaseService.client.auth.currentUser;
-                              bool justSignedIn = false;
-                              if (user == null) {
-                                await AuthModal.show(context);
-                                user = supabaseService.client.auth.currentUser;
-                                if (user == null) return; // still not signed in
-                                justSignedIn = true;
-                              }
-                              
-                              if (justSignedIn) {
-                                // Double check if this existing user already has a profile!
-                                try {
-                                  final response = await supabaseService.client
-                                      .from('user_preferences')
-                                      .select('user_id')
-                                      .eq('user_id', user.id)
-                                      .maybeSingle();
-                                      
-                                  if (response != null && mounted) {
-                                    // They ALREADY have a profile/plan. Close the quiz and load it!
-                                    // the MainScaffold auth listener will handle refreshing the UI.
-                                    Navigator.pop(context, {'completed': true, 'navIndex': widget.quizType == 'workout' ? 1 : 2});
-                                    return;
-                                  }
-                                } catch (_) {}
-                              }
-                              
-                              AnalyticsService().trackQuizStarted();
-                              nextScreen(1);
-                            },
-                            style: ElevatedButton.styleFrom(
-                              foregroundColor: const Color(0xFFFF0000),
-                              padding: EdgeInsets.symmetric(
-                                vertical: isVerySmallScreen ? 14 : 18,
+                          height: isVerySmall ? 52 : 58,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFFF1E40), Color(0xFFC8061B)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(50),
-                              ),
-                              elevation: 10,
+                              borderRadius: BorderRadius.circular(50),
+                              border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFFF1E40).withOpacity(0.45),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
                             ),
-                            child: Text(
-                              "GET STARTED",
-                              style: TextStyle(
-                                fontSize: buttonSize,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                final supabaseService = SupabaseService();
+                                var user = supabaseService.client.auth.currentUser;
+                                bool justSignedIn = false;
+                                if (user == null) {
+                                  await AuthModal.show(context);
+                                  user = supabaseService.client.auth.currentUser;
+                                  if (user == null) return;
+                                  justSignedIn = true;
+                                }
+                                if (justSignedIn) {
+                                  try {
+                                    final response = await supabaseService.client
+                                        .from('user_preferences')
+                                        .select('user_id')
+                                        .eq('user_id', user.id)
+                                        .maybeSingle();
+                                    if (response != null && mounted) {
+                                      Navigator.pop(context, {
+                                        'completed': true,
+                                        'navIndex': widget.quizType == 'workout' ? 1 : 2,
+                                      });
+                                      return;
+                                    }
+                                  } catch (_) {}
+                                }
+                                AnalyticsService().trackQuizStarted();
+                                nextScreen(1);
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.transparent,
+                                shadowColor: Colors.transparent,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(50),
+                                ),
+                                elevation: 0,
                               ),
+                              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                const Text(
+                                  'GET MY PLAN',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Container(
+                                  width: 28, height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.25),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.arrow_forward_rounded,
+                                    color: Colors.white, size: 16),
+                                ),
+                              ]),
                             ),
                           ),
                         ),
-                        SizedBox(height: spacing),
-                        Text(
-                          'No strict rules. No pressure.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: subtitleSize,
-                            color: Colors.white.withOpacity(0.8),
-                          ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 72,
+                              height: 34,
+                              child: Stack(
+                                children: [
+                                  Positioned(left: 0, child: _quizAvatar('assets/avatar1.png', 34)),
+                                  Positioned(left: 20, child: _quizAvatar('assets/avatar2.png', 34)),
+                                  Positioned(left: 40, child: _quizAvatar('assets/avatar3.png', 34)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Join 12,000+ users',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                Text(
+                                  'already transforming their bodies',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
+                        SizedBox(height: isVerySmall ? 8 : 12),
                       ],
                     ),
                   ),
-                ],
+                ),
               ),
             ),
-          ),
+          ],
         );
       },
     );
   }
 
-  // --- Helper Widgets & Animations ---
+  Widget _quizFeatureColumnDark(String emoji, String title, {required bool isLast}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.10), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.20),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: Text(emoji, style: const TextStyle(fontSize: 14)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                title.replaceFirst(' ', '\n'), // Max 2 lines
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quizFeatureRow(String emoji, String title, String sub, bool compact, bool isTablet) {
+    return Row(children: [
+      Container(
+        width: compact ? 34 : 40, height: compact ? 34 : 40,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.18),
+          borderRadius: BorderRadius.circular(10)),
+        child: Center(child: Text(emoji, style: TextStyle(fontSize: compact ? 16 : 18))),
+      ),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: TextStyle(fontSize: isTablet ? 14 : 12.5,
+          fontWeight: FontWeight.w700, color: Colors.white)),
+        const SizedBox(height: 1),
+        Text(sub, style: TextStyle(fontSize: isTablet ? 11.5 : 10.5,
+          color: Colors.white.withOpacity(0.65))),
+      ])),
+      Container(
+        width: 20, height: 20,
+        decoration: BoxDecoration(color: Colors.white.withOpacity(0.20), shape: BoxShape.circle),
+        child: const Icon(Icons.check_rounded, color: Colors.white, size: 12),
+      ),
+    ]);
+  }
+
+  Widget _quizAvatar(String asset, double size) {
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFCC0A16), width: 2),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4)],
+      ),
+      child: ClipOval(child: Image.asset(asset, fit: BoxFit.cover)),
+    );
+  }
+
+    // --- Helper Widgets & Animations ---
 
   Widget _buildAnimatedWidget({
     required Widget child,
@@ -765,73 +914,86 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required VoidCallback onContinue,
     required bool isDarkMode,
   }) {
-    return Column(
-      children: [
-        _buildProgressBar(questionNumber),
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: isDarkMode ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildAnimatedWidget(
-                  delay: 100,
-                  slideUp: false,
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                      height: 1.3,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        final isVerySmall = h < 500;
+        final isSmall = h < 650;
+        final double titleFontSize = isVerySmall ? 13 : (isSmall ? 14.5 : 16);
+        final double subtitleFontSize = isVerySmall ? 11.5 : (isSmall ? 12.5 : 14);
+        final double innerPad = isVerySmall ? 12 : (isSmall ? 14 : 20);
+        final double titleSubGap = isVerySmall ? 4 : 8;
+        final double contentGap = isVerySmall ? 6 : 12;
+
+        return Column(
+          children: [
+            _buildProgressBar(questionNumber),
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(innerPad),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDarkMode ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
                     ),
-                  ),
+                  ],
                 ),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 8),
-                  _buildAnimatedWidget(
-                    delay: 150,
-                    slideUp: false,
-                    child: Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
-                        height: 1.4,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildAnimatedWidget(
+                      delay: 100,
+                      slideUp: false,
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.w600,
+                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                          height: 1.3,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                Expanded(
-                  child: content,
+                    if (subtitle != null) ...[
+                      SizedBox(height: titleSubGap),
+                      _buildAnimatedWidget(
+                        delay: 150,
+                        slideUp: false,
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: subtitleFontSize,
+                            color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: contentGap),
+                    Expanded(
+                      child: content,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildContinueButton(VoidCallback onPressed, {bool enabled = true, String text = 'CONTINUE'}) {
+  Widget _buildContinueButton(VoidCallback onPressed, {bool enabled = true, String text = 'CONTINUE', double topMargin = 15, double verticalPad = 14}) {
     return _buildAnimatedWidget(
       delay: 600,
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.only(top: 15),
+        margin: EdgeInsets.only(top: topMargin),
         child: ElevatedButton(
           onPressed: enabled ? onPressed : null,
           style: ElevatedButton.styleFrom(
@@ -839,7 +1001,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
             foregroundColor: Colors.white,
             disabledBackgroundColor: Colors.grey.shade400,
             disabledForegroundColor: Colors.white70,
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            padding: EdgeInsets.symmetric(vertical: verticalPad),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(50),
             ),
@@ -872,14 +1034,28 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required int index,
     required bool isDarkMode,
     bool isRadio = true,
+    String? iconPath,
+    String? trailingText,
+    double fontSize = 14,
+    double verticalPadding = 12,
+    double bottomMargin = 8,
+    bool isGrid = false,
   }) {
+    final double hPad = isGrid ? 8 : 14;
+    final double gap1 = isGrid ? 6 : 10;
+    final double gap2 = isGrid ? 4 : 8;
+    // Icon size is proportional to the option height (verticalPadding * 2 + fontSize) so it never overflows
+    final double iconSize = isGrid
+        ? (fontSize + 8).clamp(20.0, 32.0)
+        : (verticalPadding * 1.6 + fontSize * 0.5).clamp(20.0, 34.0);
+
     return _buildAnimatedWidget(
       delay: 100 + (index * 50),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          margin: EdgeInsets.only(bottom: bottomMargin),
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: verticalPadding),
           decoration: BoxDecoration(
             color: isSelected 
                 ? (isDarkMode ? const Color(0xFF8B0000) : const Color(0xFFFFE5E5))
@@ -892,32 +1068,62 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           ),
           child: Row(
             children: [
-              Container(
+              SizedBox(
                 width: 20,
                 height: 20,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-                  border: Border.all(
-                    color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
-                    width: 2,
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
+                    border: Border.all(
+                      color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
+                      width: 2,
+                    ),
                   ),
+                  child: isSelected
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
                 ),
-                child: isSelected
-                    ? const Icon(Icons.check, size: 14, color: Colors.white)
-                    : null,
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: gap1),
               Expanded(
-                child: Text(
-                  text,
+                child: isGrid 
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          text,
+                          style: TextStyle(
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w500,
+                            color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                          ),
+                        ),
+                      )
+                    : Text(
+                        text,
+                        style: TextStyle(
+                          fontSize: fontSize,
+                          fontWeight: FontWeight.w500,
+                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                        ),
+                      ),
+              ),
+              if (trailingText != null) ...[
+                SizedBox(width: gap1),
+                Text(
+                  trailingText,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: fontSize,
                     fontWeight: FontWeight.w500,
-                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                    color: isDarkMode ? Colors.white70 : const Color(0xFF444444),
                   ),
                 ),
-              ),
+              ],
+              if (iconPath != null) ...[
+                SizedBox(width: gap2),
+                Image.asset(iconPath, width: iconSize, height: iconSize),
+              ],
             ],
           ),
         ),
@@ -991,33 +1197,79 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required String selectedValue,
     required ValueChanged<String> onSelect,
     required bool isDarkMode,
+    Map<String, String> optionIcons = const {},
+    Map<String, String> optionSubtitles = const {},
   }) {
     final bool hasSelection = selectedValue.isNotEmpty;
-    return _buildQuestionScreen(
-      questionNumber: questionNumber,
-      title: title,
-      subtitle: subtitle,
-      onContinue: hasSelection ? () => nextScreen(questionNumber + 1) : () {},
-      isDarkMode: isDarkMode,
-      content: ListView.builder(
-        itemCount: options.length + 1, // +1 for continue button
-        itemBuilder: (context, index) {
-          if (index == options.length) {
-            return _buildContinueButton(
-              () => nextScreen(questionNumber + 1),
-              enabled: hasSelection,
-            );
-          }
-          final option = options[index];
-          return _buildOption(
-            text: option,
-            isSelected: selectedValue == option,
-            onTap: () => onSelect(option),
-            index: index,
-            isDarkMode: isDarkMode,
-          );
-        },
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        final isVerySmall = h < 500;
+        final isSmall = h < 650;
+        final int count = options.length;
+        // Extra tightening for 7+ options to prevent overflow
+        final double tightFactor = count >= 7 ? 3.4 : (count >= 5 ? 3.0 : 2.8);
+        final double marginFactor = count >= 7 ? 8.0 : (count >= 5 ? 7.0 : 6.0);
+        // Compute available space for options: subtract progress bar (~31px) + title block (~60px) + button (~60px) + gaps
+        final headerEst = isVerySmall ? 110.0 : (isSmall ? 130.0 : 155.0);
+        final btnEst = isVerySmall ? 50.0 : 60.0;
+        final availableForOptions = h - headerEst - btnEst;
+        final double optionVPad = (availableForOptions / count / tightFactor).clamp(4.0, 12.0);
+        final double optionMargin = (availableForOptions / count / marginFactor).clamp(2.0, 8.0);
+        final double optionFont = isVerySmall ? 12.0 : (isSmall ? 13.0 : 14.0);
+        final double btnTopMargin = isVerySmall ? 6.0 : (isSmall ? 10.0 : 15.0);
+        final double btnVPad = isVerySmall ? 10.0 : (isSmall ? 12.0 : 14.0);
+
+        return _buildQuestionScreen(
+          questionNumber: questionNumber,
+          title: title,
+          subtitle: subtitle,
+          onContinue: hasSelection ? () => nextScreen(questionNumber + 1) : () {},
+          isDarkMode: isDarkMode,
+          content: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (ctx, innerConstraints) {
+                    return SingleChildScrollView(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: innerConstraints.maxHeight,
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: options.asMap().entries.map((entry) {
+                            final option = entry.value;
+                            return _buildOption(
+                              text: option,
+                              isSelected: selectedValue == option,
+                              onTap: () => onSelect(option),
+                              index: entry.key,
+                              isDarkMode: isDarkMode,
+                              iconPath: optionIcons[option],
+                              trailingText: optionSubtitles[option],
+                              fontSize: optionFont,
+                              verticalPadding: optionVPad,
+                              bottomMargin: optionMargin,
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              _buildContinueButton(
+                () => nextScreen(questionNumber + 1),
+                enabled: hasSelection,
+                topMargin: btnTopMargin,
+                verticalPad: btnVPad,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1030,65 +1282,122 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required ValueChanged<String> onToggle,
     required bool isDarkMode,
     int columns = 1,
+    Map<String, String> optionIcons = const {},
+    bool fullWidthFirst = false,
   }) {
-    // Force single column on small screens to prevent overflow
-    if (MediaQuery.of(context).size.width < 600) {
-      columns = 1;
-    }
-    return _buildQuestionScreen(
-      questionNumber: questionNumber,
-      title: title,
-      subtitle: subtitle,
-      onContinue: () => nextScreen(questionNumber + 1),
-      isDarkMode: isDarkMode,
-      content: CustomScrollView(
-        slivers: [
-          if (columns > 1)
-            SliverGrid(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                childAspectRatio: 3.5, // Adjusted for better fit
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 0,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        final isVerySmall = h < 500;
+        final isSmall = h < 650;
+        final int effectiveCols = columns;
+        final headerEst = isVerySmall ? 110.0 : (isSmall ? 130.0 : 155.0);
+        final btnEst = isVerySmall ? 50.0 : 60.0;
+        final availableForOptions = h - headerEst - btnEst;
+        // When fullWidthFirst, the first item is 1 row, rest fill the grid
+        final int gridItemCount = fullWidthFirst ? options.length - 1 : options.length;
+        final int rowCount = (gridItemCount / effectiveCols).ceil() + (fullWidthFirst ? 1 : 0);
+        final double optionVPad = (availableForOptions / rowCount / 2.8).clamp(4.0, 12.0);
+        final double optionMargin = (availableForOptions / rowCount / 6).clamp(2.0, 8.0);
+        final double optionFont = isVerySmall ? 11.5 : (isSmall ? 12.5 : 14.0);
+        final double btnTopMargin = isVerySmall ? 4.0 : (isSmall ? 8.0 : 15.0);
+        final double btnVPad = isVerySmall ? 10.0 : (isSmall ? 12.0 : 14.0);
+
+        Widget buildOptionItem(int index, {bool forceFullWidth = false}) {
+          final option = options[index];
+          return _buildOption(
+            text: option,
+            isSelected: selectedValues.contains(option),
+            onTap: () => onToggle(option),
+            index: index,
+            isRadio: false,
+            isDarkMode: isDarkMode,
+            iconPath: optionIcons[option],
+            fontSize: optionFont,
+            verticalPadding: optionVPad,
+            bottomMargin: optionMargin,
+            isGrid: effectiveCols > 1 && !forceFullWidth,
+          );
+        }
+
+        Widget optionsWidget;
+        if (fullWidthFirst && effectiveCols > 1) {
+          // First item spans full width, rest in 2-column grid
+          final rows = <Widget>[];
+          // Full-width first row
+          rows.add(buildOptionItem(0, forceFullWidth: true));
+          // Remaining items in grid
+          final rest = options.sublist(1);
+          final int restRows = (rest.length / effectiveCols).ceil();
+          for (int r = 0; r < restRows; r++) {
+            final rowChildren = <Widget>[];
+            for (int c = 0; c < effectiveCols; c++) {
+              final idx = r * effectiveCols + c;
+              if (idx < rest.length) {
+                final globalIdx = idx + 1;
+                rowChildren.add(Expanded(child: buildOptionItem(globalIdx)));
+                if (c < effectiveCols - 1) rowChildren.add(const SizedBox(width: 8));
+              } else {
+                rowChildren.add(const Expanded(child: SizedBox()));
+              }
+            }
+            rows.add(Row(children: rowChildren));
+          }
+          optionsWidget = Column(children: rows);
+        } else if (effectiveCols > 1) {
+          final int rowCount2 = (options.length / effectiveCols).ceil();
+          final rows = <Widget>[];
+          for (int r = 0; r < rowCount2; r++) {
+            final rowChildren = <Widget>[];
+            for (int c = 0; c < effectiveCols; c++) {
+              final idx = r * effectiveCols + c;
+              if (idx < options.length) {
+                rowChildren.add(Expanded(child: buildOptionItem(idx)));
+                if (c < effectiveCols - 1) rowChildren.add(const SizedBox(width: 8));
+              } else {
+                rowChildren.add(const Expanded(child: SizedBox()));
+              }
+            }
+            rows.add(Row(children: rowChildren));
+          }
+          optionsWidget = Column(children: rows);
+        } else {
+          optionsWidget = Column(
+            children: List.generate(options.length, (i) => buildOptionItem(i)),
+          );
+        }
+
+        return _buildQuestionScreen(
+          questionNumber: questionNumber,
+          title: title,
+          subtitle: subtitle,
+          onContinue: () => nextScreen(questionNumber + 1),
+          isDarkMode: isDarkMode,
+          content: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (ctx, innerConstraints) {
+                    return SingleChildScrollView(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: innerConstraints.maxHeight,
+                        ),
+                        child: optionsWidget,
+                      ),
+                    );
+                  },
+                ),
               ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final option = options[index];
-                  return _buildOption(
-                    text: option,
-                    isSelected: selectedValues.contains(option),
-                    onTap: () => onToggle(option),
-                    index: index,
-                    isRadio: false,
-                    isDarkMode: isDarkMode,
-                  );
-                },
-                childCount: options.length,
+              _buildContinueButton(
+                () => nextScreen(questionNumber + 1),
+                topMargin: btnTopMargin,
+                verticalPad: btnVPad,
               ),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final option = options[index];
-                  return _buildOption(
-                    text: option,
-                    isSelected: selectedValues.contains(option),
-                    onTap: () => onToggle(option),
-                    index: index,
-                    isRadio: false,
-                    isDarkMode: isDarkMode,
-                  );
-                },
-                childCount: options.length,
-              ),
-            ),
-            
-          SliverToBoxAdapter(
-            child: _buildContinueButton(() => nextScreen(questionNumber + 1)),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1197,9 +1506,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     List<String> units = const [],
     String unit = '',
     ValueChanged<String>? onUnitChanged,
+    Widget? extraContent,
   }) {
+    return LayoutBuilder(
+      builder: (context, pickerConstraints) {
     final int curIndex = values.indexOf(selectedValue).clamp(0, values.length - 1);
-    const double itemH = 52.0;
+    final double itemH = pickerConstraints.maxHeight < 500 ? 38.0 : (pickerConstraints.maxHeight < 650 ? 44.0 : 52.0);
 
     void step(int delta) {
       final newIndex = (curIndex + delta).clamp(0, values.length - 1);
@@ -1242,6 +1554,14 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     // Track drag accumulator as a state in the parent (hack: use local var inside gesture)
     double dragAccum = 0;
 
+    final bool isVerySmallPicker = pickerConstraints.maxHeight < 500;
+    final bool isSmallPicker = pickerConstraints.maxHeight < 650;
+    final double unitToggleHPad = isVerySmallPicker ? 16 : (isSmallPicker ? 20 : 28);
+    final double unitToggleVPad = isVerySmallPicker ? 6 : (isSmallPicker ? 8 : 10);
+    final double unitToggleMargin = isVerySmallPicker ? 8 : (isSmallPicker ? 12 : 16);
+    final double btnVPad = isVerySmallPicker ? 10.0 : (isSmallPicker ? 12.0 : 14.0);
+    final double btnTopMargin = isVerySmallPicker ? 6.0 : (isSmallPicker ? 10.0 : 20.0);
+
     return _buildQuestionScreen(
       questionNumber: questionNumber,
       title: title,
@@ -1249,12 +1569,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       onContinue: () => nextScreen(questionNumber + 1),
       isDarkMode: isDarkMode,
       content: Column(
+        mainAxisSize: MainAxisSize.max,
         children: [
-          const SizedBox(height: 8),
+          SizedBox(height: isVerySmallPicker ? 4 : 8),
           // Unit toggle (optional)
           if (units.isNotEmpty)
             Container(
-              margin: const EdgeInsets.only(bottom: 16),
+              margin: EdgeInsets.only(bottom: unitToggleMargin),
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
                 color: isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF2F2F2),
@@ -1269,7 +1590,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     onTap: () => onUnitChanged?.call(u),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                      padding: EdgeInsets.symmetric(horizontal: unitToggleHPad, vertical: unitToggleVPad),
                       decoration: BoxDecoration(
                         color: isSel ? const Color(0xFFFF0000) : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
@@ -1279,7 +1600,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                         style: TextStyle(
                           color: isSel ? Colors.white : (isDarkMode ? Colors.white60 : Colors.grey),
                           fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 15,
+                          fontSize: isVerySmallPicker ? 13 : 15,
                         ),
                       ),
                     ),
@@ -1287,70 +1608,144 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                 }).toList(),
               ),
             ),
-          // Picker area
-          Listener(
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent) {
-                step(event.scrollDelta.dy > 0 ? 1 : -1);
-              }
-            },
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onVerticalDragUpdate: (d) {
-                dragAccum += d.delta.dy;
-                // Snap every 52px of drag
-                while (dragAccum <= -itemH) { dragAccum += itemH; step(1); }
-                while (dragAccum >= itemH)  { dragAccum -= itemH; step(-1); }
-              },
-              onVerticalDragEnd: (_) { dragAccum = 0; },
-              child: SizedBox(
-                height: itemH * 5,
-                child: Stack(
-                  alignment: Alignment.center,
+          // Picker area — uses flex only when no extraContent, otherwise fixed height
+          if (extraContent == null)
+            Expanded(
+              child: Listener(
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent) {
+                    step(event.scrollDelta.dy > 0 ? 1 : -1);
+                  }
+                },
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onVerticalDragUpdate: (d) {
+                    dragAccum += d.delta.dy;
+                    while (dragAccum <= -itemH) { dragAccum += itemH; step(1); }
+                    while (dragAccum >= itemH)  { dragAccum -= itemH; step(-1); }
+                  },
+                  onVerticalDragEnd: (_) { dragAccum = 0; },
+                  child: LayoutBuilder(
+                    builder: (ctx, bc) {
+                      final pickerHeight = itemH * 5;
+                      return Center(
+                        child: SizedBox(
+                          height: pickerHeight,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                height: itemH,
+                                decoration: BoxDecoration(
+                                  color: isDarkMode
+                                      ? Colors.white.withOpacity(0.08)
+                                      : Colors.black.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              Column(
+                                children: [
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => step(-1),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox.expand(),
+                                    ),
+                                  ),
+                                  SizedBox(height: itemH),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => step(1),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox.expand(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              buildPickerItems(),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
                   children: [
-                    // Highlight band for center item
-                    Container(
-                      height: itemH,
-                      decoration: BoxDecoration(
-                        color: isDarkMode
-                            ? Colors.white.withOpacity(0.08)
-                            : Colors.black.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(12),
+                    Listener(
+                      onPointerSignal: (event) {
+                        if (event is PointerScrollEvent) {
+                          step(event.scrollDelta.dy > 0 ? 1 : -1);
+                        }
+                      },
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: (d) {
+                          dragAccum += d.delta.dy;
+                          while (dragAccum <= -itemH) { dragAccum += itemH; step(1); }
+                          while (dragAccum >= itemH)  { dragAccum -= itemH; step(-1); }
+                        },
+                        onVerticalDragEnd: (_) { dragAccum = 0; },
+                        child: SizedBox(
+                          height: itemH * 5,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                height: itemH,
+                                decoration: BoxDecoration(
+                                  color: isDarkMode
+                                      ? Colors.white.withOpacity(0.08)
+                                      : Colors.black.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              Column(
+                                children: [
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => step(-1),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox.expand(),
+                                    ),
+                                  ),
+                                  SizedBox(height: itemH),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => step(1),
+                                      behavior: HitTestBehavior.opaque,
+                                      child: const SizedBox.expand(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              buildPickerItems(),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    // Tap zones: top half = step(-1), bottom half = step(+1)
-                    Column(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () => step(-1),
-                            behavior: HitTestBehavior.opaque,
-                            child: const SizedBox.expand(),
-                          ),
-                        ),
-                        SizedBox(height: itemH), // center item — no tap override
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () => step(1),
-                            behavior: HitTestBehavior.opaque,
-                            child: const SizedBox.expand(),
-                          ),
-                        ),
-                      ],
-                    ),
-                    // Items display
-                    buildPickerItems(),
+                    extraContent,
                   ],
                 ),
               ),
             ),
+          _buildContinueButton(
+            () => nextScreen(questionNumber + 1),
+            topMargin: btnTopMargin,
+            verticalPad: btnVPad,
           ),
-          const SizedBox(height: 20),
-          _buildContinueButton(() => nextScreen(questionNumber + 1)),
         ],
       ),
     );
   }
+  );
+}
 
 
   // --- Question Implementations ---
@@ -1364,6 +1759,10 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: gender,
       onSelect: (val) => setState(() => gender = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Male': 'assets/quizemojis/male.png',
+        'Female': 'assets/quizemojis/female.png',
+      },
     );
   }
 
@@ -1446,6 +1845,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: activityLevel,
       onSelect: (val) => setState(() => activityLevel = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Sedentary (mostly sitting, office work)': 'assets/quizemojis/Sedentary.png',
+        'Light (some walking or light movement)': 'assets/quizemojis/Light.png',
+        'Moderate (active job or frequent movement)': 'assets/quizemojis/Moderate.png',
+        'Very Active (physical labor or athlete)': 'assets/quizemojis/Very Active.png',
+      },
     );
   }
 
@@ -1457,30 +1862,358 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: mainGoal,
       onSelect: (val) => setState(() => mainGoal = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Lose Fat & Stay Lean': 'assets/quizemojis/Lose Fat & Stay Lean.png',
+        'Build Muscle & Gain Strength': 'assets/quizemojis/Build Muscle.png',
+      },
     );
   }
 
   Widget _buildTargetWeightScreen(bool isDarkMode) {
-    final List<String> vals = targetWeightUnit == 'kg'
-        ? List.generate(171, (i) => '${i + 30} kg')
-        : List.generate(331, (i) => '${i + 66} lbs');
-    if (targetWeight.isEmpty) targetWeight = targetWeightUnit == 'kg' ? '65 kg' : '145 lbs';
-    return _buildNumberPickerScreen(
+    if (targetWeight.isEmpty) {
+      targetWeight = targetWeightUnit == 'kg' ? '65 kg' : '145 lbs';
+    }
+
+    double currentW = double.tryParse(weight.replaceAll(RegExp(r'[^\d.]'), '')) ??
+        (weightUnit == 'kg' ? 70.0 : 155.0);
+    if (weightUnit != targetWeightUnit) {
+      currentW = targetWeightUnit == 'kg'
+          ? currentW * 0.453592
+          : currentW * 2.20462;
+    }
+    final double minW = targetWeightUnit == 'kg' ? 30.0 : 66.0;
+    final double maxW = targetWeightUnit == 'kg' ? 200.0 : 396.0;
+    double targetW =
+        (double.tryParse(targetWeight.replaceAll(RegExp(r'[^\d.]'), '')) ?? currentW)
+            .clamp(minW, maxW);
+    final bool isLoss =
+        targetW < currentW || (targetW == currentW && mainGoal.contains('Lose'));
+    final double diff = (targetW - currentW).abs();
+    final double weeklyRate = isLoss
+        ? (targetWeightUnit == 'kg' ? 0.5 : 1.1)
+        : (targetWeightUnit == 'kg' ? 0.25 : 0.55);
+    final int weeks =
+        diff > 0 ? (diff / weeklyRate).ceil().clamp(1, 104) : 1;
+    final double percent = currentW > 0 ? (diff / currentW * 100) : 0;
+    final DateTime td = DateTime.now().add(Duration(days: weeks * 7));
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun',
+                 'Jul','Aug','Sep','Oct','Nov','Dec'];
+    final String formattedDate = "${mo[td.month - 1]} ${td.day}, ${td.year}";
+    final String emojiAsset = isLoss
+        ? 'assets/svg/mealsicons/iconfire.png'
+        : 'assets/quizemojis/Build Muscle.png';
+    final String messageText =
+        isLoss ? "drop body weight by " : "increase muscle mass by ";
+    final String messageSub = isLoss
+        ? "As your body fat decreases, you will look leaner and more defined."
+        : "As your muscle mass increases, you will gain a stronger physique.";
+
+    return _buildQuestionScreen(
       questionNumber: 7,
       title: "Do you have a goal in mind? (optional)",
       subtitle: "This is only used to track your progress.",
-      values: vals,
-      selectedValue: targetWeight,
-      onChanged: (val) => setState(() => targetWeight = val),
+      onContinue: () => nextScreen(8),
       isDarkMode: isDarkMode,
-      units: ['kg', 'lbs'],
-      unit: targetWeightUnit,
-      onUnitChanged: (u) => setState(() {
-        _pickerControllers.remove('8_$targetWeightUnit')?.dispose();
-        _pickerControllers.remove('8_$u')?.dispose();
-        targetWeightUnit = u;
-        targetWeight = u == 'kg' ? '65 kg' : '145 lbs';
-      }),
+      content: LayoutBuilder(
+        builder: (ctx, bc) {
+          final bool isSmall = bc.maxHeight < 520;
+          // Drum-roll picker height: same proportion as other quiz screens
+          final double pickerH =
+              (bc.maxHeight * (isSmall ? 0.42 : 0.46)).clamp(160.0, 280.0);
+
+          // Drum-roll constants
+          const int halfRange = 2;      // show -2..+2 => 5 rows
+          const int totalRows = halfRange * 2 + 1;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+
+              // Unit toggle
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isDarkMode
+                      ? const Color(0xFF2C2C2C)
+                      : const Color(0xFFF2F2F2),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: isDarkMode
+                          ? Colors.white12
+                          : const Color(0xFFE0E0E0)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: ['kg', 'lbs'].map((u) {
+                    final isSel = targetWeightUnit == u;
+                    return GestureDetector(
+                      onTap: () => setState(() {
+                        if (targetWeightUnit != u) {
+                          targetWeightUnit = u;
+                          targetWeight = u == 'kg' ? '65 kg' : '145 lbs';
+                          _targetWeightDragAccum = 0;
+                        }
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: EdgeInsets.symmetric(
+                            horizontal: isSmall ? 22 : 28,
+                            vertical: isSmall ? 8 : 10),
+                        decoration: BoxDecoration(
+                          color: isSel
+                              ? const Color(0xFFFF0000)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(u,
+                            style: TextStyle(
+                              color: isSel
+                                  ? Colors.white
+                                  : (isDarkMode
+                                      ? Colors.white60
+                                      : Colors.grey),
+                              fontWeight: isSel
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              fontSize: 15,
+                            )),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
+              SizedBox(height: isSmall ? 10 : 16),
+
+              // Row: drum-roll picker (left) + big number (right)
+              SizedBox(
+                height: pickerH,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+
+                    // Drum-roll picker
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: (d) {
+                          _targetWeightDragAccum += d.delta.dy;
+                          const double pxPerStep = 10.0;
+                          while (_targetWeightDragAccum <= -pxPerStep) {
+                            _targetWeightDragAccum += pxPerStep;
+                            final next = (targetW + 1).clamp(minW, maxW);
+                            setState(() => targetWeight =
+                                "${next.round()} $targetWeightUnit");
+                          }
+                          while (_targetWeightDragAccum >= pxPerStep) {
+                            _targetWeightDragAccum -= pxPerStep;
+                            final next = (targetW - 1).clamp(minW, maxW);
+                            setState(() => targetWeight =
+                                "${next.round()} $targetWeightUnit");
+                          }
+                        },
+                        onVerticalDragEnd: (_) =>
+                            _targetWeightDragAccum = 0,
+                        child: LayoutBuilder(
+                          builder: (rctx, rbc) {
+                            final double itemH =
+                                rbc.maxHeight / totalRows;
+                            return Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                // Centre highlight box
+                                Container(
+                                  height: itemH,
+                                  decoration: BoxDecoration(
+                                    color: isDarkMode
+                                        ? Colors.white
+                                            .withOpacity(0.08)
+                                        : Colors.black
+                                            .withOpacity(0.06),
+                                    borderRadius:
+                                        BorderRadius.circular(12),
+                                  ),
+                                ),
+                                // Number rows
+                                Column(
+                                  children: List.generate(totalRows,
+                                      (i) {
+                                    final int offset = i - halfRange;
+                                    final int val =
+                                        targetW.round() + offset;
+                                    final bool isCenter =
+                                        offset == 0;
+                                    final int absOff = offset.abs();
+                                    return GestureDetector(
+                                      onTap: () => setState(() =>
+                                          targetWeight =
+                                              "$val $targetWeightUnit"),
+                                      child: SizedBox(
+                                        height: itemH,
+                                        child: Center(
+                                          child:
+                                              AnimatedDefaultTextStyle(
+                                            duration: const Duration(
+                                                milliseconds: 150),
+                                            style: TextStyle(
+                                              fontSize: isCenter
+                                                  ? 28
+                                                  : (absOff == 1
+                                                      ? 19
+                                                      : 14),
+                                              fontWeight: isCenter
+                                                  ? FontWeight.bold
+                                                  : FontWeight.w400,
+                                              color: isCenter
+                                                  ? (isDarkMode
+                                                      ? Colors.white
+                                                      : Colors.black)
+                                                  : (isDarkMode
+                                                      ? Colors.white
+                                                          .withOpacity(
+                                                              absOff ==
+                                                                      1
+                                                                  ? 0.45
+                                                                  : 0.20)
+                                                      : Colors.black
+                                                          .withOpacity(
+                                                              absOff ==
+                                                                      1
+                                                                  ? 0.35
+                                                                  : 0.15)),
+                                            ),
+                                            child: Text(
+                                                "$val $targetWeightUnit"),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+
+                  ],
+                ),
+              ),
+
+              const Spacer(),
+
+              // Est. target date (above message card)
+              Row(
+                children: [
+                  Image.asset(
+                    'assets/svg/mealsicons/iconprogress.png',
+                    width: 16,
+                    height: 16,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.calendar_today_outlined,
+                      size: 14,
+                      color: isDarkMode
+                          ? Colors.white54
+                          : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Est. target: $formattedDate",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDarkMode
+                          ? Colors.white54
+                          : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+
+              SizedBox(height: isSmall ? 8 : 10),
+
+              // Message card
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: isSmall ? 10 : 14),
+                decoration: BoxDecoration(
+                  color: isDarkMode
+                      ? Colors.white.withOpacity(0.06)
+                      : const Color(0xFFFFF8F8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDarkMode
+                        ? Colors.white12
+                        : const Color(0xFFFFE0E0),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Image.asset(
+                          emojiAsset,
+                          width: 20,
+                          height: 20,
+                          errorBuilder: (_, __, ___) =>
+                              const SizedBox(width: 20),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(children: [
+                              TextSpan(
+                                text:
+                                    "Challenge target, you'll $messageText",
+                                style: TextStyle(
+                                  color: isDarkMode
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                              TextSpan(
+                                text:
+                                    "${percent.toStringAsFixed(0)}%",
+                                style: const TextStyle(
+                                  color: Color(0xFFFF0000),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      messageSub,
+                      style: TextStyle(
+                        color: isDarkMode
+                            ? Colors.white60
+                            : Colors.black54,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+              _buildContinueButton(() => nextScreen(8)),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -1488,10 +2221,16 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return _buildSelectionScreen(
       questionNumber: 8,
       title: "How long do you want this first plan to last?",
-      options: ['2 Weeks (14 Days)', '3 Weeks (21 Days)', '4 Weeks (28 Days)', '12 Weeks (90 Days)'],
+      options: ['2 Weeks', '3 Weeks', '4 Weeks', '12 Weeks'],
       selectedValue: planDuration,
       onSelect: (val) => setState(() => planDuration = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        '2 Weeks': 'assets/quizemojis/2 weeks.png',
+        '3 Weeks': 'assets/quizemojis/3 weeks.png',
+        '4 Weeks': 'assets/quizemojis/4 weeks.png',
+        '12 Weeks': 'assets/quizemojis/12 weeks.png',
+      },
     );
   }
 
@@ -1503,6 +2242,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: experience,
       onSelect: (val) => setState(() => experience = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Beginner': 'assets/quizemojis/beginner.png',
+        'Intermediate': 'assets/quizemojis/Intermediate.png',
+        'Advanced': 'assets/quizemojis/Advanced.png',
+      },
     );
   }
 
@@ -1515,6 +2259,10 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: workoutLocation,
       onSelect: (val) => setState(() => workoutLocation = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Home': 'assets/quizemojis/home-.png',
+        'Gym': 'assets/quizemojis/gym.png',
+      },
     );
   }
 
@@ -1526,7 +2274,16 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValues: equipment,
       onToggle: (val) => toggleOption(equipment, val),
       isDarkMode: isDarkMode,
-      columns: 2,
+      columns: 1,
+      optionIcons: {
+        'Bodyweight': 'assets/quizemojis/Bodyweight.png',
+        'Dumbbells': 'assets/quizemojis/dumbbell.png',
+        'Resistance Bands': 'assets/quizemojis/resistance-band.png',
+        'Barbell': 'assets/quizemojis/barbell.png',
+        'Kettlebells': 'assets/quizemojis/Kettlebells.png',
+        'Machines': 'assets/quizemojis/Machines.png',
+        'All': 'assets/quizemojis/All.png',
+      },
     );
   }
 
@@ -1538,6 +2295,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: trainingDays,
       onSelect: (val) => setState(() => trainingDays = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        '3 days': 'assets/quizemojis/3 days.png',
+        '4 days': 'assets/quizemojis/4 days.png',
+        '5 days': 'assets/quizemojis/5 days.png',
+        '6 days': 'assets/quizemojis/6 days.png',
+        '7 days': 'assets/quizemojis/7 days.png',
+      },
     );
   }
 
@@ -1549,6 +2313,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: sessionDuration,
       onSelect: (val) => setState(() => sessionDuration = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        '20 min': 'assets/quizemojis/20 min.png',
+        '30 min': 'assets/quizemojis/30 min.png',
+        '45 min': 'assets/quizemojis/45 min.png',
+        '60 min': 'assets/quizemojis/60 min.png',
+        '90 min': 'assets/quizemojis/90 min.png',
+      },
     );
   }
 
@@ -1560,6 +2331,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: workoutTime,
       onSelect: (val) => setState(() => workoutTime = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Morning': 'assets/quizemojis/Morning.png',
+        'Afternoon': 'assets/quizemojis/Afternoon.png',
+        'Evening': 'assets/quizemojis/Evening.png',
+        'Flexible': 'assets/quizemojis/flexible.png',
+      },
     );
   }
 
@@ -1579,6 +2356,18 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         }
       },
       isDarkMode: isDarkMode,
+      columns: 2,
+      fullWidthFirst: true, // 'None' spans full width; remaining 8 fill 2-column grid
+      optionIcons: {
+        'Back': 'assets/quizemojis/Back.png',
+        'Knees': 'assets/quizemojis/Knees.png',
+        'Shoulders': 'assets/quizemojis/Shoulders.png',
+        'Hips': 'assets/quizemojis/Hips.png',
+        'Neck': 'assets/quizemojis/Neck.png',
+        'Elbows': 'assets/quizemojis/Elbows.png',
+        'Wrists': 'assets/quizemojis/Wrists.png',
+        'Ankles': 'assets/quizemojis/Ankles.png',
+      },
     );
   }
 
@@ -1591,6 +2380,16 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: dietType,
       onSelect: (val) => setState(() => dietType = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'No Preference': 'assets/quizemojis/No Preference.png',
+        'Vegetarian': 'assets/quizemojis/Vegetarian.png',
+        'Vegan': 'assets/quizemojis/vegan.png',
+        'Pescatarian': 'assets/quizemojis/Pescatarian.png',
+        'Mediterranean': 'assets/quizemojis/Mediterranean.png',
+        'Keto': 'assets/quizemojis/keto.png',
+        'Low-Carb': 'assets/quizemojis/Low-Carb.png',
+        'Gluten-Free': 'assets/quizemojis/gluten-free.png',
+      },
     );
   }
 
@@ -1611,6 +2410,15 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         }
       },
       isDarkMode: isDarkMode,
+      columns: 1,
+      optionIcons: {
+        'Nuts': 'assets/quizemojis/nuts.png',
+        'Dairy': 'assets/quizemojis/dairy.png',
+        'Gluten': 'assets/quizemojis/Gluten.png',
+        'Eggs': 'assets/quizemojis/egg.png',
+        'Soy': 'assets/quizemojis/Soy.png',
+        'Shellfish': 'assets/quizemojis/Shellfish.png',
+      },
     );
   }
 
@@ -1622,6 +2430,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: macroBalance,
       onSelect: (val) => setState(() => macroBalance = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Balanced': 'assets/quizemojis/Balanced.png',
+        'Higher Protein': 'assets/quizemojis/Higher Protein.png',
+        'Lower Carb': 'assets/quizemojis/Lower Carb.png',
+        'Higher Carb': 'assets/quizemojis/Higher Carb.png',
+      },
     );
   }
 
@@ -1634,6 +2448,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: sleepHours,
       onSelect: (val) => setState(() => sleepHours = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Less than 5': 'assets/quizemojis/Poor.png',
+        '5-6 hours': 'assets/quizemojis/Fair.png',
+        '7-8 hours': 'assets/quizemojis/Good.png',
+        'More than 8': 'assets/quizemojis/Excellent.png',
+      },
     );
   }
 
@@ -1645,6 +2465,12 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: sleepQuality,
       onSelect: (val) => setState(() => sleepQuality = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Poor': 'assets/quizemojis/Poor.png',
+        'Fair': 'assets/quizemojis/Fair.png',
+        'Good': 'assets/quizemojis/Good.png',
+        'Excellent': 'assets/quizemojis/Excellent.png',
+      },
     );
   }
 
@@ -1657,6 +2483,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: stressLevel,
       onSelect: (val) => setState(() => stressLevel = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Low': 'assets/quizemojis/Good.png',
+        'Moderate': 'assets/quizemojis/Fair.png',
+        'High': 'assets/quizemojis/Poor.png',
+      },
     );
   }
 
@@ -1666,10 +2497,27 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       questionNumber: 22,
       title: "How much water do you usually drink per day?",
       subtitle: "We'll suggest a general daily hydration goal.",
-      options: ['Less than 1 liter (about 4 cups)', '1–2 liters (4–8 cups)', '2–3 liters (8–12 cups)', 'More than 3 liters (12+ cups)'],
+      options: [
+        'Less than 1 Liter',
+        '1–2 Liters',
+        '2–3 Liters',
+        'More than 3 Liters'
+      ],
       selectedValue: waterIntake,
       onSelect: (val) => setState(() => waterIntake = val),
       isDarkMode: isDarkMode,
+      optionIcons: {
+        'Less than 1 Liter': 'assets/quizemojis/glass-of-water.png',
+        '1–2 Liters': 'assets/quizemojis/glass-of-water.png',
+        '2–3 Liters': 'assets/quizemojis/glass-of-water.png',
+        'More than 3 Liters': 'assets/quizemojis/glass-of-water.png',
+      },
+      optionSubtitles: {
+        'Less than 1 Liter': '4×',
+        '1–2 Liters': '6×',
+        '2–3 Liters': '10×',
+        'More than 3 Liters': '12×',
+      },
     );
   }
 
@@ -1721,8 +2569,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     ),
                   ),
                 ),
-                const Spacer(),
-                _buildContinueButton(() => nextScreen(24), text: 'I UNDERSTAND'),
+                const Spacer(flex: 1),
+                _buildContinueButton(() => nextScreen(24), text: 'I UNDERSTAND', verticalPad: 12),
               ],
             ),
           ),
@@ -1731,245 +2579,243 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  // --- Completion Screens ---
-
-  // ── BMI helpers ──────────────────────────────────────────────────────────
-
-  /// Parse weight/height from quiz state variables and compute BMI.
-  double? _computeBmi() {
-    try {
-      // ── Parse weight in kg (read unit from the string itself) ──
-      double? kg;
-      final wMatch = RegExp(r'([\d.]+)').firstMatch(weight);
-      if (wMatch == null) return null;
-      final wVal = double.parse(wMatch.group(1)!);
-      // Determine unit from the embedded string, fall back to state var
-      final isLbs = weight.toLowerCase().contains('lb');
-      kg = isLbs ? wVal * 0.453592 : wVal;
-
-      // ── Parse height in metres (read unit from the string itself) ──
-      double? m;
-      // Try ft/in format first (e.g. "5ft 10in")
-      final ftMatch = RegExp(r'(\d+)ft\s*(\d+)in').firstMatch(height);
-      if (ftMatch != null) {
-        final totalIn = int.parse(ftMatch.group(1)!) * 12 + int.parse(ftMatch.group(2)!);
-        m = totalIn * 0.0254;
-      } else {
-        // Assume cm (e.g. "175 cm")
-        final hMatch = RegExp(r'([\d.]+)').firstMatch(height);
-        if (hMatch == null) return null;
-        m = double.parse(hMatch.group(1)!) / 100;
-      }
-      if (m == null || m <= 0) return null;
-      return kg / (m * m);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Widget _buildBmiWidget(bool isDarkMode, {bool compact = false, bool veryCompact = false}) {
-    final bmi = _computeBmi();
-    if (bmi == null) return const SizedBox.shrink();
-
-    // BMI range: 15 → 40 display
-    const double minBmi = 15, maxBmi = 40;
-    final double clampedBmi = bmi.clamp(minBmi, maxBmi);
-    final double fraction = (clampedBmi - minBmi) / (maxBmi - minBmi);
-
-    // Responsive sizes
-    final double gaugeHeight = veryCompact ? 120 : (compact ? 145 : 190);
-    final double containerPadding = veryCompact ? 12 : (compact ? 16 : 20);
-    final double descFontSize = veryCompact ? 12 : 13;
-    final double afterGaugeSpacing = veryCompact ? 6 : (compact ? 10 : 16);
-    final double descVertPadding = veryCompact ? 10 : 14;
-
-    // Category
-    Color catColor;
-    if (bmi < 18.5) {
-      catColor = const Color(0xFF5BC8F5);
-    } else if (bmi < 25) {
-      catColor = const Color(0xFF27AE60);
-    } else if (bmi < 30) {
-      catColor = const Color(0xFFE67E22);
-    } else {
-      catColor = const Color(0xFFE74C3C);
-    }
-
-    return _buildAnimatedWidget(
-      delay: 500,
-      child: Container(
-        margin: EdgeInsets.symmetric(vertical: veryCompact ? 6 : 10),
-        padding: EdgeInsets.all(containerPadding),
-        decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFF8F8F8),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isDarkMode ? Colors.white12 : const Color(0xFFE8E8E8),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              'Body-Mass-Index (BMI)',
-              style: TextStyle(
-                fontSize: compact ? 14 : 16,
-                fontWeight: FontWeight.bold,
-                color: isDarkMode ? Colors.white : Colors.black,
-              ),
-            ),
-            SizedBox(height: veryCompact ? 4 : 8),
-            // ── Semicircle gauge ──────────────────────────────────────
-            AspectRatio(
-              aspectRatio: 2.0,
-              child: CustomPaint(
-                painter: BmiGaugePainter(
-                  fraction: fraction,
-                  bmi: bmi,
-                  catColor: catColor,
-                  isDarkMode: isDarkMode,
-                ),
-              ),
-            ),
-            SizedBox(height: afterGaugeSpacing),
-            // ── Compliance text ─────────────────────────────
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: isDarkMode ? Colors.white24 : Colors.black12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    'Your BMI estimate: ${bmi.toStringAsFixed(1)}',
-                    style: TextStyle(
-                      fontSize: compact ? 14 : 16,
-                      fontWeight: FontWeight.bold,
-                      color: isDarkMode ? Colors.white : Colors.black,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'This is a general reference and not a medical assessment.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: descFontSize,
-                      color: isDarkMode ? Colors.white70 : const Color(0xFF555555),
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildSummaryScreen(bool isDarkMode) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isSmallScreen = constraints.maxHeight < 700;
-        final isVerySmallScreen = constraints.maxHeight < 600;
-        final double iconSize = isVerySmallScreen ? 32 : (isSmallScreen ? 44 : 60);
-        final double iconPadding = isVerySmallScreen ? 12 : (isSmallScreen ? 16 : 20);
-        final double titleSize = isVerySmallScreen ? 18 : (isSmallScreen ? 20 : 24);
-        final double subtitleSize = isVerySmallScreen ? 13 : (isSmallScreen ? 14 : 16);
-        final double topSpacing = isVerySmallScreen ? 8 : (isSmallScreen ? 12 : 32);
-        final double afterIconSpacing = isVerySmallScreen ? 10 : (isSmallScreen ? 16 : 24);
-        final double smallSpacing = isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 12);
-        final double afterSubtitleSpacing = isVerySmallScreen ? 10 : (isSmallScreen ? 14 : 20);
+        final screenH = constraints.maxHeight;
+        final isSmall = screenH < 600;
+        final isMedium = screenH < 750;
+
+        final double hPad    = isSmall ? 16 : 24;
+        final double vPad    = isSmall ? 16 : (isMedium ? 24 : 32);
+        final double iconSz  = isSmall ? 36 : 48;
+        final double titleSz = isSmall ? 22 : (isMedium ? 25 : 28);
+        final double subSz   = isSmall ? 13 : 15;
+        final double rowVPad = isSmall ? 11 : (isMedium ? 13 : 16);
+        final double gap     = isSmall ? 20 : (isMedium ? 28 : 36);
+        final double btnH    = isSmall ? 52 : 60;
+        final double btnSz   = isSmall ? 15 : 17;
+
+        final dividerColor = isDarkMode ? Colors.white.withOpacity(0.1) : const Color(0xFFEEEEEE);
+        final cardColor    = isDarkMode ? const Color(0xFF1C1C1E) : Colors.white;
+        final cardBorder   = isDarkMode ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.04);
+
+        final allRows = <(String, String, String)>[
+          // Workout
+          ('Goal',          mainGoal.isEmpty        ? 'Weight Loss'    : mainGoal,        'assets/emojis/target.png'),
+          ('Duration',      planDuration.isEmpty    ? '4 Weeks'        : planDuration,    'assets/emojis/hourglass.png'),
+          ('Training Days', trainingDays.isEmpty    ? '3-4 Days'       : trainingDays,    'assets/emojis/calendar.png'),
+          ('Location',      workoutLocation.isEmpty ? 'Gym'            : workoutLocation, 'assets/emojis/pin.png'),
+          // Meal
+          ('Diet Type',     dietType.isEmpty        ? 'No Preference'  : dietType,        'assets/emojis/salad.png'),
+          ('Macro Focus',   macroBalance.isEmpty    ? 'Balanced'       : macroBalance,    'assets/emojis/scale.png'),
+          ('Allergies',     (allergies.isEmpty || allergies.first == 'None') ? 'None' : allergies.join(', '), 'assets/emojis/peanuts.png'),
+          ('Meals / Day',   '4 Meals', 'assets/emojis/plate.png'),
+        ];
 
         return Column(
           children: [
             Expanded(
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: isVerySmallScreen ? 8 : 16,
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(height: topSpacing),
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth - (hPad * 2), // Constrain to available width so text wraps properly
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // ── Icon ──
+                          _buildAnimatedWidget(
+                            delay: 0,
+                            child: Container(
+                              padding: EdgeInsets.all(isSmall ? 14 : 20),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF0000).withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Image.asset('assets/sparkles.png', width: iconSz, height: iconSz),
+                            ),
+                          ),
+                    SizedBox(height: isSmall ? 14 : 20),
+
+                    // ── Title ──
                     _buildAnimatedWidget(
-                      delay: 0,
-                      child: Container(
-                        padding: EdgeInsets.all(iconPadding),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF0000).withOpacity(0.1),
-                          shape: BoxShape.circle,
+                      delay: 100,
+                      child: Text(
+                        'Plan Review',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: titleSz,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          color: isDarkMode ? Colors.white : const Color(0xFF111111),
                         ),
-                        child: Icon(Icons.check_circle, color: const Color(0xFFFF0000), size: iconSize),
                       ),
                     ),
-                    SizedBox(height: afterIconSpacing),
+                    SizedBox(height: isSmall ? 6 : 10),
+
+                    // ── Subtitle ──
                     _buildAnimatedWidget(
                       delay: 200,
                       child: Text(
-                        'Profile Completed!',
-                        style: TextStyle(
-                          fontSize: titleSize,
-                          fontWeight: FontWeight.bold,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: smallSpacing),
-                    _buildAnimatedWidget(
-                      delay: 400,
-                      child: Text(
-                        'We have gathered all the information needed to create your personalized plan.',
+                        "Here's a quick overview of your personalized plan before we build it.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: subtitleSize,
+                          fontSize: subSz,
+                          height: 1.5,
                           color: isDarkMode ? Colors.white70 : const Color(0xFF666666),
-                          height: 1.4,
                         ),
                       ),
                     ),
-                    SizedBox(height: afterSubtitleSpacing),
-                    // ── BMI Widget ────────────────────────────────────────
-                    _buildBmiWidget(isDarkMode, compact: isSmallScreen, veryCompact: isVerySmallScreen),
-                      const SizedBox(height: 10),
-                    ],
+                    SizedBox(height: gap),
+
+                    // ── Single combined Plan Summary card ──
+                    _buildAnimatedWidget(
+                      delay: 300,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isDarkMode ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.06),
+                              blurRadius: 24,
+                              offset: const Offset(0, 12),
+                            ),
+                          ],
+                          border: Border.all(color: cardBorder, width: 1),
+                        ),
+                        child: Column(
+                          children: [
+                            // Card header
+                            Container(
+                              padding: EdgeInsets.symmetric(vertical: isSmall ? 12 : 16, horizontal: 20),
+                              decoration: BoxDecoration(
+                                color: isDarkMode ? Colors.white.withOpacity(0.03) : const Color(0xFFF9F9F9),
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(24),
+                                  topRight: Radius.circular(24),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Image.asset('assets/sparkles.png', width: 18, height: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'PLAN SUMMARY',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 1.2,
+                                      color: isDarkMode ? Colors.white70 : const Color(0xFF333333),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Divider(height: 1, color: dividerColor),
+
+                            // All rows combined
+                            ...allRows.asMap().entries.map((entry) {
+                              final isLast = entry.key == allRows.length - 1;
+                              return Column(
+                                children: [
+                                  _buildSleekRow(entry.value.$1, entry.value.$2, entry.value.$3, isDarkMode, rowVPad),
+                                  if (!isLast) Divider(height: 1, color: dividerColor),
+                                ],
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ),
+                          SizedBox(height: isSmall ? 12 : 16),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20).copyWith(bottom: 20),
-              child: _buildContinueButton(() async {
-                // 1. Auth check before we start loading UI
-                final supabaseService = SupabaseService();
-                var user = supabaseService.client.auth.currentUser;
-                if (user == null) {
-                  await AuthModal.show(context);
-                  user = supabaseService.client.auth.currentUser;
-                  if (user == null) return; // aborted login
-                }
 
-                if (!mounted) return;
-                setState(() {
-                  _isIntroProgress = true;
-                  _introComplete = false;
-                  progressPercent = 0;
-                });
-                nextScreen(25);
-                
-                // Real layout executes plan concurrently with the UI steps!
-                await _startRealGenerationFlow();
-              }),
+            // ── CTA ──
+            _buildAnimatedWidget(
+              delay: 500,
+              slideUp: true,
+              child: SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.only(left: hPad, right: hPad, bottom: isSmall ? 12 : 20, top: 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        height: btnH,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            final supabaseService = SupabaseService();
+                            var user = supabaseService.client.auth.currentUser;
+                            if (user == null) {
+                              await AuthModal.show(context);
+                              user = supabaseService.client.auth.currentUser;
+                              if (user == null) return;
+                            }
+                            if (!mounted) return;
+                            setState(() {
+                              _isIntroProgress = true;
+                              _introComplete = false;
+                              progressPercent = 0;
+                            });
+                            nextScreen(25);
+                            await _startRealGenerationFlow();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF0000),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                          ),
+                          child: Text(
+                            'Build My Full Plan',
+                            style: TextStyle(
+                              fontSize: btnSz,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.check_circle_outline, size: 13, color: isDarkMode ? Colors.white60 : const Color(0xFF777777)),
+                            const SizedBox(width: 5),
+                            Text(
+                              'No commitment • Takes less than 10 seconds',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDarkMode ? Colors.white60 : const Color(0xFF777777),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         );
@@ -1977,27 +2823,35 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildSummaryItem(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 15),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0))),
-      ),
+  Widget _buildSleekRow(String label, String value, String iconPath, bool isDarkMode, [double vPad = 16]) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 20, vertical: vPad),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF666666),
-            ),
+          Row(
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: isDarkMode ? Colors.white60 : const Color(0xFF777777),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Image.asset(iconPath, width: 20, height: 20),
+            ],
           ),
-          Text(
-            value.isEmpty ? '-' : value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF1A1A1A),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: isDarkMode ? Colors.white : const Color(0xFF111111),
+              ),
             ),
           ),
         ],
@@ -2006,136 +2860,129 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
   }
 
   Widget _buildProgressScreen(bool isDarkMode) {
+
     // ── INTRO mode (fake 7-second animation before paywall) ──────────────────
     if (_isIntroProgress) {
       return LayoutBuilder(
         builder: (context, constraints) {
-          final isSmallScreen = constraints.maxHeight < 700;
-          final double progressSize = isSmallScreen ? 100 : 150;
-          final double percentageSize = isSmallScreen ? 24 : 32;
-          final double spacing = isSmallScreen ? 20 : 40;
-          final double smallSpacing = isSmallScreen ? 15 : 30;
+          final h = constraints.maxHeight;
+          final isVerySmall = h < 500;
+          final isSmall = h < 700;
+          final double progressSize = isVerySmall ? 80 : (isSmall ? 100 : 150);
+          final double percentageSize = isVerySmall ? 20 : (isSmall ? 24 : 32);
+          final double spacing = isVerySmall ? 12 : (isSmall ? 20 : 40);
+          final double smallSpacing = isVerySmall ? 10 : (isSmall ? 15 : 30);
+          final double stepFont = isVerySmall ? 13 : (isSmall ? 14 : 15);
+          final double stepVPad = isVerySmall ? 4 : (isSmall ? 6 : 8);
+          final double btnVPad = isVerySmall ? 12 : (isSmall ? 14 : 18);
+          final double bottomGap = isVerySmall ? 8 : (isSmall ? 12 : 20);
 
-          return SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(height: spacing),
-                      SizedBox(
-                        height: progressSize,
-                        width: progressSize,
-                        child: Stack(
-                          children: [
-                            Center(
-                              child: SizedBox(
-                                width: progressSize,
-                                height: progressSize,
-                                child: CircularProgressIndicator(
-                                  value: progressPercent / 100,
-                                  strokeWidth: isSmallScreen ? 8 : 12,
-                                  backgroundColor: const Color(0xFFE0E0E0),
-                                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
-                                ),
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(height: spacing),
+                SizedBox(
+                  height: progressSize,
+                  width: progressSize,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.0, end: progressPercent / 100.0),
+                    duration: const Duration(milliseconds: 800),
+                    builder: (context, value, child) {
+                      return Stack(
+                        children: [
+                          Center(
+                            child: SizedBox(
+                              width: progressSize,
+                              height: progressSize,
+                              child: CircularProgressIndicator(
+                                value: value,
+                                strokeWidth: isSmall ? 8 : 12,
+                                backgroundColor: const Color(0xFFE0E0E0),
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
                               ),
                             ),
-                            Center(
-                              child: Text(
-                                '${progressPercent.toInt()}%',
-                                style: TextStyle(
-                                  fontSize: percentageSize,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                                ),
+                          ),
+                          Center(
+                            child: Text(
+                              '${(value * 100).toInt()}%',
+                              style: TextStyle(
+                                fontSize: percentageSize,
+                                fontWeight: FontWeight.bold,
+                                color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(height: smallSpacing),
-                      Text(
-                        progressStatus,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                        ),
-                      ),
-                      SizedBox(height: spacing),
-                      _buildProgressStep('Preparing your preferences', currentStep >= 1, isDarkMode),
-                      _buildProgressStep('Organizing workouts', currentStep >= 2, isDarkMode),
-                      _buildProgressStep('Creating your schedule', currentStep >= 3, isDarkMode),
-                      const SizedBox(height: 32),
-                      // Button appears only when animation completes
-                      AnimatedOpacity(
-                        opacity: _introComplete ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 500),
-                        child: _introComplete
-                            ? SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton(
-                                  onPressed: _isGenerating ? null : () async {
-                                    final purchased = await _presentRevenueCatPaywall();
-                                    if (!mounted) return;
-                                    if (purchased) {
-                                      // Subscription confirmed — persist flag and go to plans.
-                                      final prefs = await SharedPreferences.getInstance();
-                                      await prefs.setBool('hasCompletedQuiz', true);
-                                      if (!mounted) return;
-                                      Navigator.pop(context, {
-                                        'completed': true,
-                                        'navIndex': 1, // Workout tab
-                                      });
-                                    } else {
-                                      // User dismissed paywall — hard gate: send to Home.
-                                      if (!mounted) return;
-                                      Navigator.pop(context, {
-                                        'completed': false,
-                                        'navIndex': 0, // Home tab
-                                      });
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFFFF0000),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 18),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    elevation: 5,
-                                    shadowColor: const Color(0xFFFF0000).withOpacity(0.4),
-                                  ),
-                                  child: _isGenerating
-                                      ? const SizedBox(
-                                          height: 22,
-                                          width: 22,
-                                          child: CircularProgressIndicator(
-                                            color: Colors.white,
-                                            strokeWidth: 2.5,
-                                          ),
-                                        )
-                                      : const Text(
-                                          'Start My Program',
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                ),
-                              )
-                            : const SizedBox(height: 56),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
-              ),
+                SizedBox(height: smallSpacing),
+                Text(
+                  progressStatus,
+                  style: TextStyle(
+                    fontSize: isVerySmall ? 14 : 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                  ),
+                ),
+                SizedBox(height: spacing),
+                _buildProgressStepCompact('Analyzing your body & goals', 'assets/emojis/fire.png', currentStep >= 2, isDarkMode, stepFont, stepVPad),
+                _buildProgressStepCompact('Designing your workout plan', 'assets/emojis/flex.png', currentStep >= 3, isDarkMode, stepFont, stepVPad),
+                _buildProgressStepCompact('Generating your meal plan', 'assets/emojis/salad2.png', currentStep >= 4, isDarkMode, stepFont, stepVPad),
+                _buildProgressStepCompact('Optimizing for fastest results', 'assets/emojis/chart.png', currentStep >= 5, isDarkMode, stepFont, stepVPad),
+                const Spacer(),
+                // Button appears only when animation completes
+                AnimatedOpacity(
+                  opacity: _introComplete ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 500),
+                  child: _introComplete
+                      ? SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isGenerating ? null : () async {
+                              final purchased = await _presentRevenueCatPaywall();
+                              if (!mounted) return;
+                              Navigator.pop(context, {
+                                'completed': true,
+                                'navIndex': widget.quizType == 'workout' ? 1 : 2,
+                              });
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFF0000),
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: btnVPad),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 5,
+                              shadowColor: const Color(0xFFFF0000).withOpacity(0.4),
+                            ),
+                            child: _isGenerating
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                : const Text(
+                                    'Start My Program',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                          ),
+                        )
+                      : const SizedBox(height: 56),
+                ),
+                SizedBox(height: bottomGap),
+              ],
             ),
           );
         },
@@ -2146,48 +2993,34 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     return LayoutBuilder(
       builder: (context, constraints) {
         final isSmallScreen = constraints.maxHeight < 700;
-        final double progressSize = isSmallScreen ? 100 : 150;
-        final double percentageSize = isSmallScreen ? 24 : 32;
+        final double iconSize = isSmallScreen ? 80 : 100;
         final double spacing = isSmallScreen ? 20 : 40;
-        final double smallSpacing = isSmallScreen ? 15 : 30;
 
-        return SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight,
-            ),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(height: spacing),
-                    Icon(
-                      Icons.cloud_sync_outlined,
-                      size: isSmallScreen ? 80 : 100,
-                      color: const Color(0xFFFF0000),
-                    ),
-                    SizedBox(height: smallSpacing + 10),
-                    Text(
-                      progressStatus,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Removed duplicate progress steps from REAL loading mode to avoid confusing users
-                    const SizedBox(height: 10),
-                    const CircularProgressIndicator(
-                       color: Color(0xFFFF0000),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.cloud_sync_outlined,
+                  size: iconSize,
+                  color: const Color(0xFFFF0000),
                 ),
-              ),
+                SizedBox(height: spacing * 0.75),
+                Text(
+                  progressStatus,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 14 : 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const CircularProgressIndicator(
+                   color: Color(0xFFFF0000),
+                ),
+              ],
             ),
           ),
         );
@@ -2232,215 +3065,59 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     );
   }
 
-  Widget _buildProgressStep(String label, bool isCompleted, bool isDarkMode) {
+  Widget _buildProgressStep(String label, String iconPath, bool isCompleted, bool isDarkMode) {
+    return _buildProgressStepCompact(label, iconPath, isCompleted, isDarkMode, 15, 8);
+  }
+
+  Widget _buildProgressStepCompact(String label, String iconPath, bool isCompleted, bool isDarkMode, double fontSize, double vPad) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: vPad),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
             color: isCompleted ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
-            size: 20,
+            size: fontSize + 5,
           ),
-          const SizedBox(width: 10),
-          Text(
-            label,
-            style: TextStyle(
-              color: isCompleted 
-                  ? (isDarkMode ? Colors.white : const Color(0xFF1A1A1A)) 
-                  : (isDarkMode ? Colors.white54 : const Color(0xFF999999)),
-              fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: fontSize,
+                color: isCompleted 
+                    ? (isDarkMode ? Colors.white : const Color(0xFF1A1A1A)) 
+                    : (isDarkMode ? Colors.white54 : const Color(0xFF999999)),
+                fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
+          Image.asset(iconPath, width: fontSize + 5, height: fontSize + 5),
         ],
       ),
     );
   }
 }
 
-// ── BMI Gauge Painter ─────────────────────────────────────────────────────────
-/// Draws a semicircle BMI gauge with coloured arc segments and a needle pointer.
-class BmiGaugePainter extends CustomPainter {
-  final double fraction;   // 0..1 position on the gauge
-  final double bmi;        // raw BMI value for the centre label
-  final Color catColor;    // colour of the active category
-  final bool isDarkMode;
-
-  BmiGaugePainter({
-    required this.fraction,
-    required this.bmi,
-    required this.catColor,
-    required this.isDarkMode,
-  });
-
-  // BMI zone colours (left → right on arc)
-  static const List<Color> _zoneColors = [
-    Color(0xFF4FC3F7), // Underweight  (15–18.5)
-    Color(0xFF29B6F6), // Underweight  (transition)
-    Color(0xFF66BB6A), // Normal       (18.5–25)
-    Color(0xFF43A047), // Normal
-    Color(0xFFFFCA28), // Overweight   (25–30)
-    Color(0xFFFFA726), // Overweight
-    Color(0xFFEF5350), // Obese        (30–40)
-    Color(0xFFE53935), // Obese
-  ];
-
-  // Proportional stops on the 180° arc for each zone boundary
-  // 18.5 → (18.5-15)/25 = 14%,  25 → 40%,  30 → 60%
-  static const List<double> _stops = [
-    0.00, 0.14, // underweight
-    0.14, 0.40, // normal
-    0.40, 0.60, // overweight
-    0.60, 1.00, // obese
-  ];
+/// Small left-pointing triangle used as the vertical ruler centre indicator.
+class _TrianglePainter extends CustomPainter {
+  final Color color;
+  const _TrianglePainter({required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height - 10; // bottom baseline with small padding
-    final radius = (size.width * 0.42).clamp(60.0, 160.0);
-    const strokeW = 22.0;
-    const gapBetweenSegments = 0.025; // radians gap between arc segments
-
-    // The semicircle spans from π (left) to 0 (right) in standard math coords,
-    // but drawArc uses clockwise angles starting from the 3-o'clock position.
-    // We paint from 180° (left) sweeping 180° → ends at 0° (right).
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
-    final Paint arcPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeW
-      ..strokeCap = StrokeCap.butt;
-
-    // Draw background track
-    arcPaint.color = (isDarkMode ? Colors.white : Colors.black).withOpacity(0.08);
-    canvas.drawArc(rect, pi, pi, false, arcPaint);
-
-    // Reset color to fully opaque so the segment gradients don't inherit 8% opacity
-    arcPaint.color = Colors.white;
-
-    // Draw coloured zone segments (4 zones, each with two stop entries)
-    final zoneData = [
-      (_stops[0], _stops[1], _zoneColors[0], _zoneColors[1]), // underweight
-      (_stops[2], _stops[3], _zoneColors[2], _zoneColors[3]), // normal
-      (_stops[4], _stops[5], _zoneColors[4], _zoneColors[5]), // overweight
-      (_stops[6], _stops[7], _zoneColors[6], _zoneColors[7]), // obese
-    ];
-
-    for (final zone in zoneData) {
-      final startAngle = pi + zone.$1 * pi + gapBetweenSegments / 2;
-      final sweepAngle = (zone.$2 - zone.$1) * pi - gapBetweenSegments;
-      // Use a simple gradient approximation via shader
-      final startPt = Offset(
-        cx + radius * cos(startAngle),
-        cy + radius * sin(startAngle),
-      );
-      final endPt = Offset(
-        cx + radius * cos(startAngle + sweepAngle),
-        cy + radius * sin(startAngle + sweepAngle),
-      );
-      arcPaint.shader = LinearGradient(
-        colors: [zone.$3, zone.$4],
-      ).createShader(Rect.fromPoints(startPt, endPt));
-      canvas.drawArc(
-        rect.inflate(0),
-        startAngle,
-        sweepAngle,
-        false,
-        arcPaint,
-      );
-    }
-    arcPaint.shader = null;
-
-    // ── Needle ──────────────────────────────────────────────────────────────
-    // angle: π = left end (BMI 15), 2π = right end (BMI 40)
-    final needleAngle = pi + fraction * pi;
-    final needleLen = radius - strokeW / 2 + 2;
-    final needleInnerRadius = radius * 0.45; // Leave center empty for the BMI text
-    
-    final needleStartX = cx + needleInnerRadius * cos(needleAngle);
-    final needleStartY = cy + needleInnerRadius * sin(needleAngle);
-    
-    final needleX = cx + needleLen * cos(needleAngle);
-    final needleY = cy + needleLen * sin(needleAngle);
-
-    final needlePaint = Paint()
-      ..color = isDarkMode ? Colors.white : Colors.black87
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(Offset(needleStartX, needleStartY), Offset(needleX, needleY), needlePaint);
-
-    // Pointer base circle at the inner start
-    canvas.drawCircle(
-      Offset(needleStartX, needleStartY),
-      5,
-      Paint()..color = isDarkMode ? Colors.white : Colors.black87,
-    );
-    canvas.drawCircle(
-      Offset(needleStartX, needleStartY),
-      3,
-      Paint()..color = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-    );
-
-    // ── Centre text: BMI value ───────────────────────────────────────────────
-    final textColor = isDarkMode ? Colors.white : const Color(0xFF1A1A1A);
-    _drawText(
-      canvas,
-      bmi.toStringAsFixed(1),
-      Offset(cx, cy - radius * 0.32),
-      fontSize: 36,
-      fontWeight: FontWeight.bold,
-      color: catColor,
-    );
-    _drawText(
-      canvas,
-      'BMI',
-      Offset(cx, cy - radius * 0.12),
-      fontSize: 13,
-      fontWeight: FontWeight.w600,
-      color: (isDarkMode ? Colors.white : Colors.black).withOpacity(0.5),
-    );
-
-    // ── Scale labels at arc ends ─────────────────────────────────────────────
-    // "15" at left, "40" at right
-    final labelStyle = TextStyle(
-      fontSize: 11,
-      color: textColor.withOpacity(0.5),
-      fontWeight: FontWeight.w500,
-    );
-    _drawTextStyle(
-        canvas, '15', Offset(cx - radius - strokeW * 0.6, cy + 14), labelStyle);
-    _drawTextStyle(
-        canvas, '40', Offset(cx + radius + strokeW * 0.3, cy + 14), labelStyle);
-  }
-
-  void _drawText(
-    Canvas canvas,
-    String text,
-    Offset center, {
-    required double fontSize,
-    required FontWeight fontWeight,
-    required Color color,
-  }) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(fontSize: fontSize, fontWeight: fontWeight, color: color),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
-  }
-
-  void _drawTextStyle(Canvas canvas, String text, Offset center, TextStyle style) {
-    final tp = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+    final paint = Paint()..color = color;
+    final path = Path()
+      ..moveTo(size.width, 0)
+      ..lineTo(0, size.height / 2)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
   }
 
   @override
-  bool shouldRepaint(BmiGaugePainter old) =>
-      old.fraction != fraction || old.bmi != bmi;
+  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
+
+

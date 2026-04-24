@@ -7,7 +7,10 @@ import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/supabase_service.dart';
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
+import '../services/subscription_state.dart';
+import '../widgets/promo_banner.dart';
 import 'exercise_detail_page.dart';
+import '../widgets/auth/auth_modal.dart';
 import 'dart:async'; // Required for StreamSubscription
 import 'dart:convert';
 import 'dart:math';
@@ -37,6 +40,7 @@ class WorkoutPageState extends State<WorkoutPage> {
   Map<String, dynamic>? _generatedPlan;
   bool _isLoadingPlan = true;
   bool _isRestDay = false;
+  int _prefDurationWeeks = 4; // loaded from user_preferences at init
   StreamSubscription<AuthState>? _authStateSubscription;
 
   // Scroll controller for hiding header
@@ -49,6 +53,8 @@ class WorkoutPageState extends State<WorkoutPage> {
   DateTime _selectedDay = DateTime.now(); // Track which day is selected
   bool _showingDayGrid =
       true; // Toggle between grid view and detail view (mobile only)
+  bool _isLoadingOfferings = true;
+  bool _hasOfferings = false;
 
   // Generate 3 days centered around current day, adjusted by week offset
   List<Map<String, dynamic>> _generateDays() {
@@ -107,62 +113,83 @@ class WorkoutPageState extends State<WorkoutPage> {
           event == AuthChangeEvent.initialSession ||
           event == AuthChangeEvent.tokenRefreshed) {
         debugPrint('[WorkoutPage] Auth Event $event → triggering refresh');
+        _loadPrefDuration(); // reload prefs on auth change
         _refresh();
       }
     });
 
+    // Load preferred duration FIRST (fast, before plan loads)
+    _loadPrefDuration();
+
     // Start refresh — completed exercises are loaded inside refresh after plan loads
     _refresh();
 
-    // Check subscription access after the first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkSubscriptionAccess();
-    });
+    // Refresh subscription status for freemium gating
+    SubscriptionState().addListener(_onSubscriptionChanged);
+    SubscriptionState().refresh();
+
+    _checkOfferings();
   }
 
-  // ── Subscription Guard ───────────────────────────────────────────────────
-  /// Called on every page visit. Shows the paywall if the user has completed
-  /// the quiz but does NOT have an active "premium" subscription.
-  /// On dismiss/cancel → hard redirect to Home via [MainScaffoldState].
-  Future<void> _checkSubscriptionAccess() async {
-    if (kIsWeb || !mounted) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final hasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
-      if (!hasCompletedQuiz) return; // First-time user — let quiz handle it.
-
-      final isPro = await RevenueCatService().isProUser();
-      if (isPro || !mounted) return; // Subscribed — all good.
-
-      debugPrint('[WorkoutPage] Not subscribed — showing paywall gate.');
-      AnalyticsService().trackPaywallViewed(source: 'workout_page');
-
-      final result = await RevenueCatService().showPaywall();
-
-      final isProAfter = await RevenueCatService().isProUser();
-      if (isProAfter) {
-          final customerInfo = await RevenueCatService().getCustomerInfo();
-          String planId = 'unknown';
-          if (customerInfo != null && customerInfo.entitlements.active.containsKey('premium')) {
-             planId = customerInfo.entitlements.active['premium']!.productIdentifier;
-          }
-          AnalyticsService().trackPurchaseSuccess(plan: planId);
-      }
-
-      final didSubscribe =
-          result == PaywallResult.purchased || result == PaywallResult.restored || isProAfter;
-
-      if (!didSubscribe && mounted) {
-        // Hard gate: redirect to Home.
-        debugPrint('[WorkoutPage] Paywall dismissed — redirecting to Home.');
-        final scaffold = context.findAncestorStateOfType<MainScaffoldState>();
-        scaffold?.changeTab(0);
-      }
-    } catch (e) {
-      debugPrint('[WorkoutPage] _checkSubscriptionAccess error: $e');
+  Future<void> _checkOfferings() async {
+    final ready = await RevenueCatService().checkOfferingsReady();
+    if (mounted) {
+      setState(() {
+        _hasOfferings = ready;
+        _isLoadingOfferings = false;
+      });
     }
   }
-  // ────────────────────────────────────────────────────────────────
+
+  /// Loads duration_weeks from user_preferences so the grid shows the
+  /// correct week count immediately — before the full plan JSON arrives.
+  Future<void> _loadPrefDuration() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 1. INTEGER FAST PATH — written by quiz the moment durationWeeks is computed.
+      //    No regex, no Supabase round-trip. Always wins if quiz was ever completed.
+      final intVal = prefs.getInt('duration_weeks_int');
+      if (intVal != null && intVal > 0) {
+        if (mounted) setState(() => _prefDurationWeeks = intVal.clamp(1, 52));
+        return;
+      }
+
+      // 2. STRING FALLBACK — older installs that only have the string key.
+      final localDuration = prefs.getString('plan_duration');
+      if (localDuration != null && localDuration.isNotEmpty) {
+        final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(localDuration);
+        if (weekMatch != null) {
+          final val = int.parse(weekMatch.group(1)!);
+          if (mounted) setState(() => _prefDurationWeeks = val.clamp(1, 52));
+          // Back-fill integer key so next launch uses the fast path.
+          await prefs.setInt('duration_weeks_int', val.clamp(1, 52));
+          return;
+        }
+      }
+
+      // 3. SUPABASE FALLBACK — covers fresh installs before quiz completes.
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      final response = await Supabase.instance.client
+          .from('user_preferences')
+          .select('duration_weeks')
+          .eq('user_id', user.id)
+          .limit(1);
+      if (response.isNotEmpty && response.first['duration_weeks'] != null && mounted) {
+        final dbVal = (response.first['duration_weeks'] as int).clamp(1, 52);
+        setState(() => _prefDurationWeeks = dbVal);
+        // Back-fill so subsequent calls skip Supabase.
+        await prefs.setInt('duration_weeks_int', dbVal);
+      }
+    } catch (e) {
+      debugPrint('[WorkoutPage] _loadPrefDuration error: $e');
+    }
+  }
+
+  void _onSubscriptionChanged() {
+    if (mounted) setState(() {});
+  }
 
   Future<void> _loadCompletedExercises() async {
     final user = Supabase.instance.client.auth.currentUser;
@@ -223,8 +250,12 @@ class WorkoutPageState extends State<WorkoutPage> {
     print('----------------------------------------------------------------');
     print('PLAN CACHE CLEARED -> FETCHING LATEST PLAN...');
 
-    // 2. FORCE FETCH plan
-    await _loadGeneratedPlan();
+    // Re-read duration_weeks from user_preferences in parallel with plan load.
+    // This ensures the correct week count is shown immediately after quiz.
+    await Future.wait([
+      _loadPrefDuration(),
+      _loadGeneratedPlan(),
+    ]);
 
     // 3. FETCH progress from cloud (must come after plan so _exercises is populated)
     await _loadCompletedExercises();
@@ -240,6 +271,7 @@ class WorkoutPageState extends State<WorkoutPage> {
     _authStateSubscription?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    SubscriptionState().removeListener(_onSubscriptionChanged);
     super.dispose();
   }
 
@@ -375,6 +407,9 @@ class WorkoutPageState extends State<WorkoutPage> {
   }
 
   // STRICT Helper: Get Day Data by Index (Index 1..TotalDays)
+  // Handles multiple JSON structures returned by generate_user_workout_plan RPC:
+  //   Structure A: weeks['1']['days']['1'] = {...}  (expandPlan format)
+  //   Structure B: weeks['1']['1'] = {...}          (RPC direct format)
   Map<String, dynamic>? _getDayData(int globalDayIndex) {
     if (_generatedPlan == null) return null;
 
@@ -390,19 +425,40 @@ class WorkoutPageState extends State<WorkoutPage> {
     int weekIndex = ((globalDayIndex - 1) ~/ 7) + 1;
     int dayInWeek = ((globalDayIndex - 1) % 7) + 1;
 
-    final weekKey = weekIndex.toString();
-    final weekData = weeks[weekKey];
+    // Cycle weeks if the preferred plan duration is longer than the DB template
+    int actualWeeksInTemplate = weeks.keys.length;
+    if (actualWeeksInTemplate > 0 && weekIndex > actualWeeksInTemplate) {
+      weekIndex = ((weekIndex - 1) % actualWeeksInTemplate) + 1;
+    }
 
-    // Logs for strict validation
+    final weekKey = weekIndex.toString();
+    final dayKey = dayInWeek.toString();
+
+    // Try both int and string week keys
+    dynamic weekData = weeks[weekKey] ?? weeks[weekIndex];
+
     if (weekData == null) {
-      // This fails if requested day exceeds plan duration
+      print('DEBUG: weekData null for weekKey=$weekKey, weeks keys=${weeks.keys.toList()}');
       return null;
     }
 
-    final days = weekData['days'];
-    if (days == null) return null;
+    // Structure A: weekData has a 'days' sub-map
+    if (weekData is Map && weekData.containsKey('days')) {
+      final days = weekData['days'];
+      if (days is Map) {
+        final result = days[dayKey] ?? days[dayInWeek];
+        if (result != null) return Map<String, dynamic>.from(result as Map);
+      }
+    }
 
-    return days[dayInWeek.toString()];
+    // Structure B: weekData IS the days map (day keys directly)
+    if (weekData is Map) {
+      final result = weekData[dayKey] ?? weekData[dayInWeek];
+      if (result != null) return Map<String, dynamic>.from(result as Map);
+    }
+
+    print('DEBUG: dayData null for weekKey=$weekKey dayKey=$dayKey, weekData keys=${weekData is Map ? weekData.keys.toList() : weekData}');
+    return null;
   }
 
   // Get GLOBAL Day Index from _selectedDay (1-based)
@@ -450,7 +506,10 @@ class WorkoutPageState extends State<WorkoutPage> {
 
     if (dayData == null || dayData['type'] == 'rest') return 0.0;
 
-    final rawIds = dayData['exercises'] as List? ?? [];
+    final rawIds = dayData['exercises'] as List? ??
+        dayData['exercise_ids'] as List? ??
+        dayData['exercise_list'] as List? ??
+        [];
     final totalExercises = rawIds.length;
     if (totalExercises == 0) return 0.0;
 
@@ -545,12 +604,8 @@ class WorkoutPageState extends State<WorkoutPage> {
     final schedule = _generatedPlan!['schedule_json'];
 
     // Debug Logs as Requested
-    int weeksCount = 4; // Default
-    if (schedule != null && schedule['weeks_count'] != null) {
-      weeksCount = schedule['weeks_count'];
-    } else if (schedule != null && schedule['plan_duration_days'] != null) {
-      weeksCount = (schedule['plan_duration_days'] / 7).ceil();
-    }
+    // Use the duration preferred by the user, default to 4 if 0
+    int weeksCount = _prefDurationWeeks > 0 ? _prefDurationWeeks : 4;
     int totalDays = weeksCount * 7;
 
     int weekIndex = ((globalDayIndex - 1) ~/ 7) + 1;
@@ -562,6 +617,30 @@ class WorkoutPageState extends State<WorkoutPage> {
     print('Week Index: $weekIndex');
     print('Day of Week: $dayInWeek (formula: (($globalDayIndex - 1) % 7) + 1)');
     print('Total Plan Duration: $weeksCount weeks ($totalDays days)');
+
+    // Debug: print schedule structure to understand JSON format
+    if (schedule != null) {
+      print('DEBUG: schedule keys: ${schedule.keys.toList()}');
+      final weeks = schedule['weeks'];
+      if (weeks != null && weeks is Map) {
+        print('DEBUG: weeks keys: ${weeks.keys.toList()}');
+        final firstWeek = weeks[weeks.keys.first];
+        if (firstWeek != null) {
+          print('DEBUG: first week type: ${firstWeek.runtimeType}');
+          if (firstWeek is Map) {
+            print('DEBUG: first week keys: ${firstWeek.keys.toList()}');
+            if (firstWeek.containsKey('days')) {
+              final days = firstWeek['days'];
+              if (days is Map) print('DEBUG: first week days keys: ${days.keys.toList()}');
+            } else {
+              // Direct day keys
+              final firstDay = firstWeek[firstWeek.keys.first];
+              if (firstDay is Map) print('DEBUG: first day keys: ${firstDay.keys.toList()}');
+            }
+          }
+        }
+      }
+    }
 
     // Use strict helper to get day data
     final dayData = _getDayData(globalDayIndex);
@@ -591,8 +670,13 @@ class WorkoutPageState extends State<WorkoutPage> {
       return;
     }
 
-    // Get exercise count (0 for rest days)
-    final rawExercises = dayData['exercises'] as List? ?? [];
+    // Get exercise count
+    // The RPC may use 'exercises', 'exercise_ids', or 'exercise_list'
+    List rawExercises = dayData['exercises'] as List? ??
+        dayData['exercise_ids'] as List? ??
+        dayData['exercise_list'] as List? ??
+        [];
+    print('DEBUG: dayData keys: ${dayData.keys.toList()}, exercises count: ${rawExercises.length}');
     final List<String> idsForDay =
         rawExercises.map((e) => _normalizeExerciseId(e)).toList();
 
@@ -726,8 +810,12 @@ class WorkoutPageState extends State<WorkoutPage> {
 
       if (completed is Map && completed['completed'] == true) {
         setState(() => _hasPlan = true);
-        debugPrint('[WorkoutPage] Quiz completed → triggering plan refresh');
-        await _refresh();
+        debugPrint('[WorkoutPage] Quiz completed → triggering full refresh');
+        await _refresh(); // refresh this page first
+        if (mounted) {
+          // Also refresh meal plan, progress and profile pages
+          context.findAncestorStateOfType<MainScaffoldState>()?.refreshAllPages();
+        }
       } else if (completed is Map && completed.containsKey('navIndex')) {
         final mainState = context.findAncestorStateOfType<MainScaffoldState>();
         mainState?.changeTab(completed['navIndex']);
@@ -937,23 +1025,15 @@ class WorkoutPageState extends State<WorkoutPage> {
     );
   }
 
-  // Grid view: Dynamic duration
+  // Grid view: Dynamic duration with freemium soft locks
   Widget _buildGridView(bool isDarkMode) {
-    // 1) Read duration_days from plan
-    int duration = 28; // Default 4 weeks
-    if (_generatedPlan != null && _generatedPlan!['schedule_json'] != null) {
-      final s = _generatedPlan!['schedule_json'];
-      if (s['plan_duration_days'] != null) {
-        duration = s['plan_duration_days'];
-      }
-    }
-
-    // 2) Compute totalWeeks
-    int totalWeeks = (duration / 7).ceil();
-    if (totalWeeks < 1) totalWeeks = 1;
+    // 1) Use _prefDurationWeeks (loaded from user_preferences at init)
+    //    We no longer override this with the template's duration.
+    int totalWeeks = _prefDurationWeeks > 0 ? _prefDurationWeeks : 4;
 
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
+    final isPro = SubscriptionState().isPro;
 
     return Column(
       children: [
@@ -983,7 +1063,7 @@ class WorkoutPageState extends State<WorkoutPage> {
               FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
-                  '${(duration / 7).ceil()}-Week Workout Plan',
+                  '$totalWeeks-Week Workout Plan',
                   style: TextStyle(
                     fontSize: isSmallScreen ? 22 : 28,
                     fontWeight: FontWeight.w700,
@@ -994,7 +1074,9 @@ class WorkoutPageState extends State<WorkoutPage> {
               ),
               SizedBox(height: isSmallScreen ? 6 : 10),
               Text(
-                'Select a day to view your workouts',
+                isPro
+                    ? 'Select a day to view your workouts'
+                    : 'Enjoy free workouts · Unlock full plan with Premium',
                 style: TextStyle(
                   fontSize: 14,
                   color: isDarkMode ? Colors.white54 : const Color(0xFF666666),
@@ -1003,28 +1085,42 @@ class WorkoutPageState extends State<WorkoutPage> {
 
               SizedBox(height: isSmallScreen ? 16 : 30),
 
-              // 4) Loop to render each Week
+              // 4) Loop to render each Week with banners between
               for (int w = 0; w < totalWeeks; w++) ...[
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Week ${w + 1}',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFFFF0000),
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          'Week ${w + 1}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFFF0000),
+                          ),
+                        ),
+                        if (!isPro && w > 0) ...[
+                          const SizedBox(width: 8),
+                          const Icon(Icons.lock, size: 14, color: Color(0xFFFF0000)),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 15),
-                    // Grid for this week. Days are 1-based.
-                    // Week 1: 1..7
-                    // Week 2: 8..14
-                    // etc.
                     _build14DayGrid((w * 7) + 1, (w * 7) + 7, isDarkMode),
                   ],
                 ),
-                SizedBox(height: isSmallScreen ? 16 : 30),
+                // Insert PromoBanner between weeks (not after the last one)
+                if (w < totalWeeks - 1) ...[
+                  if (!isPro)
+                    PromoBanner(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      source: 'workout_week_${w + 1}',
+                    )
+                  else
+                    SizedBox(height: isSmallScreen ? 16 : 30),
+                ] else
+                  SizedBox(height: isSmallScreen ? 8 : 16),
               ],
             ],
           ),
@@ -1193,9 +1289,28 @@ class WorkoutPageState extends State<WorkoutPage> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         padding: EdgeInsets.zero,
-                        itemCount: _exercises.length,
+                        itemCount: (() {
+                          final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                          return showBanners
+                              ? _exercises.length + (_exercises.length ~/ 3)
+                              : _exercises.length;
+                        })(),
                         itemBuilder: (context, index) {
-                          final exercise = _exercises[index];
+                          final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                          const bannerInterval = 3;
+
+                          if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
+                            return const PromoBanner(
+                              margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              source: 'workout_page_list',
+                            );
+                          }
+
+                          final exerciseIndex = !showBanners
+                              ? index
+                              : index - (index ~/ (bannerInterval + 1));
+
+                          final exercise = _exercises[exerciseIndex];
                           return _buildExerciseTile(
                             exercise.name,
                             '3 sets × 12 reps',
@@ -1411,10 +1526,29 @@ class WorkoutPageState extends State<WorkoutPage> {
                                               physics:
                                                   const NeverScrollableScrollPhysics(),
                                               padding: EdgeInsets.zero,
-                                              itemCount: _exercises.length,
+                                              itemCount: (() {
+                                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                                return showBanners
+                                                    ? _exercises.length + (_exercises.length ~/ 3)
+                                                    : _exercises.length;
+                                              })(),
                                               itemBuilder: (context, index) {
+                                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                                const bannerInterval = 3;
+
+                                                if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
+                                                  return const PromoBanner(
+                                                    margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                    source: 'workout_page_desktop',
+                                                  );
+                                                }
+
+                                                final exerciseIndex = !showBanners
+                                                    ? index
+                                                    : index - (index ~/ (bannerInterval + 1));
+
                                                 final exercise =
-                                                    _exercises[index];
+                                                    _exercises[exerciseIndex];
                                                 return _buildExerciseTile(
                                                   exercise.name,
                                                   '3 sets × 12 reps',
@@ -1874,7 +2008,12 @@ class WorkoutPageState extends State<WorkoutPage> {
     final dayCompleted = _completedExercisesByDay[dateKey];
 
     final dayData = _getDayData(dayNumber);
-    final rawIds = dayData != null ? (dayData['exercises'] as List? ?? []) : [];
+    final rawIds = dayData != null
+        ? (dayData['exercises'] as List? ??
+            dayData['exercise_ids'] as List? ??
+            dayData['exercise_list'] as List? ??
+            [])
+        : [];
     final totalExercises = rawIds.length;
     final dayType = dayData != null
         ? dayData['type']
@@ -1887,8 +2026,27 @@ class WorkoutPageState extends State<WorkoutPage> {
     final isRest = dayType == 'rest';
     final isCompleted = !isRest && progressPercent == 100;
 
+    // Freemium: Day 1 is always free; remaining days require subscription
+    final isPro = SubscriptionState().isPro;
+    final isLocked = !isPro && dayNumber > 1;
+
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
+        if (isLocked) {
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user == null) {
+            AuthModal.show(context);
+            return;
+          }
+
+          // Soft gate: user-initiated paywall (not forced)
+          // Go straight to RevenueCatUI — it handles store errors natively.
+          AnalyticsService()
+              .trackPaywallViewed(source: 'workout_locked_day_$dayNumber');
+          await RevenueCatService().showPaywall();
+          await SubscriptionState().refresh();
+          return;
+        }
         setState(() {
           _selectedDay = dayDate;
           _showingDayGrid = false;
@@ -1897,15 +2055,19 @@ class WorkoutPageState extends State<WorkoutPage> {
       },
       child: Container(
         decoration: ShapeDecoration(
-          color: isCompleted
-              ? const Color(0xFF4CAF50) // Solid green when completed
-              : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
+          color: isLocked
+              ? (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF0F0F0))
+              : isCompleted
+                  ? const Color(0xFF4CAF50) // Solid green when completed
+                  : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
           shape: PolygonBorder(
             sides: 16,
             borderRadius: 5.0,
             rotate: 11.25,
             side: BorderSide(
-              color: isDarkMode ? Colors.white : Colors.black,
+              color: isLocked
+                  ? (isDarkMode ? Colors.white24 : Colors.black12)
+                  : (isDarkMode ? Colors.white : Colors.black),
               width: 2.5,
             ),
           ),
@@ -1925,9 +2087,11 @@ class WorkoutPageState extends State<WorkoutPage> {
                       style: TextStyle(
                         fontSize: circleWidth * 0.35,
                         fontWeight: FontWeight.w900,
-                        color: isCompleted 
-                            ? Colors.white 
-                            : (isDarkMode ? Colors.white : Colors.black),
+                        color: isLocked
+                            ? (isDarkMode ? Colors.white30 : Colors.black26)
+                            : isCompleted
+                                ? Colors.white
+                                : (isDarkMode ? Colors.white : Colors.black),
                         letterSpacing: -0.5,
                         height: 1.0,
                       ),
@@ -1936,18 +2100,24 @@ class WorkoutPageState extends State<WorkoutPage> {
                   SizedBox(height: circleWidth * 0.05),
                   FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(
-                      isRest ? 'Rest' : (isCompleted ? '100%' : '$progressPercent%'),
-                      style: TextStyle(
-                        fontSize: circleWidth * 0.22,
-                        fontWeight: FontWeight.bold,
-                        color: isCompleted
-                            ? Colors.white // White text on green background
-                            : (isRest
-                                ? const Color(0xFFFF0000)
-                                : const Color(0xFF4CAF50)),
-                      ),
-                    ),
+                    child: isLocked
+                        ? Icon(
+                            Icons.lock,
+                            size: circleWidth * 0.28,
+                            color: isDarkMode ? Colors.white30 : Colors.black26,
+                          )
+                        : Text(
+                            isRest ? 'Rest' : (isCompleted ? '100%' : '$progressPercent%'),
+                            style: TextStyle(
+                              fontSize: circleWidth * 0.22,
+                              fontWeight: FontWeight.bold,
+                              color: isCompleted
+                                  ? Colors.white // White text on green background
+                                  : (isRest
+                                      ? const Color(0xFFFF0000)
+                                      : const Color(0xFF4CAF50)),
+                            ),
+                          ),
                   ),
                 ],
               ),
@@ -1962,6 +2132,7 @@ class WorkoutPageState extends State<WorkoutPage> {
   int _getSelectedDayNumber() {
     return _getCurrentGlobalDayIndex();
   }
+
 
   Widget _buildStatsSummary(bool isDarkMode) {
     final stats = _calculateOverallStats();

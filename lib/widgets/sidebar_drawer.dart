@@ -132,6 +132,7 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
 
                     const SizedBox(height: 24),
 
+                    if (!kIsWeb)
                     _buildNavItem(
                       icon: Icons.person_outline,
                       activeIcon: Icons.person,
@@ -142,9 +143,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb
-                          ? () => Navigator.pushNamed(context, '/profile')
-                          : null,
                     ),
                     _buildNavItem(
                       icon: Icons.settings_outlined,

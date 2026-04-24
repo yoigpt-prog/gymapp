@@ -14,8 +14,11 @@ import 'dart:io' show Platform;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/supabase_service.dart';
+import '../services/revenue_cat_service.dart';
+import '../services/subscription_state.dart';
 import '../main.dart';
 import '../widgets/red_header.dart';
+import '../widgets/promo_banner.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
 import 'legal/disclaimer_page.dart';
@@ -27,7 +30,6 @@ import 'legal/age_requirement_page.dart';
 import 'legal/ai_transparency_page.dart';
 import 'legal/contact_support_page.dart';
 import 'legal/about_app_page.dart';
-import '../widgets/desktop_right_panel.dart';
 import 'calculators/bmi_calculator_page.dart';
 import 'calculators/calorie_calculator_page.dart';
 import 'calculators/macro_calculator_page.dart';
@@ -72,6 +74,9 @@ class ProfilePageState extends State<ProfilePage> {
     'diet': '',
   };
 
+  // Subscription state for Upgrade card
+  bool _isPro = false;
+
   final ScrollController _scrollController = ScrollController();
 
   /// Called by MainScaffold after the quiz completes so the profile
@@ -83,6 +88,15 @@ class ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadProfileImage();
     _loadUserData();
+    // Listen to subscription state changes
+    SubscriptionState().addListener(_onSubscriptionChanged);
+    SubscriptionState().refresh().then((_) {
+      if (mounted) setState(() => _isPro = SubscriptionState().isPro);
+    });
+  }
+
+  void _onSubscriptionChanged() {
+    if (mounted) setState(() => _isPro = SubscriptionState().isPro);
   }
 
   Future<void> _loadProfileImage() async {
@@ -231,7 +245,7 @@ class ProfilePageState extends State<ProfilePage> {
 
   void _rateApp() async {
     const androidPackageName = 'com.gymguide.app';
-    const iOSAppId = '1234567890'; // Replace with Apple App ID when available
+    const iOSAppId = '6760553535';
 
     if (kIsWeb) return;
 
@@ -614,6 +628,7 @@ class ProfilePageState extends State<ProfilePage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    SubscriptionState().removeListener(_onSubscriptionChanged);
     super.dispose();
   }
 
@@ -648,100 +663,47 @@ class ProfilePageState extends State<ProfilePage> {
               isDarkMode: widget.isDarkMode,
             ),
             Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Responsive ad panel: 22% of screen width, clamped to [200, 320]
-                  final adPanelWidth = (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1200),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Left Column: User Profile Card
+                          SizedBox(
+                            width: 350,
+                            child: _buildUserProfileCard(),
+                          ),
+                          const SizedBox(width: 24),
 
-                  const double spacing = 16.0;
-
-                  return Stack(
-                    children: [
-                      // Layer 1: Scrollable Content with Scrollbar on far right
-                      Positioned.fill(
-                        child: Scrollbar(
-                          controller: _scrollController,
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.all(spacing),
-                            child: Row(
+                          // Right Column: Stats & Goals Grid
+                          Expanded(
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: Center(
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(maxWidth: 1200),
-                                      child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          // Left Column: User Profile Card
-                                          SizedBox(
-                                            width: 350,
-                                            child: _buildUserProfileCard(),
-                                          ),
-                                          const SizedBox(width: 24),
-
-                                          // Right Column: Stats & Goals Grid
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                _buildSectionTitle('Physical Stats'),
-                                                const SizedBox(height: 16),
-                                                _buildStatsGrid(),
-                                                const SizedBox(height: 32),
-                                                _buildSectionTitle('Goals & Preferences'),
-                                                const SizedBox(height: 16),
-                                                _buildGoalsGrid(),
-                                                const SizedBox(height: 24),
-                                                _buildResetPlanCard(),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: spacing),
-                                SizedBox(width: adPanelWidth), // Spacer for Ad
+                                _buildSectionTitle('Physical Stats'),
+                                const SizedBox(height: 16),
+                                _buildStatsGrid(),
+                                const SizedBox(height: 32),
+                                _buildSectionTitle('Goals & Preferences'),
+                                const SizedBox(height: 16),
+                                _buildGoalsGrid(),
+                                const SizedBox(height: 24),
+                                _buildResetPlanCard(),
                               ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
-
-                      // Layer 2: Fixed Ad Panel
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.all(spacing),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Expanded(child: SizedBox()), // Allows clicks to pass through
-                              const SizedBox(width: spacing),
-                              SizedBox(
-                                width: adPanelWidth,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                                    border: Border.all(
-                                      color: widget.isDarkMode ? Colors.white : Colors.black,
-                                      width: 1.0,
-                                    ),
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: DesktopRightPanel(isDarkMode: widget.isDarkMode),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
@@ -778,7 +740,16 @@ class ProfilePageState extends State<ProfilePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildUserProfileCard(isMobile: true),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
+
+                      // ── Upgrade to Premium card (non-subscribers only) ──────
+                      if (!_isPro)
+                        const PromoBanner(
+                          source: 'profile_page',
+                        ),
+                      // ──────────────────────────────────────────────────────
+
+                      const SizedBox(height: 8),
                       _buildSectionTitle('Physical Stats'),
                       const SizedBox(height: 16),
                       _buildStatsGrid(isMobile: true),
@@ -1211,15 +1182,15 @@ class ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  /// Returns the correct default avatar SVG based on the user's gender.
-  /// Male is the default. Switches to femaleprofile.svg when gender is 'Female'.
+  /// Returns the correct default avatar based on the user's gender.
+  /// Male is the default. Switches to femaleprofile.png when gender is 'Female'.
   Widget _buildDefaultAvatar() {
     final gender = (_userStats['gender'] ?? '').toString().toLowerCase();
-    final svgAsset = (gender == 'female')
-        ? 'assets/svg/logo/femaleprofile.svg'
-        : 'assets/svg/logo/maleprofile.svg';
-    return SvgPicture.asset(
-      svgAsset,
+    final pngAsset = (gender == 'female')
+        ? 'assets/svg/logo/femaleprofile.png'
+        : 'assets/svg/logo/maleprofile.png';
+    return Image.asset(
+      pngAsset,
       fit: BoxFit.cover,
       width: 120,
       height: 120,
@@ -1656,6 +1627,7 @@ class ProfilePageState extends State<ProfilePage> {
       await prefs.remove('has_meal_plan');
       await prefs.remove('meal_plan_cache_${user.id}');
       await prefs.remove('plan_duration');
+      await prefs.remove('duration_weeks_int');
       await prefs.remove('weight_unit');
 
       if (mounted) {

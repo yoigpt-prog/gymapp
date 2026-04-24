@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'main_layout_wrapper.dart';
 import 'red_header.dart';
 
@@ -46,8 +45,8 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
           final adPanelWidth =
               (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
           final adAsset = widget.isDarkMode
-              ? 'assets/banner/adblackmode.svg'
-              : 'assets/banner/adwhitemode.svg';
+              ? 'assets/banner/adblackmode.png'
+              : 'assets/banner/adwhitemode.png';
 
           const double spacing = 16.0;
 
@@ -146,7 +145,7 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
                                       builder: (context, constraints) {
                                         return AnimatedSwitcher(
                                           duration: const Duration(milliseconds: 50),
-                                          child: SvgPicture.asset(
+                                          child: Image.asset(
                                             adAsset,
                                             key: ValueKey(adAsset),
                                             fit: BoxFit.fill,
@@ -204,7 +203,11 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
             height: double.infinity,
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
-              child: widget.child,
+              child: Column(
+                children: [
+                   widget.child,
+                ],
+              ),
             ),
           ),
         );

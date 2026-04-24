@@ -1,8 +1,8 @@
 name: gymguide_app
-description: A new Flutter project.
+description: Personalized Workout & Meal Plan App (1800+ Exercises)
 publish_to: "none"
 
-version: 1.0.0+1
+version: 1.0.2+1
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -24,8 +24,13 @@ dependencies:
   purchases_flutter: ^9.16.0
   purchases_ui_flutter: ^9.16.0
   url_launcher: ^6.3.1
+  sign_in_with_apple: ^6.1.4
+  crypto: ^3.0.6
   path_provider: ^2.1.2
   mixpanel_flutter: ^2.5.0
+  seo: any
+  share_plus: ^12.0.2
+  upgrader: ^13.1.0
 
 dev_dependencies:
   flutter_test:
@@ -51,6 +56,13 @@ flutter:
     - assets/svg/socialmedia/
     - assets/banner/
     - assets/quizimg.png
+    - assets/sparkles.png
+    - assets/rating4.9.png
+    - assets/avatar1.png
+    - assets/avatar2.png
+    - assets/avatar3.png
+    - assets/emojis/
+    - assets/quizemojis/
 
 flutter_launcher_icons:
   android: true
