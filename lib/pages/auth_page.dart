@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/auth/auth_modal.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({Key? key}) : super(key: key);
@@ -12,20 +13,8 @@ class _AuthPageState extends State<AuthPage> {
   bool _isLoading = false;
 
   Future<void> _signInWithGoogle() async {
-    setState(() => _isLoading = true);
-    try {
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'com.gymguide.app://login-callback/',
-      );
-      if (mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
-      }
-    } catch (e) {
-      debugPrint('[AUTH ERROR] Google sign-in: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    // Delegate to the platform-aware AuthModal (native on mobile, OAuth on web)
+    AuthModal.show(context);
   }
 
   Future<void> _signInWithApple() async {

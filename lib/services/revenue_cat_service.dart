@@ -103,6 +103,7 @@ class RevenueCatService {
   /// Returns true if the user has the "premium" entitlement active.
   /// Returns false on Web since RevenueCat SDK is unsupported.
   Future<bool> isProUser() async {
+    if (kDebugMode) return true;
     if (kIsWeb) return false;
     if (!_initialized) return false;
     try {

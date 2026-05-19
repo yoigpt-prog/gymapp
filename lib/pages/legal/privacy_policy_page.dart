@@ -96,12 +96,16 @@ class PrivacyPolicyPage extends StatelessWidget {
             isDarkMode,
           ),
           _buildSection(
-            '6. Third-Party Services',
+            '6. Third-Party Services & Advertising',
             'GymGuide uses trusted third-party providers:\n\n'
             '• Supabase – database and authentication\n'
             '• Cloudflare R2 – media storage\n'
             '• RevenueCat / Apple / Google – payments and subscriptions\n'
             '• AI providers – plan generation\n\n'
+            'Advertising & Cookies:\n'
+            'We use Google AdSense to display ads on the web. Third-party vendors, including Google, use cookies to serve ads based on a user\'s prior visits to this or other websites.\n'
+            '• Google\'s use of advertising cookies enables it and its partners to serve ads to our users based on their visit to our sites and/or other sites on the Internet.\n'
+            '• You may opt out of personalized advertising by visiting Google\'s Ads Settings (https://www.google.com/settings/ads) or www.aboutads.info.\n\n'
             'Each third party operates under its own privacy policies.',
             isDarkMode,
           ),

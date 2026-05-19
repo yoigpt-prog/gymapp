@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Ignore backups and scratch files
+fresh_backup.sql
+backup.sql
+scratch/

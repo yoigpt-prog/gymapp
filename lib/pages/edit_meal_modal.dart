@@ -311,7 +311,7 @@ class _EditMealModalState extends State<EditMealModal> {
                   child: ElevatedButton(
                     onPressed: _save,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF4444),
+                      backgroundColor: const Color(0xFFFF0000),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),

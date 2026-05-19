@@ -67,7 +67,20 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: () => Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false),
+                    ),
+                    _buildNavItem(
+                      icon: Icons.article_outlined,
+                      activeIcon: Icons.article,
+                      label: 'Articles',
+                      index: -2,
+                      isSelected: false,
+                      selectedColor: selectedColor,
+                      unselectedColor: unselectedColor,
+                      hoverColor: hoverColor,
+                      selectedBgColor: selectedBgColor,
+                      onTapOverride: () {
+                        Navigator.pushNamed(context, '/Blog');
+                      },
                     ),
                     _buildNavItem(
                       icon: Icons.calculate_outlined,
@@ -79,7 +92,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/bmi') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.local_fire_department_outlined,
@@ -91,7 +103,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/calorie') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.pie_chart_outline,
@@ -103,7 +114,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/macro') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.monitor_weight_outlined,
@@ -115,7 +125,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/body-fat') : null,
                     ),
                     _buildNavItem(
                       icon: Icons.fitness_center_outlined,
@@ -127,7 +136,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb ? () => Navigator.pushNamed(context, '/calculators/one-rm') : null,
                     ),
 
                     const SizedBox(height: 24),
@@ -154,9 +162,6 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
                       unselectedColor: unselectedColor,
                       hoverColor: hoverColor,
                       selectedBgColor: selectedBgColor,
-                      onTapOverride: kIsWeb
-                          ? () => Navigator.pushNamed(context, '/settings')
-                          : null,
                     ),
                     _buildNavItem(
                       icon: Icons.logout,

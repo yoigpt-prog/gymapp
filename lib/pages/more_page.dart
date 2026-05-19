@@ -19,6 +19,7 @@ import 'legal/ai_transparency_page.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/revenue_cat_service.dart';
 import '../widgets/auth/auth_modal.dart';
+import '../widgets/desktop_right_panel.dart';
 
 class SettingsPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -65,10 +66,11 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ─── WEB LAYOUT (new redesign) ───────────────
+  // ─── WEB LAYOUT ──────────────────────────────
 
   Widget _buildWebLayout() {
     final bg = widget.isDarkMode ? const Color(0xFF0F0F0F) : const Color(0xFFF5F5F5);
+    final isDark = widget.isDarkMode;
 
     return Scaffold(
       backgroundColor: bg,
@@ -80,50 +82,99 @@ class _SettingsPageState extends State<SettingsPage> {
               title: 'Settings',
               subtitle: 'Account, billing & preferences',
               onToggleTheme: widget.toggleTheme,
-              isDarkMode: widget.isDarkMode,
+              isDarkMode: isDark,
             ),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const double spacing = 16.0;
+                  const double spacing = 12.0;
+                  final availableWidth = constraints.maxWidth;
+                  final panelWidth = (availableWidth * 0.20).clamp(200.0, 280.0);
 
-                  return Scrollbar(
-                    controller: _scrollController,
-                    thumbVisibility: true,
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(spacing),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: 800,
-                            minHeight: constraints.maxHeight - (spacing * 2),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Column(
+                  return Stack(
+                    children: [
+                      // Layer 1: Scrollable center content
+                      Positioned.fill(
+                        child: Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            padding: EdgeInsets.all(spacing),
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _sectionLabel('Account'),
-                                _buildAccountSection(),
-                                const SizedBox(height: 12),
-                                _sectionLabel('Subscription'),
-                                _buildSubscriptionSection(),
-                                const SizedBox(height: 12),
-                                _sectionLabel('Preferences'),
-                                _buildPreferencesSection(),
-                                const SizedBox(height: 12),
-                                _sectionLabel('Legal & Support'),
-                                _buildLegalPrivacyCard(),
-                                const SizedBox(height: 12),
-                                _buildSupportInfoCard(),
-                                const SizedBox(height: 32),
+                                // Center content (fills all space left of ad panel)
+                                Expanded(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                      border: Border.all(
+                                        color: isDark ? Colors.white : Colors.black,
+                                        width: 1.0,
+                                      ),
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        _sectionLabel('Account'),
+                                        _buildAccountSection(),
+                                        const SizedBox(height: 12),
+                                        _sectionLabel('Subscription'),
+                                        _buildSubscriptionSection(),
+                                        const SizedBox(height: 12),
+                                        _sectionLabel('Preferences'),
+                                        _buildPreferencesSection(),
+                                        const SizedBox(height: 12),
+                                        _sectionLabel('Legal & Support'),
+                                        _buildLegalPrivacyCard(),
+                                        const SizedBox(height: 12),
+                                        _buildSupportInfoCard(),
+                                        const SizedBox(height: 32),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // Right spacer matching ad panel width
+                                SizedBox(width: spacing + panelWidth),
                               ],
                             ),
                           ),
                         ),
                       ),
-                    ),
+
+                      // Layer 2: Fixed right ad panel only
+                      Positioned.fill(
+                        child: Padding(
+                          padding: EdgeInsets.all(spacing),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Pass-through center (no left panel for settings)
+                              const Expanded(child: SizedBox()),
+                              SizedBox(width: spacing),
+                              // Fixed right ad panel
+                              SizedBox(
+                                width: panelWidth,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                    border: Border.all(
+                                      color: isDark ? Colors.white : Colors.black,
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: DesktopRightPanel(isDarkMode: isDark),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -778,10 +829,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                const Icon(
-                  Icons.workspace_premium_rounded,
-                  color: Colors.white,
-                  size: 60,
+                Image.asset(
+                  'assets/progress/program completion.png',
+                  width: 64,
+                  height: 64,
                 ),
               ],
             ),

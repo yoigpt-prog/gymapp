@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
+import 'meal_engine_v2_service.dart';
+import '../config/env_config.dart';
 
 
 class PlanService {
@@ -110,7 +112,7 @@ class PlanService {
       'gender': gender,
       'goal': goalCode,
       'location': trainingLocation,
-      'weeks_count': (planDurationDays / 7).ceil().clamp(1, 52),
+      'weeks_count': (planDurationDays / 7).ceil().clamp(1, 104),
       'days_per_week': trainingDays,
       'weeks': {},
       'metadata': {'note': 'plan_templates removed'},
@@ -150,8 +152,10 @@ class PlanService {
   // ✅ MEAL PLAN (NEW SIMPLE LOGIC)
   // ------------------------------------------------------------
 
-  /// Check if plan exists, if not generate it using the simple RPC.
-  /// This replaces all complex generation logic.
+  /// Generates (or regenerates) the meal plan.
+  ///
+  /// STAGING → calls the new dynamic generate_meal_plan_v2 RPC via MealEngineV2Service.
+  /// PRODUCTION → falls back to the existing template-based RPC (unchanged).
   Future<Map<String, dynamic>> generateMealPlan({
     String? goal,
     int? durationWeeks,
@@ -162,51 +166,16 @@ class PlanService {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not logged in');
 
-    // 1. CHECK IF PLAN EXISTS
-    final existing = await _supabase
-        .from('user_meal_plans')
-        .select('id')
-        .eq('user_id', user.id)
-        .limit(1);
-
-    // 2. GENERATE IF EMPTY OR FORCED
-    if (existing.isEmpty || forceRegenerate) {
-      print('DEBUG: Generating meal plan via new pivot RPC...');
-      
-      // Fetch user preferences to build the template key
-      final prefs = await _supabase
-          .from('user_preferences')
-          .select('goal, diet_type, duration_weeks')
-          .eq('user_id', user.id)
-          .maybeSingle();
-          
-      String diet = 'balanced';
-      String g = 'fat_loss';
-      int weeks = 1;
-      
-      if (prefs != null) {
-          diet = prefs['diet_type'] ?? 'balanced';
-          g = prefs['goal'] ?? 'fat_loss';
-          weeks = (prefs['duration_weeks'] as int?) ?? 1;
-      }
-      
-      final String templateKey = resolveTemplateKey(goal: g, diet: diet);
-
-      final response = await _supabase.rpc(
-        'generate_user_meal_plan_from_template',
-        params: {
-            'p_user_id': user.id,
-            'p_template_key': templateKey,
-            'p_duration_weeks': weeks,
-        },
-      );
-      print('DEBUG: generate_user_meal_plan_from_template ($templateKey) response: $response');
-    } else {
-      print('DEBUG: Meal plan already exists. Skipping generation.');
+    print('DEBUG: [PlanService] Generating via MealEngineV2Service');
+    try {
+      final result = await MealEngineV2Service()
+          .generateMealPlan(forceRegen: forceRegenerate);
+      print('DEBUG: [PlanService] v2 generation result: $result');
+      return result;
+    } catch (e) {
+      print('WARNING: [PlanService] v2 generation failed: $e');
+      rethrow;
     }
-
-    // 3. RETURN DUMMY MAP (Quiz expects a Map, but ignores content)
-    return {'status': 'success', 'message': 'Plan ensured'}; 
   }
 
   // ----------------------------------------------------------------

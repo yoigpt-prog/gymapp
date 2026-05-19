@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
 import '../widgets/red_header.dart';
+import '../config/env_config.dart';
 
 // ---------------------------------------------------------------------------
 // Shared data model loaded once by ProgressPage
@@ -181,30 +182,20 @@ class ProgressPageState extends State<ProgressPage> {
     DateTime? planStartFromPlan;
 
     try {
-      // 1. Fetch the user's active plan
-      final planResponse = await _supabase
-          .from('user_meal_plans')
-          .select('id, created_at')
-          .eq('user_id', user.id)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+      final mealRows = await _supabase
+          .from('user_meal_plan_v2')
+          .select('week_number, day_number, is_eaten, generated_at, created_at')
+          .eq('user_id', user.id);
 
-      if (planResponse != null) {
-        if (planResponse['created_at'] != null) {
-          final parsed = DateTime.tryParse(planResponse['created_at'].toString());
+      if (mealRows != null && (mealRows as List).isNotEmpty) {
+        final firstRow = (mealRows as List).first;
+        final createdVal = firstRow['created_at'] ?? firstRow['generated_at'];
+        if (createdVal != null) {
+          final parsed = DateTime.tryParse(createdVal.toString());
           if (parsed != null) {
             planStartFromPlan = DateTime(parsed.year, parsed.month, parsed.day);
           }
         }
-
-        final String activePlanId = planResponse['id'].toString();
-
-        // 2. Fetch pivot meals for this plan
-        final mealRows = await _supabase
-            .from('user_meal_plan_meals')
-            .select('week_number, day_number, is_eaten')
-            .eq('plan_id', activePlanId);
 
         final Map<int, int> totalMealsMap = {};
         final Map<int, int> eatenMealsMap = {};
@@ -233,16 +224,21 @@ class ProgressPageState extends State<ProgressPage> {
            }
         }
       }
-    } catch (_) {
-      // Ignore if table doesn't exist yet
+    } catch (e) {
+      debugPrint('ERROR: Failed to fetch user_meal_plan_v2 in progress_page: $e');
     }
 
     // Derive actual duration from the actual max day in the plan (same logic as MealPlanPage)
     final int maxDay =
         allDays.isEmpty ? 0 : allDays.reduce((a, b) => a > b ? a : b);
     final int durationWeeksFromPlan = maxDay > 0 ? (maxDay / 7).ceil() : 0;
-    // Only apply prefs fallback if we actually have plan data — otherwise keep 0
-    final int durationWeeks = allDays.isEmpty
+    
+    // Fall back to preferred duration if the user has completed the quiz or has plan keys in preferences
+    final bool hasPlan = allDays.isNotEmpty ||
+        (prefs.getBool('hasCompletedQuiz') ?? false) ||
+        (prefs.getBool('has_workout_plan') ?? false);
+
+    final int durationWeeks = !hasPlan
         ? 0
         : (durationWeeksFromPlan > durationWeeksFromPrefs)
             ? durationWeeksFromPlan
@@ -362,11 +358,9 @@ class ProgressPageState extends State<ProgressPage> {
     return [
       _ProgramCompletionCard(isDarkMode: d, data: _data, loading: _loading),
       const SizedBox(height: 16),
-      _StreakCard(isDarkMode: d, data: _data),
-      const SizedBox(height: 16),
-      _WeeklyMetricsEntryCard(isDarkMode: d),
-      const SizedBox(height: 16),
       _BodyMetricsCard(isDarkMode: d, data: _data),
+      const SizedBox(height: 16),
+      _WeeklyMetricsEntryCard(isDarkMode: d, data: _data, loading: _loading),
       const SizedBox(height: 20),
     ];
   }
@@ -454,11 +448,9 @@ class ProgressPageState extends State<ProgressPage> {
                                   const SizedBox(height: 16),
                                   _WeeklyTrendChart(isDarkMode: d, data: _data),
                                   const SizedBox(height: 16),
-                                  _StreakCard(isDarkMode: d, data: _data),
-                                  const SizedBox(height: 16),
-                                  _WeeklyMetricsEntryCard(isDarkMode: d),
-                                  const SizedBox(height: 16),
                                   _BodyMetricsCard(isDarkMode: d, data: _data),
+                                  const SizedBox(height: 16),
+                                  _WeeklyMetricsEntryCard(isDarkMode: d, data: _data, loading: _loading),
                                   const SizedBox(height: 20),
                                 ],
                               ),
@@ -535,169 +527,89 @@ class _ProgramCompletionCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
+        color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDarkMode
-                ? Colors.black.withOpacity(0.5)
-                : Colors.black.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Gradient header banner ────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isDarkMode
-                      ? [
-                          const Color(0xFF1F1F1F),
-                          const Color(0xFF2A1A1A),
-                        ]
-                      : [
-                          const Color(0xFFFFF0F0),
-                          const Color(0xFFFFF8F0),
-                        ],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Image.asset('assets/progress/program completion.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Program Completion',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Track your workout & meal progress',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  // Stacked icon with gradient ring
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFFF4444), Color(0xFFFF8C00)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFF4444).withOpacity(0.4),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.military_tech_rounded,
-                        color: Colors.white, size: 20),
+              if (loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF0000)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _PremiumSection(
+            isDarkMode: isDarkMode,
+            imagePath: 'assets/progress/workout plan.png',
+            label: 'Workout Plan',
+            accentColor: const Color(0xFFFF0000),
+            accentEnd: const Color(0xFFFF0000),
+            totalDays: wTotal,
+            completedDays: wCompleted,
+            pct: wPct,
+            loading: loading,
+            subtext: 'training days',
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 1,
+                    color: isDarkMode ? Colors.white12 : Colors.grey.shade200,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Program Completion',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            color: isDarkMode ? Colors.white : Colors.black,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Track your workout & meal progress',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDarkMode
-                                ? Colors.white38
-                                : Colors.grey.shade500,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (loading)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Color(0xFFFF4444)),
-                    ),
-                ],
-              ),
+                ),
+              ],
             ),
-
-            // ── Body ─────────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  // ── Workout section ─────────────────────────────────────
-                  _PremiumSection(
-                    isDarkMode: isDarkMode,
-                    icon: Icons.fitness_center_rounded,
-                    label: 'Workout Plan',
-                    accentColor: const Color(0xFFFF4444),
-                    accentEnd: const Color(0xFFFF6B6B),
-                    totalDays: wTotal,
-                    completedDays: wCompleted,
-                    pct: wPct,
-                    loading: loading,
-                    subtext: 'training days',
-                  ),
-
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            height: 1,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.transparent,
-                                  isDarkMode
-                                      ? Colors.white12
-                                      : Colors.grey.shade200,
-                                  Colors.transparent,
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // ── Meal section ────────────────────────────────────────
-                  _PremiumSection(
-                    isDarkMode: isDarkMode,
-                    icon: Icons.restaurant_menu_rounded,
-                    label: 'Meal Plan',
-                    accentColor: const Color(0xFFFF8C00),
-                    accentEnd: const Color(0xFFFFB347),
-                    totalDays: mTotal,
-                    completedDays: mCompleted,
-                    pct: mPct,
-                    loading: loading,
-                    subtext: 'total days',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+          _PremiumSection(
+            isDarkMode: isDarkMode,
+            imagePath: 'assets/progress/mealplan.png',
+            label: 'Meal Plan',
+            accentColor: const Color(0xFFFF0000),
+            accentEnd: const Color(0xFFFF0000),
+            totalDays: mTotal,
+            completedDays: mCompleted,
+            pct: mPct,
+            loading: loading,
+            subtext: 'total days',
+          ),
+        ],
       ),
     );
   }
@@ -706,7 +618,7 @@ class _ProgramCompletionCard extends StatelessWidget {
 /// A single plan section: header, stat tiles, and progress bar.
 class _PremiumSection extends StatelessWidget {
   final bool isDarkMode;
-  final IconData icon;
+  final String imagePath;
   final String label;
   final Color accentColor;
   final Color accentEnd;
@@ -718,7 +630,7 @@ class _PremiumSection extends StatelessWidget {
 
   const _PremiumSection({
     required this.isDarkMode,
-    required this.icon,
+    required this.imagePath,
     required this.label,
     required this.accentColor,
     required this.accentEnd,
@@ -737,25 +649,7 @@ class _PremiumSection extends StatelessWidget {
         // Section header
         Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [accentColor, accentEnd],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: accentColor.withOpacity(0.35),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Icon(icon, size: 15, color: Colors.white),
-            ),
+            Image.asset(imagePath, width: 32, height: 32),
             const SizedBox(width: 10),
             Text(
               label,
@@ -799,7 +693,7 @@ class _PremiumSection extends StatelessWidget {
             Expanded(
               child: _StatTile(
                 isDarkMode: isDarkMode,
-                icon: Icons.calendar_month_rounded,
+                imagePath: 'assets/progress/calendar.png',
                 value: loading ? '--' : '$totalDays',
                 label: subtext,
                 accentColor: accentColor,
@@ -809,10 +703,10 @@ class _PremiumSection extends StatelessWidget {
             Expanded(
               child: _StatTile(
                 isDarkMode: isDarkMode,
-                icon: Icons.check_circle_rounded,
+                imagePath: 'assets/progress/completed.png',
                 value: loading ? '--' : '$completedDays',
                 label: 'completed',
-                accentColor: const Color(0xFFFF4444),
+                accentColor: const Color(0xFFFF0000),
               ),
             ),
           ],
@@ -834,14 +728,14 @@ class _PremiumSection extends StatelessWidget {
 /// A premium stat tile (icon + big number + label).
 class _StatTile extends StatelessWidget {
   final bool isDarkMode;
-  final IconData icon;
+  final String imagePath;
   final String value;
   final String label;
   final Color accentColor;
 
   const _StatTile({
     required this.isDarkMode,
-    required this.icon,
+    required this.imagePath,
     required this.value,
     required this.label,
     required this.accentColor,
@@ -863,15 +757,7 @@ class _StatTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 17, color: accentColor),
-          ),
+          Image.asset(imagePath, width: 34, height: 34),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1010,31 +896,40 @@ class _WeeklyTrendChart extends StatelessWidget {
               : (isDarkMode ? Colors.white12 : Colors.black12),
           width: 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDarkMode
-                ? Colors.white.withOpacity(0.03)
-                : Colors.black.withOpacity(0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-            spreadRadius: 0,
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Meal Adherence – This Week',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDarkMode ? Colors.white : Colors.black)),
-          const SizedBox(height: 4),
-          Text('Meals eaten per day of the current program week',
-              style: TextStyle(
-                  fontSize: 11,
-                  color: isDarkMode ? Colors.white38 : Colors.grey)),
-          const SizedBox(height: 20),
+          Row(
+            children: [
+              Image.asset('assets/progress/mealplan.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Meal Adherence',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Meals eaten per day of the current week',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -1107,282 +1002,6 @@ class _BarColumn extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Streak Card — PREMIUM REDESIGN
-// ---------------------------------------------------------------------------
-class _StreakCard extends StatelessWidget {
-  final bool isDarkMode;
-  final _ProgressData? data;
-  const _StreakCard({required this.isDarkMode, required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width <= 800;
-    final streak = data?.streakDays ?? 0;
-    final eaten = data?.currentWeekEaten ?? {};
-    final dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    final hasStreak = streak > 0;
-    final borderColor = isMobile
-        ? (isDarkMode ? Colors.white : Colors.black)
-        : (isDarkMode ? Colors.white12 : Colors.black12);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF141414) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDarkMode
-                ? Colors.black.withOpacity(0.5)
-                : Colors.black.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Gradient header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isDarkMode
-                      ? [const Color(0xFF1F1F1F), const Color(0xFF1A1A2A)]
-                      : [const Color(0xFFFFF8EC), const Color(0xFFFFF3F0)],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFF6B00).withOpacity(0.4),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.local_fire_department_rounded,
-                        color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Consistency Streak',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                          color: isDarkMode ? Colors.white : Colors.black,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Meals logged this week',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Body
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Streak number + label row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '$streak',
-                        style: TextStyle(
-                          fontSize: 52,
-                          fontWeight: FontWeight.w900,
-                          height: 1.0,
-                          letterSpacing: -2,
-                          foreground: Paint()
-                            ..shader = const LinearGradient(
-                              colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
-                            ).createShader(
-                              const Rect.fromLTWH(0, 0, 80, 60),
-                            ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              streak == 1 ? 'day' : 'days',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: isDarkMode ? Colors.white70 : Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              'streak',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Spacer(),
-                      // Badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: hasStreak
-                              ? const Color(0xFFFF6B00).withOpacity(isDarkMode ? 0.18 : 0.1)
-                              : (isDarkMode ? Colors.white10 : Colors.grey.shade100),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: hasStreak
-                                ? const Color(0xFFFF6B00).withOpacity(0.35)
-                                : Colors.transparent,
-                          ),
-                        ),
-                        child: Text(
-                          hasStreak ? '🔥 On fire!' : 'Get started',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: hasStreak
-                                ? const Color(0xFFFF6B00)
-                                : (isDarkMode ? Colors.white38 : Colors.grey),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    hasStreak
-                        ? 'Meals logged consecutively. Keep it up!'
-                        : 'Log a meal today to start your streak.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: isDarkMode ? Colors.white38 : Colors.grey.shade500,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // Day bubbles
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: List.generate(
-                      7,
-                      (i) => _StreakBubble(
-                        day: dayLabels[i],
-                        isActive: (eaten[i + 1] ?? 0) > 0,
-                        isDarkMode: isDarkMode,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StreakBubble extends StatelessWidget {
-  final String day;
-  final bool isActive;
-  final bool isDarkMode;
-
-  const _StreakBubble({
-    required this.day,
-    required this.isActive,
-    required this.isDarkMode,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            gradient: isActive
-                ? const LinearGradient(
-                    colors: [Color(0xFFFF6B00), Color(0xFFFF4444)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  )
-                : null,
-            color: isActive ? null : (isDarkMode ? Colors.white.withOpacity(0.07) : Colors.grey.shade100),
-            shape: BoxShape.circle,
-            boxShadow: isActive
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFFFF6B00).withOpacity(0.4),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    )
-                  ]
-                : null,
-            border: isActive
-                ? null
-                : Border.all(
-                    color: isDarkMode ? Colors.white12 : Colors.grey.shade200,
-                    width: 1,
-                  ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            day,
-            style: TextStyle(
-              color: isActive
-                  ? Colors.white
-                  : (isDarkMode ? Colors.white38 : Colors.grey.shade400),
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 6. Body Metrics Card
 // ---------------------------------------------------------------------------
 class _BodyMetricsCard extends StatelessWidget {
@@ -1432,26 +1051,40 @@ class _BodyMetricsCard extends StatelessWidget {
               : (isDarkMode ? Colors.white12 : Colors.black12),
           width: 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDarkMode
-                ? Colors.white.withOpacity(0.03)
-                : Colors.black.withOpacity(0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-            spreadRadius: 0,
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Body Metrics',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDarkMode ? Colors.white : Colors.black)),
-          const SizedBox(height: 20),
+          Row(
+            children: [
+              Image.asset('assets/progress/body metrics.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Body Metrics',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Track your weight progress',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1593,26 +1226,40 @@ class _NutritionProgressCard extends StatelessWidget {
               : (isDarkMode ? Colors.white12 : Colors.black12),
           width: 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDarkMode
-                ? Colors.white.withOpacity(0.03)
-                : Colors.black.withOpacity(0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-            spreadRadius: 0,
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Nutrition Progress',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDarkMode ? Colors.white : Colors.black)),
-          const SizedBox(height: 20),
+          Row(
+            children: [
+              Image.asset('assets/progress/mealplan.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Nutrition Progress',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Adherence to your meal plan',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           Text('Meal Adherence',
               style: TextStyle(
                   fontSize: 13,
@@ -1766,7 +1413,13 @@ class _MacroRing extends StatelessWidget {
 // ---------------------------------------------------------------------------
 class _WeeklyMetricsEntryCard extends StatefulWidget {
   final bool isDarkMode;
-  const _WeeklyMetricsEntryCard({required this.isDarkMode});
+  final _ProgressData? data;
+  final bool loading;
+  const _WeeklyMetricsEntryCard({
+    required this.isDarkMode,
+    required this.data,
+    required this.loading,
+  });
 
   @override
   State<_WeeklyMetricsEntryCard> createState() =>
@@ -1775,82 +1428,41 @@ class _WeeklyMetricsEntryCard extends StatefulWidget {
 
 class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
   bool _isKg = true;
-  bool _loading = true;
-  int _durationWeeks = 0;
   int _selectedWeek = 1; // which week the user is logging for
-  final Map<int, double> _weekWeights = {}; // week number -> weight in kg
   final TextEditingController _weightController = TextEditingController();
   bool _saving = false;
+  bool _initialized = false;
 
   final _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _syncData();
   }
 
   @override
-  void dispose() {
-    _weightController.dispose();
-    super.dispose();
+  void didUpdateWidget(_WeeklyMetricsEntryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.data != oldWidget.data || widget.loading != oldWidget.loading) {
+      _syncData();
+    }
   }
 
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
-
-      // 1. Get plan duration
-      final prefs = await _supabase
-          .from('user_preferences')
-          .select('duration_weeks, created_at')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      final weeks = (prefs?['duration_weeks'] as int?) ?? 0;
-
-      // 2. Get saved weekly weights
-      final rows = await _supabase
-          .from('user_weekly_weights')
-          .select('week_number, weight_kg')
-          .eq('user_id', user.id)
-          .order('week_number');
-
-      final Map<int, double> loaded = {};
-      for (final r in (rows as List)) {
-        final wn = r['week_number'] as int;
-        final wkg = (r['weight_kg'] as num).toDouble();
-        loaded[wn] = wkg;
+  void _syncData() {
+    if (widget.data != null && !_initialized) {
+      _initialized = true;
+      if (mounted) {
+        setState(() {
+          _selectedWeek = widget.data!.currentWeek;
+          if (widget.data!.weekWeights.containsKey(_selectedWeek)) {
+            final val = _isKg
+                ? widget.data!.weekWeights[_selectedWeek]!
+                : widget.data!.weekWeights[_selectedWeek]! * 2.20462;
+            _weightController.text = val.toStringAsFixed(1);
+          }
+        });
       }
-
-      // Determine current week from plan start date
-      DateTime? planStart;
-      if (prefs?['created_at'] != null) {
-        planStart = DateTime.tryParse(prefs!['created_at'].toString());
-      }
-      int currentWeek = 1;
-      if (planStart != null) {
-        final daysPassed = DateTime.now().difference(planStart).inDays;
-        currentWeek = (daysPassed ~/ 7) + 1;
-        currentWeek = currentWeek.clamp(1, weeks > 0 ? weeks : 1);
-      }
-
-      setState(() {
-        _durationWeeks = weeks;
-        _weekWeights.addAll(loaded);
-        _selectedWeek = currentWeek;
-        _loading = false;
-        // Pre-fill input if current week already has a weight
-        if (loaded.containsKey(currentWeek)) {
-          final val =
-              _isKg ? loaded[currentWeek]! : loaded[currentWeek]! * 2.20462;
-          _weightController.text = val.toStringAsFixed(1);
-        }
-      });
-    } catch (_) {
-      setState(() => _loading = false);
     }
   }
 
@@ -1898,22 +1510,19 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
 
       if (mounted) {
         setState(() {
-          _weekWeights[_selectedWeek] = kgValue;
           _saving = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Weight logged successfully!'),
-            backgroundColor: Color(0xFFCC0A16),
+            backgroundColor: Color(0xFFFF0000),
           ),
         );
         
-        // Let the parent refresh data if needed
+        // Let the parent refresh data to update UI
         if (context.findAncestorStateOfType<ProgressPageState>() != null) {
           context.findAncestorStateOfType<ProgressPageState>()!.refresh();
         }
-        // Also reload local data to sync the displayed weight list
-        await _loadData();
       }
     } catch (e) {
       print('Error logging weight: $e');
@@ -1943,99 +1552,50 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
         : (widget.isDarkMode ? Colors.white12 : Colors.black12);
 
     return Container(
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF141414) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        color: widget.isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: widget.isDarkMode
-                ? Colors.black.withOpacity(0.5)
-                : Colors.black.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Gradient header ───────────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: widget.isDarkMode
-                      ? [const Color(0xFF1F1F1F), const Color(0xFF1A2020)]
-                      : [const Color(0xFFF0FFF8), const Color(0xFFF0F8FF)],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Image.asset('assets/progress/log weekly metrics.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Log Weekly Metrics',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: widget.isDarkMode ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      (widget.data?.durationWeeks ?? 0) > 0
+                          ? 'Week $_selectedWeek of ${widget.data!.durationWeeks}'
+                          : 'Track your weight each week',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: subColor,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFF4444).withOpacity(0.4),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.monitor_weight_rounded,
-                        color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Log Weekly Metrics',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            color: widget.isDarkMode ? Colors.white : Colors.black,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _durationWeeks > 0
-                              ? 'Week $_selectedWeek of $_durationWeeks'
-                              : 'Track your weight each week',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: subColor,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Body ─────────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            ],
+          ),
+          const SizedBox(height: 24),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
                   // Weight input + unit toggle
                   Row(
                     children: [
@@ -2064,23 +1624,26 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
                                   size: 16,
                                   color: _weightController.text.isEmpty
                                       ? subColor
-                                      : const Color(0xFFFF4444),
+                                      : const Color(0xFFFF0000),
                                 ),
                                 const SizedBox(width: 10),
-                                Text(
-                                  _weightController.text.isEmpty
-                                      ? 'Tap to enter weight'
-                                      : _weightController.text,
-                                  style: TextStyle(
-                                    color: _weightController.text.isEmpty
-                                        ? subColor
-                                        : (widget.isDarkMode
-                                            ? Colors.white
-                                            : Colors.black),
-                                    fontSize: 15,
-                                    fontWeight: _weightController.text.isEmpty
-                                        ? FontWeight.w400
-                                        : FontWeight.w600,
+                                Expanded(
+                                  child: Text(
+                                    _weightController.text.isEmpty
+                                        ? 'Tap to enter weight'
+                                        : _weightController.text,
+                                    style: TextStyle(
+                                      color: _weightController.text.isEmpty
+                                          ? subColor
+                                          : (widget.isDarkMode
+                                              ? Colors.white
+                                              : Colors.black),
+                                      fontSize: 15,
+                                      fontWeight: _weightController.text.isEmpty
+                                          ? FontWeight.w400
+                                          : FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],
@@ -2136,17 +1699,17 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
                           gradient: _saving
                               ? null
                               : const LinearGradient(
-                                  colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
+                                  colors: [Color(0xFFFF0000), Color(0xFFFF0000)],
                                   begin: Alignment.centerLeft,
                                   end: Alignment.centerRight,
                                 ),
-                          color: _saving ? const Color(0xFFFF4444).withOpacity(0.5) : null,
+                          color: _saving ? const Color(0xFFFF0000).withOpacity(0.5) : null,
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: _saving
                               ? null
                               : [
                                   BoxShadow(
-                                    color: const Color(0xFFFF4444).withOpacity(0.4),
+                                    color: const Color(0xFFFF0000).withOpacity(0.4),
                                     blurRadius: 12,
                                     offset: const Offset(0, 4),
                                   ),
@@ -2176,15 +1739,15 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
                   ),
 
                   // Weekly weights list
-                  if (_loading)
+                  if (widget.loading)
                     const Padding(
                       padding: EdgeInsets.only(top: 20),
                       child: Center(
                         child: CircularProgressIndicator(
-                          color: Color(0xFFFF4444), strokeWidth: 2),
+                          color: Color(0xFFFF0000), strokeWidth: 2),
                       ),
                     )
-                  else if (_durationWeeks > 0) ...[
+                  else if ((widget.data?.durationWeeks ?? 0) > 0) ...[
                     const SizedBox(height: 20),
                     Row(
                       children: [
@@ -2211,7 +1774,7 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
                           width: 4,
                           height: 14,
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFF4444),
+                            color: const Color(0xFFFF0000),
                             borderRadius: BorderRadius.circular(2),
                           ),
                         ),
@@ -2224,130 +1787,443 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
                             color: widget.isDarkMode ? Colors.white70 : Colors.black87,
                           ),
                         ),
+                        const Spacer(),
+                        // Jump-to-week button — always shown for plans > 12 weeks
+                        if (widget.data!.durationWeeks > 12)
+                          GestureDetector(
+                            onTap: () => _showWeekJumpPicker(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF0000).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: const Color(0xFFFF0000).withOpacity(0.3),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.swap_vert_rounded,
+                                      size: 13, color: Color(0xFFFF0000)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Jump to Week',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFFF0000),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 10),
-                    ...List.generate(_durationWeeks, (i) {
-                      final weekNum = i + 1;
-                      final hasWeight = _weekWeights.containsKey(weekNum);
-                      final isSelected = _selectedWeek == weekNum;
+                    _buildWeekList(),
+                  ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-                      return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedWeek = weekNum;
-                            if (hasWeight) {
-                              final val = _isKg
-                                  ? _weekWeights[weekNum]!
-                                  : _weekWeights[weekNum]! * 2.20462;
-                              _weightController.text = val.toStringAsFixed(1);
-                            } else {
-                              _weightController.clear();
-                            }
-                          });
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 11),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFFFF4444).withOpacity(0.08)
-                                : (widget.isDarkMode
-                                    ? Colors.white.withOpacity(0.04)
-                                    : const Color(0xFFF8F8F8)),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isSelected
-                                  ? const Color(0xFFFF4444)
-                                  : Colors.transparent,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  gradient: isSelected
-                                      ? const LinearGradient(
-                                          colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        )
-                                      : null,
-                                  color: isSelected
-                                      ? null
-                                      : (hasWeight
-                                          ? const Color(0xFFFF4444).withOpacity(0.12)
-                                          : (widget.isDarkMode
-                                              ? Colors.white10
-                                              : Colors.grey.withOpacity(0.15))),
-                                  shape: BoxShape.circle,
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '$weekNum',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: isSelected
-                                        ? Colors.white
-                                        : (hasWeight
-                                            ? const Color(0xFFFF4444)
-                                            : (widget.isDarkMode
-                                                ? Colors.white38
-                                                : Colors.grey)),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                'Week $weekNum',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                  color: widget.isDarkMode
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                hasWeight
-                                    ? _displayWeight(_weekWeights[weekNum]!)
-                                    : '—',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: hasWeight
-                                      ? const Color(0xFFFF4444)
-                                      : (widget.isDarkMode
-                                          ? Colors.white24
-                                          : Colors.black26),
-                                ),
-                              ),
-                              if (isSelected) ...[
-                                const SizedBox(width: 6),
-                                const Icon(Icons.edit_rounded,
-                                    size: 14, color: Color(0xFFFF4444)),
-                              ],
-                            ],
-                          ),
+  /// Builds the smart week list — adapts to any plan duration.
+  Widget _buildWeekList() {
+    final totalWeeks = widget.data!.durationWeeks;
+    final currentWeek = widget.data!.currentWeek;
+    final weekWeights = widget.data!.weekWeights;
+
+    // ── SHORT plan (≤ 12 weeks): show every week ─────────────────────────
+    if (totalWeeks <= 12) {
+      return Column(
+        children: List.generate(totalWeeks, (i) {
+          return _buildWeekRow(i + 1, weekWeights);
+        }),
+      );
+    }
+
+    // ── MEDIUM / LONG plan (> 12 weeks): smart view ──────────────────────
+    // Always show: logged weeks + window around current/selected week.
+    final Set<int> toShow = {};
+
+    // 1. All weeks that have a logged weight
+    toShow.addAll(weekWeights.keys);
+
+    // 2. Window: 2 before and 2 after the SELECTED week
+    final windowStart = (_selectedWeek - 2).clamp(1, totalWeeks);
+    final windowEnd   = (_selectedWeek + 2).clamp(1, totalWeeks);
+    for (int w = windowStart; w <= windowEnd; w++) {
+      toShow.add(w);
+    }
+
+    // 3. Always include current plan week
+    toShow.add(currentWeek.clamp(1, totalWeeks));
+
+    final sorted = toShow.toList()..sort();
+
+    // Render with gap indicators between non-consecutive weeks
+    final rows = <Widget>[];
+    for (int idx = 0; idx < sorted.length; idx++) {
+      final weekNum = sorted[idx];
+      if (idx > 0 && sorted[idx] - sorted[idx - 1] > 1) {
+        // Gap indicator
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.more_vert,
+                    size: 14,
+                    color: widget.isDarkMode ? Colors.white24 : Colors.black26),
+              ],
+            ),
+          ),
+        );
+      }
+      rows.add(_buildWeekRow(weekNum, weekWeights));
+    }
+
+    // Summary chip at the bottom
+    final loggedCount = weekWeights.length;
+    rows.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Center(
+          child: Text(
+            '$loggedCount of $totalWeeks weeks logged',
+            style: TextStyle(
+              fontSize: 11,
+              color: widget.isDarkMode ? Colors.white38 : Colors.grey.shade500,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Column(children: rows);
+  }
+
+  /// Single week row — shared by all plan-length modes.
+  Widget _buildWeekRow(int weekNum, Map<int, double> weekWeights) {
+    final hasWeight = weekWeights.containsKey(weekNum);
+    final isSelected = _selectedWeek == weekNum;
+    final isCurrent = weekNum == (widget.data?.currentWeek ?? 1);
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedWeek = weekNum;
+          if (hasWeight) {
+            final val = _isKg
+                ? weekWeights[weekNum]!
+                : weekWeights[weekNum]! * 2.20462;
+            _weightController.text = val.toStringAsFixed(1);
+          } else {
+            _weightController.clear();
+          }
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFFFF0000).withOpacity(0.08)
+              : (widget.isDarkMode
+                  ? Colors.white.withOpacity(0.04)
+                  : const Color(0xFFF8F8F8)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFFFF0000)
+                : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                gradient: isSelected
+                    ? const LinearGradient(
+                        colors: [Color(0xFFFF0000), Color(0xFFFF0000)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: isSelected
+                    ? null
+                    : (hasWeight
+                        ? const Color(0xFFFF0000).withOpacity(0.12)
+                        : (widget.isDarkMode
+                            ? Colors.white10
+                            : Colors.grey.withOpacity(0.15))),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '$weekNum',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected
+                      ? Colors.white
+                      : (hasWeight
+                          ? const Color(0xFFFF0000)
+                          : (widget.isDarkMode ? Colors.white38 : Colors.grey)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Row(
+                children: [
+                  Text(
+                    'Week $weekNum',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  if (isCurrent) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF0000).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'NOW',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFFF0000),
+                          letterSpacing: 0.5,
                         ),
-                      );
-                    }),
+                      ),
+                    ),
                   ],
                 ],
               ),
             ),
+            Text(
+              hasWeight ? _displayWeight(weekWeights[weekNum]!) : '—',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: hasWeight
+                    ? const Color(0xFFFF0000)
+                    : (widget.isDarkMode ? Colors.white24 : Colors.black26),
+              ),
+            ),
+            if (isSelected) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.edit_rounded, size: 14, color: Color(0xFFFF0000)),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  /// Bottom-sheet week picker — works for any plan duration.
+  void _showWeekJumpPicker(BuildContext context) {
+    final totalWeeks = widget.data?.durationWeeks ?? 1;
+    int tempWeek = _selectedWeek.clamp(1, totalWeeks);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            return Container(
+              height: MediaQuery.of(ctx).size.height * 0.55,
+              decoration: BoxDecoration(
+                color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  // Handle
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: widget.isDarkMode ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Select Week',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: widget.isDarkMode ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  Text(
+                    '1 – $totalWeeks weeks',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(ctx).copyWith(
+                        dragDevices: {
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.mouse,
+                          PointerDeviceKind.trackpad,
+                        },
+                      ),
+                      child: ListWheelScrollView.useDelegate(
+                        itemExtent: 48,
+                        perspective: 0.005,
+                        physics: const FixedExtentScrollPhysics(),
+                        controller: FixedExtentScrollController(
+                            initialItem: tempWeek - 1),
+                        onSelectedItemChanged: (idx) {
+                          setSheet(() => tempWeek = idx + 1);
+                        },
+                        childDelegate: ListWheelChildBuilderDelegate(
+                          childCount: totalWeeks,
+                          builder: (ctx2, idx) {
+                            final wk = idx + 1;
+                            final sel = wk == tempWeek;
+                            final logged = widget.data!.weekWeights.containsKey(wk);
+                            return Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Week $wk',
+                                    style: TextStyle(
+                                      fontSize: sel ? 22 : 17,
+                                      fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                                      color: sel
+                                          ? const Color(0xFFFF0000)
+                                          : (widget.isDarkMode
+                                              ? Colors.white38
+                                              : Colors.grey),
+                                    ),
+                                  ),
+                                  if (logged) ...[
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      Icons.check_circle_rounded,
+                                      size: 14,
+                                      color: sel
+                                          ? const Color(0xFFFF0000)
+                                          : Colors.green,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => Navigator.pop(ctx),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                color: widget.isDarkMode
+                                    ? Colors.white10
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: widget.isDarkMode
+                                      ? Colors.white54
+                                      : Colors.black54,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              setState(() {
+                                _selectedWeek = tempWeek;
+                                final ww = widget.data!.weekWeights;
+                                if (ww.containsKey(tempWeek)) {
+                                  final val = _isKg
+                                      ? ww[tempWeek]!
+                                      : ww[tempWeek]! * 2.20462;
+                                  _weightController.text =
+                                      val.toStringAsFixed(1);
+                                } else {
+                                  _weightController.clear();
+                                }
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFFFF0000), Color(0xFFFF0000)],
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color:
+                                        const Color(0xFFFF0000).withOpacity(0.4),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              alignment: Alignment.center,
+                              child: const Text(
+                                'Go to Week',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -2537,13 +2413,13 @@ class _UnitPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFFFF4444)
+              ? const Color(0xFFFF0000)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
           boxShadow: isActive
               ? [
                   BoxShadow(
-                    color: const Color(0xFFFF4444).withOpacity(0.35),
+                    color: const Color(0xFFFF0000).withOpacity(0.35),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   )

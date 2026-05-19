@@ -1,6 +1,9 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/meal_model.dart';
+import 'meal_engine_v2_service.dart';
+import '../config/env_config.dart';
 import 'dart:math';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -129,116 +132,9 @@ class SupabaseService {
   }
   Future<List<Map<String, dynamic>>> getUserMealPlan({int? week, int? day}) async {
     try {
-      final user = _client.auth.currentUser;
-      print('DEBUG: [SupabaseService] getUserMealPlan called. AUTH USER ID = ${user?.id}');
-      
-      if (user == null) {
-          print('ERROR: User is null in getUserMealPlan!');
-          throw Exception('User not logged in');
-      }
-
-      // 1. Fetch the user's active meal plan ID
-      print("Fetching from meal_plans, NOT ai_plans");
-      final planResponse = await _client
-          .from('user_meal_plans')
-          .select('id')
-          .eq('user_id', user.id)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
-      if (planResponse == null) {
-          print('DEBUG: User has 0 rows in meal_plans table. Auto-creating a shell plan.');
-          final insertResponse = await _client.from('user_meal_plans').insert({
-              'user_id': user.id,
-              'template_key': 'custom',
-          }).select('id').single();
-          
-          final newPlanId = insertResponse['id'].toString();
-          return []; // Return empty meals (no crash)
-      }
-      
-      final String activePlanId = planResponse['id'].toString();
-
-      // 2. Fetch meals for this plan using the pivot table
-      var query = _client
-          .from('user_meal_plan_meals')
-          .select('''
-            id,
-            week_number,
-            day_number,
-            meal_type,
-            is_eaten,
-            meals (
-              id,
-              meal_code,
-              name,
-              image_url,
-              calories,
-              protein_g,
-              carbs_g,
-              fat_g,
-              ingredients_json,
-              meal_ingredients (*)
-            )
-          ''')
-          .eq('plan_id', activePlanId);
-
-      if (week != null) {
-        query = query.eq('week_number', week);
-      }
-      if (day != null) {
-        query = query.eq('day_number', day);
-      }
-      
-      final pivotData = await query.order('day_number', ascending: true) as List<dynamic>;
-      
-      if (pivotData.isEmpty) return [];
-
-      // 4. Map them back to the enriched plan format expected by UI
-      final List<Map<String, dynamic>> enrichedPlan = [];
-
-      for (var pivotRow in pivotData) {
-        final mealObj = pivotRow['meals'];
-        if (mealObj == null) continue;
-
-        final mealId = mealObj['id'].toString();
-        final merged = <String, dynamic>{};
-        
-        // Use week_number directly from DB
-        final int weekNum = (pivotRow['week_number'] as int?) ?? 1;
-        final int dayOfWeek = (pivotRow['day_number'] as int?) ?? 1;
-        final int globalDay = (weekNum - 1) * 7 + dayOfWeek;
-        
-        merged['plan_week'] = weekNum;
-        merged['plan_day'] = dayOfWeek;
-        merged['plan_global_day'] = globalDay;
-        merged['plan_meal_type'] = pivotRow['meal_type'];
-        merged['meal_type'] = pivotRow['meal_type']; // Pass the explicit type for Meal.fromJson
-        
-        merged['plan_row_id'] = pivotRow['id']; // Important: Use the pivot UUID
-        merged['id'] = mealId; // The real global meal UUID
-        merged['is_eaten'] = pivotRow['is_eaten'] ?? false;
-        merged['name'] = mealObj['name'];
-        merged['image_url'] = mealObj['image_url'];
-        merged['calories'] = mealObj['calories'];
-        merged['protein_g'] = mealObj['protein_g'];
-        merged['carbs_g'] = mealObj['carbs_g'];
-        merged['fats_g'] = mealObj['fat_g'];
-        
-        // Attach DB ingredients 
-        final List<dynamic> mealIngs = mealObj['meal_ingredients'] ?? [];
-        final List<dynamic> jsonIngs = mealObj['ingredients_json'] ?? [];
-        merged['ingredients'] = mealIngs.isNotEmpty ? mealIngs : jsonIngs;
-        
-        enrichedPlan.add(merged);
-      }
-      
-      print('DEBUG: Fetched ${enrichedPlan.length} isolated meals from active plan.');
-      return enrichedPlan;
-
+      return await MealEngineV2Service().getUserMealPlan(week: week, day: day);
     } catch (e) {
-      print('Error fetching isolated user meal plan: $e');
+      print('ERROR: [SupabaseService] getUserMealPlan (v2) failed: $e');
       return [];
     }
   }
@@ -250,14 +146,8 @@ class SupabaseService {
           final user = _client.auth.currentUser;
           if (user == null) throw Exception('User not logged in');
 
-          // Persist the toggled state to DB tables depending on architecture
           if (meal.planId != null) {
-              try {
-                  await _client
-                      .from('user_meal_plan_meals')
-                      .update({'is_eaten': isEaten})
-                      .eq('id', meal.planId!);
-              } catch (_) {}
+              await MealEngineV2Service().toggleMealEaten(meal.planId!, isEaten);
           }
 
           if (isEaten) {
@@ -300,72 +190,33 @@ class SupabaseService {
       }
   }
 
-  // Save edits natively by cloning the meal and attaching it to the pivot.
-  // Replaces the old approach since meals are now global and static.
+  // Save edits natively by updating the custom fields in user_meal_plan_v2.
   Future<void> saveMealOverrides(String originalMealId, Meal meal) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
-    if (meal.planId == null) {
-      print('Error: Cannot edit meal without a pivot planId');
-      return;
-    }
 
     try {
-      final String safeMealCode = DateTime.now().millisecondsSinceEpoch.toString() + '_custom';
+      final payload = {
+        'custom_calories': meal.calories,
+        'custom_protein': meal.protein,
+        'custom_carbs': meal.carbs,
+        'custom_fats': meal.fats,
+        'scaled_ingredients': meal.ingredients.map((ing) => {
+          'name': ing.name,
+          'amount': ing.amount,
+          'kcal': ing.calories,
+        }).toList(),
+        'is_custom': true,
+      };
+
+      await _client
+          .from('user_meal_plan_v2')
+          .update(payload)
+          .eq('id', originalMealId);
       
-      // 1. Fetch original meal row to clone all properties (like primary_goal)
-      final originalMealRow = await _client.from('meals').select().eq('id', meal.id).maybeSingle();
-      
-      final Map<String, dynamic> cloneData = originalMealRow != null 
-          ? Map<String, dynamic>.from(originalMealRow as Map<String, dynamic>) 
-          : {};
-          
-      cloneData.remove('id');
-      cloneData.remove('created_at');
-
-      // Overlay with custom edits
-      cloneData['name'] = meal.name;
-      cloneData['calories'] = meal.calories;
-      cloneData['protein_g'] = meal.protein;
-      cloneData['carbs_g'] = meal.carbs;
-      cloneData['fat_g'] = meal.fats;
-      cloneData['meal_code'] = safeMealCode;
-      cloneData['user_id'] = user.id;
-      cloneData['is_custom'] = true;
-      // Force keep the original image_url, never overwrite it with the potentially missing UI value
-      cloneData['ingredients_json'] = meal.ingredients.map((ing) => {
-        'name': ing.name,
-        'quantity': ing.amount,
-        'kcal': ing.calories,
-      }).toList();
-
-      // Create a brand new custom meal in the global table
-      final newMealRaw = await _client.from('meals').insert(cloneData).select('id').single();
-
-      final String newMealId = newMealRaw['id'].toString();
-
-      // 2. Link this new custom meal to the user's pivot row
-      await _client.from('user_meal_plan_meals').update({
-        'meal_id': newMealId,
-      }).eq('id', meal.planId!);
-
-      // 3. Insert new ingredients linked to the newly cloned meal
-      if (meal.ingredients.isNotEmpty) {
-        final List<Map<String, dynamic>> ingPayload = meal.ingredients.map((ing) {
-          return {
-            'meal_id': newMealId,
-            'name': ing.name,
-            'quantity': ing.amount,
-            'calories': ing.calories,
-          };
-        }).toList();
-
-        await _client.from('meal_ingredients').insert(ingPayload);
-      }
-      
-      print('DEBUG: Cloned customized meal and assigned to pivot row ${meal.planId}');
+      print('DEBUG: [SupabaseService] V2 saved overrides on user_meal_plan_v2: $payload');
     } catch (e) {
-      print('Error saving meal edits natively: $e');
+      print('ERROR: [SupabaseService] V2 failed to save overrides: $e');
       throw e;
     }
   }
@@ -387,6 +238,8 @@ class SupabaseService {
     double? weight,
     int? age,
     double? targetWeight,
+    String? experienceLevel,
+    String? sessionDuration,
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw Exception('User not logged in');
@@ -441,6 +294,8 @@ class SupabaseService {
     if (weight != null) upsertData['weight_kg'] = weight;
     if (age != null) upsertData['age'] = age;
     if (targetWeight != null) upsertData['target_weight_kg'] = targetWeight;
+    if (experienceLevel != null) upsertData['experience_level'] = experienceLevel;
+    if (sessionDuration != null) upsertData['session_duration'] = sessionDuration;
 
     // Single atomic upsert — all fields together
     await _client.from('user_preferences').upsert(upsertData, onConflict: 'user_id');
@@ -453,7 +308,10 @@ class SupabaseService {
   Future<List<String>> getFavorites() async {
     try {
       final user = _client.auth.currentUser;
-      if (user == null) return [];
+      if (user == null) {
+        final prefs = await SharedPreferences.getInstance();
+        return prefs.getStringList('local_favorites') ?? [];
+      }
       
       final response = await _client
           .from('user_favorites')
@@ -471,7 +329,17 @@ class SupabaseService {
   Future<void> toggleFavorite(String exerciseName, bool isFavorite) async {
     try {
       final user = _client.auth.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        final prefs = await SharedPreferences.getInstance();
+        List<String> favs = prefs.getStringList('local_favorites') ?? [];
+        if (isFavorite && !favs.contains(exerciseName)) {
+          favs.add(exerciseName);
+        } else if (!isFavorite && favs.contains(exerciseName)) {
+          favs.remove(exerciseName);
+        }
+        await prefs.setStringList('local_favorites', favs);
+        return;
+      }
 
       if (isFavorite) {
         await _client.from('user_favorites').upsert({
@@ -572,6 +440,83 @@ class SupabaseService {
     } catch (e) {
       print('DEBUG: [SupabaseService] Error getting all completed exercises: $e');
       return {};
+    }
+  }
+
+  Future<Map<String, Map<String, List<String>>>> getAllWorkoutCustomizations() async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return {};
+
+      final response = await _client
+          .from('user_workout_progress')
+          .select('date, added_exercises, removed_exercises')
+          .eq('user_id', user.id);
+
+      final Map<String, Map<String, List<String>>> result = {};
+      final rows = response as List<dynamic>;
+      for (var row in rows) {
+        final added = row['added_exercises'] != null ? List<String>.from(row['added_exercises']) : <String>[];
+        final removed = row['removed_exercises'] != null ? List<String>.from(row['removed_exercises']) : <String>[];
+        result[row['date'].toString()] = {
+          'added': added,
+          'removed': removed,
+        };
+      }
+      return result;
+    } catch (e) {
+      print('DEBUG: [SupabaseService] Error getting all customizations: $e');
+      return {};
+    }
+  }
+
+  Future<void> updateDayCustomizations(String dateYMD, List<String> added, List<String> removed) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return;
+
+      await _client.from('user_workout_progress').upsert({
+        'user_id': user.id,
+        'date': dateYMD,
+        'added_exercises': added,
+        'removed_exercises': removed,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id, date');
+    } catch (e) {
+      print('DEBUG: [SupabaseService] Error updating day customizations: $e');
+    }
+  }
+
+  Future<List<dynamic>> getFavoriteExercisesDetails() async {
+    try {
+      final user = _client.auth.currentUser;
+      List<String> favoriteNames = [];
+
+      if (user == null) {
+        final prefs = await SharedPreferences.getInstance();
+        favoriteNames = prefs.getStringList('local_favorites') ?? [];
+      } else {
+        final response = await _client
+            .from('user_favorites')
+            .select('exercise_name')
+            .eq('user_id', user.id);
+        final rows = response as List<dynamic>;
+        favoriteNames = rows.map((e) => e['exercise_name'].toString()).toList();
+      }
+
+      if (favoriteNames.isEmpty) return [];
+
+      final detailsResponse = await _client
+          .from('exercises')
+          .select('id, exercise_name, target_muscle, synergist, difficulty_level, '
+                'instruction_1, instruction_2, instruction_3, instruction_4, '
+                'urls, exercise_type, equipment, is_male, is_female, group_path')
+          .inFilter('exercise_name', favoriteNames);
+
+      return detailsResponse as List<dynamic>;
+    } catch (e) {
+      print('DEBUG: [SupabaseService] Error getting favorite exercise details: $e');
+      return [];
     }
   }
 

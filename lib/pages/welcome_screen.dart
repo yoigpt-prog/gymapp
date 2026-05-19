@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'auth_page.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
-const _kBg = Color(0xFF0D0608);
-const _kRed = Color(0xFFD4132A);
-const _kRedGlow = Color(0xFFB5061C);
+const _kBg = Color(0xFF000000);
+const _kRed = Color(0xFFFF0000);
+const _kRedGlow = Color(0xFFFF0000);
 const _kGold = Color(0xFFFFBB00);
 
 class WelcomeScreen extends StatefulWidget {
@@ -49,6 +51,15 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    precacheImage(const AssetImage('assets/built for real results.png'), context);
+    precacheImage(const AssetImage('assets/personalized workouts.png'), context);
+    precacheImage(const AssetImage('assets/smart meal plans.png'), context);
+    precacheImage(const AssetImage('assets/track your progress.png'), context);
+  }
+
+  @override
   void dispose() {
     _entryCtrl.dispose();
     _pulseCtrl.dispose();
@@ -56,6 +67,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   void _goNext() {
+    final isMobileLayout = MediaQuery.of(context).size.width <= 600;
+    if (kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android || isMobileLayout)) {
+      _showAppDownloadPopup(context);
+      return;
+    }
+
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const AuthPage(),
@@ -63,6 +80,145 @@ class _WelcomeScreenState extends State<WelcomeScreen>
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
       ),
+    );
+  }
+
+  void _showAppDownloadPopup(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        final bool isIOS = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
+        
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+          ),
+          backgroundColor: Colors.white,
+          elevation: 24,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(28),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                const Text(
+                  'Get the Full Experience',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'To create your personalized custom plan and unlock all features, please install the free GymGuide mobile app.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.black.withOpacity(0.6),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: () async {
+                        final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        }
+                      },
+                      child: Container(
+                        width: 160,
+                        height: 48,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.apple, color: Colors.white, size: 28),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text('Download on the', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                Text('App Store', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () async {
+                        final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        }
+                      },
+                      child: Container(
+                        width: 160,
+                        height: 48,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.asset('assets/svg/logo/playminiicon.png', width: 26, height: 26),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text('GET IT ON', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                Text('Google Play', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.black45,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -86,31 +242,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
           position: _slideAnim,
           child: Stack(
             children: [
-              // ── Red radial glow (purely decorative, fully positioned) ────────
-              Positioned(
-                top: -screenH * 0.08,
-                right: isWide
-                    ? (screenW - contentW) / 2 - contentW * 0.25
-                    : -screenW * 0.25,
-                child: IgnorePointer(
-                  child: Container(
-                    width: contentW * 1.1,
-                    height: screenH * 0.60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          _kRedGlow.withOpacity(0.75),
-                          _kRedGlow.withOpacity(0.28),
-                          Colors.transparent,
-                        ],
-                        stops: const [0.0, 0.45, 1.0],
-                        radius: 0.55,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+              // (Red radial glow removed for pure solid black background)
 
               // ── Scrollable content — NEVER overflows ─────────────────────────
               Positioned.fill(
@@ -139,8 +271,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Text('🏆',
-                                            style: TextStyle(fontSize: 11)),
+                                        Image.asset(
+                                          'assets/built for real results.png',
+                                          width: 14,
+                                          height: 14,
+                                          gaplessPlayback: true,
+                                        ),
                                         const SizedBox(width: 5),
                                         Text(
                                           'Built for Real Results',
@@ -298,17 +434,17 @@ class _FeaturesCard extends StatelessWidget {
 
   static const _features = [
     {
-      'emoji': '🔥',
+      'asset': 'assets/personalized workouts.png',
       'title': 'Personalized Workouts',
       'sub': 'Tailored to your fitness level'
     },
     {
-      'emoji': '🥗',
+      'asset': 'assets/smart meal plans.png',
       'title': 'Smart Meal Plans',
       'sub': 'Nutrition that fits your lifestyle'
     },
     {
-      'emoji': '📊',
+      'asset': 'assets/track your progress.png',
       'title': 'Track Your Progress',
       'sub': 'Stay motivated with real insights'
     },
@@ -340,17 +476,11 @@ class _FeaturesCard extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(f['emoji']!,
-                        style: const TextStyle(fontSize: 14)),
-                  ),
+                Image.asset(
+                  f['asset']!,
+                  width: 38,
+                  height: 38,
+                  gaplessPlayback: true,
                 ),
                 const SizedBox(height: 6),
                 Padding(
@@ -425,18 +555,14 @@ class _CtaButtonState extends State<_CtaButton>
           width: double.infinity,
           height: 58,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFFF1E40), Color(0xFFC8061B)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: const Color(0xFFFF0000),
             borderRadius: BorderRadius.circular(50),
             border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFFF1E40).withOpacity(0.45),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+                color: const Color(0xFFFF0000).withOpacity(0.35),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -497,7 +623,7 @@ Widget _buildAvatar(String asset, double size) {
     height: size,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
-      border: Border.all(color: const Color(0xFFCC0A16), width: 2),
+      border: Border.all(color: const Color(0xFFFF0000), width: 2),
       boxShadow: [
         BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4)
       ],

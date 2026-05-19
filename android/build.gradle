@@ -51,6 +51,39 @@ allprojects {
 rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
+    
+    // Dynamically inject namespace for legacy plugins lacking it (AGP 8.0+ requirement)
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin("com.android.library")) {
+            def android = project.extensions.findByName("android")
+            if (android != null && android.namespace == null) {
+                def groupName = project.group.toString()
+                if (groupName != null && groupName != "") {
+                    android.namespace = groupName
+                } else {
+                    android.namespace = "com.gymguide." + project.name.replaceAll("[^a-zA-Z0-9]", "")
+                }
+            }
+        }
+    }
+
+    // Dynamically align both Java and Kotlin compiler targets to Java 17 for absolute consistency
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin("com.android.library") || project.plugins.hasPlugin("com.android.application")) {
+            def android = project.extensions.findByName("android")
+            if (android != null) {
+                android.compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                    kotlinOptions {
+                        jvmTarget = "17"
+                    }
+                }
+            }
+        }
+    }
 }
 subprojects {
     project.evaluationDependsOn(":app")

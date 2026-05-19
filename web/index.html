@@ -12,6 +12,10 @@
   <meta name="description" content="Get your custom workout and meal plan in seconds. 1800+ exercises, fat loss & muscle gain programs. Download Gym Guide now.">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://www.gymguide.co/">
+  <meta name="yandex-verification" content="6c7f368d399af95d" />
+
+  <!-- Google Sign-In: client_id required by google_sign_in_web v7 -->
+  <meta name="google-signin-client_id" content="632794058416-ssqc8ks3q33rr73p6p8q8hhp3l9da26v.apps.googleusercontent.com">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -65,14 +69,40 @@
 
     // Observe changes to the URL (for Flutter web router)
     let lastUrl = location.href; 
-    new MutationObserver(() => {
+    function checkUrlChange() {
       const url = location.href;
       if (url !== lastUrl) {
         lastUrl = url;
         updateSEO();
       }
-    }).observe(document, {subtree: true, childList: true});
+    }
+
+    window.addEventListener('popstate', checkUrlChange);
+    window.addEventListener('hashchange', checkUrlChange);
+
+    const originalPushState = history.pushState;
+    history.pushState = function() {
+      originalPushState.apply(this, arguments);
+      checkUrlChange();
+    };
+
+    const originalReplaceState = history.replaceState;
+    history.replaceState = function() {
+      originalReplaceState.apply(this, arguments);
+      checkUrlChange();
+    };
   </script>
+
+  <!-- AdSense bootstrap: ensure array exists before async script loads -->
+  <script>
+    window.adsbygoogle = window.adsbygoogle || [];
+    // Called by Dart via dart:js to push an ad unit
+    window.adsbygoogle_push = function() {
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    };
+  </script>
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5827254930319648" crossorigin="anonymous"></script>
 </head>
 
 <body>

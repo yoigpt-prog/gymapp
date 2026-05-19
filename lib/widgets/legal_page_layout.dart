@@ -10,6 +10,7 @@ class LegalPageLayout extends StatefulWidget {
   final VoidCallback? onToggleTheme;
   final bool embedded;
   final bool showBanner;
+  final Color? backgroundColor;
 
   const LegalPageLayout({
     Key? key,
@@ -19,6 +20,7 @@ class LegalPageLayout extends StatefulWidget {
     this.onToggleTheme,
     this.embedded = false,
     this.showBanner = true,
+    this.backgroundColor,
   }) : super(key: key);
 
   @override
@@ -170,9 +172,9 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
 
           if (widget.embedded) {
             return Container(
-              color: widget.isDarkMode
+              color: widget.backgroundColor ?? (widget.isDarkMode
                   ? const Color(0xFF121212)
-                  : const Color(0xFFF5F7FA),
+                  : const Color(0xFFF5F7FA)),
               child: content,
             );
           }

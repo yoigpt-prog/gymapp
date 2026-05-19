@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
+import '../../widgets/calculator_seo_content.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -55,90 +56,127 @@ class _BodyFatCalculatorPageState extends State<BodyFatCalculatorPage> {
         isDarkMode: widget.isDarkMode,
         onToggleTheme: widget.toggleTheme,
         embedded: true,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildToggleBtn('Male', _gender == 'Male'),
-                    const SizedBox(width: 16),
-                    _buildToggleBtn('Female', _gender == 'Female'),
+        backgroundColor: widget.isDarkMode ? null : Colors.white,
+        child: Column(
+          children: [
+            Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 600),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(widget.isDarkMode ? 0.3 : 0.05),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 32),
-                _buildInput(
-                    'Height (cm)', _heightController, 'e.g. 175', textColor),
-                const SizedBox(height: 16),
-                _buildInput('Waist Circumference (cm)', _waistController,
-                    'e.g. 85', textColor),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _calculateBodyFat,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF0000),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Estimate Body Fat',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-                if (_bodyFat != null) ...[
-                  const SizedBox(height: 32),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: widget.isDarkMode ? Colors.black12 : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: const Color(0xFFFF0000).withOpacity(0.3),
-                      ),
-                    ),
-                    child: Column(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'Estimated Body Fat',
-                          style: TextStyle(
-                            color: textColor.withOpacity(0.7),
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${_bodyFat!.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        _buildToggleBtn('Male', _gender == 'Male'),
+                        const SizedBox(width: 16),
+                        _buildToggleBtn('Female', _gender == 'Female'),
                       ],
                     ),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                _buildDisclaimerFooter(textColor),
+                    const SizedBox(height: 32),
+                    _buildInput(
+                        'Height (cm)', _heightController, 'e.g. 175', textColor),
+                    const SizedBox(height: 16),
+                    _buildInput('Waist Circumference (cm)', _waistController,
+                        'e.g. 85', textColor),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _calculateBodyFat,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF0000),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Estimate Body Fat',
+                          style:
+                              TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    if (_bodyFat != null) ...[
+                      const SizedBox(height: 32),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: widget.isDarkMode ? Colors.black12 : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFFFF0000).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'Estimated Body Fat',
+                              style: TextStyle(
+                                color: textColor.withOpacity(0.7),
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${_bodyFat!.toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 48,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    _buildDisclaimerFooter(textColor),
+                  ],
+                ),
+              ),
+            ),
+            CalculatorSeoContent(
+              calculatorName: "Body Fat Calculator",
+              isDarkMode: widget.isDarkMode,
+              whatIsDescription: "A Body Fat Calculator is an advanced tool that estimates the percentage of your total body weight that is composed of fat versus lean mass (muscle, bone, water, etc.). Unlike BMI, which only looks at weight and height, a body fat estimate provides a deeper look into your actual body composition and physical health.\n\nAt GymGuide, we prioritize body composition over just \"weight.\" Knowing your body fat percentage helps you understand if you're truly losing fat or if you're losing valuable muscle. It’s an essential metric for anyone serious about body recomposition, athletic performance, or long-term health.",
+              howItWorksSteps: [
+                {'title': 'Essential Measurements', 'description': 'Input your neck, waist, and height measurements accurately.'},
+                {'title': 'Navy Seal Formula', 'description': 'We use the widely respected U.S. Navy Body Fat formula for precision.'},
+                {'title': 'Compare Your Stats', 'description': 'See where you fall on the body fat spectrum (Athlete, Fitness, etc.).'},
+                {'title': 'Refine Your Goal', 'description': 'Use the data to decide if you need to cut fat or build muscle.'},
+              ],
+              whyMattersDescription: "Maintaining a healthy body fat percentage is critical for hormonal balance, metabolic health, and reducing the risk of chronic diseases. For athletes, optimizing body fat can improve power-to-weight ratios and overall endurance. By tracking this number instead of just the scale, you get a much more accurate picture of your progress, allowing you to celebrate \"non-scale victories\" like losing inches while staying the same weight.",
+              healthyTips: [
+                {'icon': 'track', 'text': 'Track Progress Weekly'},
+                {'icon': 'fitness', 'text': 'Combine Workouts with Nutrition'},
+                {'icon': 'water', 'text': 'Stay Hydrated'},
+                {'icon': 'consistency', 'text': 'Focus on Consistency'},
+              ],
+              faqs: [
+                {'q': 'What is a healthy body fat percentage?', 'a': 'For men, 10-20% is generally considered fit; for women, 20-30% is ideal for health and performance.'},
+                {'q': 'How accurate is the Navy Seal formula?', 'a': 'It is one of the most accurate tape-measure methods, typically within 3-4% of a DEXA scan result.'},
+                {'q': 'Why do women need higher body fat?', 'a': 'Women require more essential fat for reproductive health, hormonal regulation, and general wellness.'},
+                {'q': 'Can I lose fat in specific areas?', 'a': 'No, \"spot reduction\" is a myth. Fat loss occurs across the whole body based on genetics and a caloric deficit.'},
+                {'q': 'How often should I measure body fat?', 'a': 'Once every 2-4 weeks is sufficient, as body composition changes happen slower than weight fluctuations.'},
               ],
             ),
-          ),
+          ],
         ),
       );
   }

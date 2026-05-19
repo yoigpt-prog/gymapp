@@ -2,7 +2,7 @@ name: gymguide_app
 description: Personalized Workout & Meal Plan App (1800+ Exercises)
 publish_to: "none"
 
-version: 1.0.2+1
+version: 1.0.4+8
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -31,6 +31,11 @@ dependencies:
   seo: any
   share_plus: ^12.0.2
   upgrader: ^13.1.0
+  google_sign_in: ^7.2.0
+  uuid: ^4.5.3
+  web: ^1.1.1
+  flutter_markdown: ^0.7.7+1
+  gal: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -56,6 +61,8 @@ flutter:
     - assets/svg/socialmedia/
     - assets/banner/
     - assets/quizimg.png
+    - assets/beforeafterimg.png
+    - assets/scanbodyicon.png
     - assets/sparkles.png
     - assets/rating4.9.png
     - assets/avatar1.png
@@ -63,6 +70,20 @@ flutter:
     - assets/avatar3.png
     - assets/emojis/
     - assets/quizemojis/
+    - assets/progress/
+    - "assets/built for real results.png"
+    - "assets/personalized workouts.png"
+    - "assets/smart meal plans.png"
+    - "assets/track your progress.png"
+    - assets/aicoachicon.png
+    - assets/fbicon.png
+    - assets/whatsappicon.png
+    - assets/xicon.png
+    - assets/blogassets/
+    - assets/blog/articles/
+    - assets/blog_content.json
+    - assets/swapmeal.png
+    - assets/rest.png
 
 flutter_launcher_icons:
   android: true

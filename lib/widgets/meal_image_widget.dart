@@ -157,7 +157,7 @@ class _MealImageWidgetState extends State<MealImageWidget> {
       child: Center(
         child: loading
             ? const CircularProgressIndicator(
-                strokeWidth: 2, color: Color(0xFFFF4444))
+                strokeWidth: 2, color: Color(0xFFFF0000))
             : Icon(Icons.restaurant,
                 color: Colors.grey[400], size: 48),
       ),
@@ -287,7 +287,7 @@ class _ImageOptionsSheet extends StatelessWidget {
               _OptionTile(
                 icon: Icons.camera_alt_rounded,
                 label: 'Take Photo',
-                color: const Color(0xFFFF4444),
+                color: const Color(0xFFFF0000),
                 isDarkMode: isDarkMode,
                 onTap: () {
                   Navigator.pop(context);

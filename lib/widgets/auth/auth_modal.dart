@@ -8,9 +8,14 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import '../../services/revenue_cat_service.dart';
 
 enum AuthMode { login, signup }
 enum SignupStep { email, otp, password }
+
+// Guards GoogleSignIn.instance.initialize() — must only run once per app session.
+bool googleSignInInitialized = false;
 
 class AuthModal extends StatefulWidget {
   const AuthModal({Key? key}) : super(key: key);
@@ -81,17 +86,67 @@ class _AuthModalState extends State<AuthModal> {
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
     try {
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: kIsWeb ? null : 'com.gymguide.app://login-callback/',
-        authScreenLaunchMode: LaunchMode.externalApplication,
-      );
+      if (kIsWeb) {
+        // ── Web ──────────────────────────────────────────────────────────────
+        await Supabase.instance.client.auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: 'http://localhost:51367',
+          // TODO: change to 'https://www.gymguide.co' before production deploy
+        );
+      } else {
+        // ── Android / iOS ─────────────────────────────────────────────────────
+        const serverClientId =
+            '632794058416-9jq69n9p2jncp386teqi5g9obgrdvtik.apps.googleusercontent.com';
+
+        if (!googleSignInInitialized) {
+          await GoogleSignIn.instance.initialize(
+            serverClientId: serverClientId,
+          );
+          googleSignInInitialized = true;
+        }
+
+        final googleUser = await GoogleSignIn.instance.authenticate();
+        if (googleUser == null) return;
+
+        final idToken = googleUser.authentication.idToken;
+
+        if (idToken == null) {
+          throw const AuthException(
+            'Google did not return an ID Token. '
+            'Verify the Web Client ID and that the SHA-1 fingerprint is '
+            'registered in Google Cloud Console for the Android client.',
+          );
+        }
+
+        await Supabase.instance.client.auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: idToken,
+        );
+
+        if (!kIsWeb) {
+          await RevenueCatService().restorePurchases();
+        }
+
+        if (mounted) {
+          AuthModal.isVisible = false;
+          Navigator.pop(context);
+          _showSuccess('Welcome!');
+        }
+      }
     } catch (e) {
-      if (mounted) _showError(e.toString());
+      final msg = e.toString().toLowerCase();
+      if (!msg.contains('cancel') &&
+          !msg.contains('dismiss') &&
+          !msg.contains('user closed') &&
+          !msg.contains('canceled')) {
+        debugPrint('[GOOGLE AUTH ERROR] ❌ $e');
+        if (mounted) _showError('Google sign-in failed. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
 
   Future<void> _signInWithApple() async {
     setState(() => _isLoading = true);
@@ -120,6 +175,10 @@ class _AuthModalState extends State<AuthModal> {
             idToken: idToken,
             nonce: rawNonce,
           );
+
+          if (!kIsWeb) {
+            await RevenueCatService().restorePurchases();
+          }
 
           if (mounted) {
             AuthModal.isVisible = false;
@@ -173,6 +232,9 @@ class _AuthModalState extends State<AuthModal> {
         email: email,
         password: password,
       );
+      if (!kIsWeb) {
+        await RevenueCatService().restorePurchases();
+      }
       if (mounted && response.session != null) {
         AuthModal.isVisible = false;
         Navigator.pop(context);
@@ -257,6 +319,9 @@ class _AuthModalState extends State<AuthModal> {
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: password),
       );
+      if (!kIsWeb) {
+        await RevenueCatService().restorePurchases();
+      }
       if (mounted) {
         // Done with multi-step — let scaffold auto-close if needed
         AuthModal.isInMultiStep = false;
@@ -672,6 +737,40 @@ class _AuthModalState extends State<AuthModal> {
           textColor: Colors.black,
           hasBorder: true,
           backgroundColor: Colors.white,
+        ),
+        SizedBox(height: isCompact ? 12 : 16),
+        TextButton(
+          onPressed: () async {
+            final session = Supabase.instance.client.auth.currentSession;
+            if (session == null) {
+              try {
+                await Supabase.instance.client.auth.signInAnonymously();
+              } catch (e) {
+                debugPrint('[AUTH ERROR] Anonymous sign-in failed: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Guest login is disabled. Please enable "Anonymous sign-ins" in your Supabase dashboard.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return; // Stop and don't close modal
+              }
+            }
+            if (mounted) {
+              AuthModal.isVisible = false;
+              Navigator.pop(context);
+            }
+          },
+          child: Text(
+            'Continue as Guest',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w600,
+              decoration: TextDecoration.underline,
+            ),
+          ),
         ),
       ],
     );

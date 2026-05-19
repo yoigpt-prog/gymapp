@@ -42,18 +42,25 @@ class _MainLayoutWrapperState extends State<MainLayoutWrapper> {
                 SidebarDrawer(
                   currentIndex: widget.currentIndex,
                   onItemSelected: widget.onItemSelected ?? (index) {
-                    // If no handler provided, navigate to MainScaffold with the selected index
-                    if (index != widget.currentIndex) {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(
-                          builder: (context) => MainScaffold(
-                            toggleTheme: () {}, // Theme toggle is handled internally or via state
-                            isDarkMode: widget.isDarkMode,
-                            initialIndex: index,
-                          ),
-                        ),
-                        (route) => false,
-                      );
+                    if (index >= 0) {
+                      // Try ancestor lookup first (when inside MainScaffold tree)
+                      final scaffoldFromTree = context.findAncestorStateOfType<MainScaffoldState>();
+                      if (scaffoldFromTree != null) {
+                        scaffoldFromTree.changeTab(index);
+                        return;
+                      }
+
+                      // On a legal/overlay page — use globalKey to reach the root MainScaffold.
+                      // Call changeTab first (it's already alive below this route),
+                      // then pop this page to reveal it.
+                      final globalScaffold = MainScaffold.globalKey.currentState;
+                      if (globalScaffold != null) {
+                        globalScaffold.changeTab(index);
+                        Navigator.of(context).popUntil((route) => route.settings.name == '/' || route.isFirst);
+                      } else {
+                        // Last resort: navigate directly to the route
+                        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                      }
                     }
                   },
                   isDarkMode: widget.isDarkMode,

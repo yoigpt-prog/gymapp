@@ -30,6 +30,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.gymguide.app</string>
+				<string>com.googleusercontent.apps.632794058416-9jq69n9p2jncp386teqi5g9obgrdvtik</string>
 			</array>
 		</dict>
 	</array>
@@ -37,10 +38,19 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>whatsapp</string>
+		<string>fb</string>
+		<string>facebook</string>
+	</array>
+
 	<key>NSCameraUsageDescription</key>
 	<string>GymGuide needs camera access so you can take and set custom photos for your meals.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>GymGuide needs photo library access so you can choose custom photos for your meals.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>GymGuide needs permission to save your AI transformation result to your Photos.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

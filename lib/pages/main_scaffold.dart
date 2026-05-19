@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
@@ -24,18 +25,27 @@ import '../widgets/auth/auth_modal.dart'; // Import AuthModal
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
 import '../services/subscription_state.dart';
+import '../widgets/update_banner.dart';
+import '../widgets/ai_coach_button.dart';
+import '../config/env_config.dart';
 
 class MainScaffold extends StatefulWidget {
   final VoidCallback toggleTheme;
   final bool isDarkMode;
-
   final int initialIndex;
+  final ExerciseDetail? initialExercise;
+
+  /// Global key so any widget can call [MainScaffoldState.changeTab] from
+  /// outside the widget tree (e.g. from a legal page sidebar).
+  static final GlobalKey<MainScaffoldState> globalKey =
+      GlobalKey<MainScaffoldState>(debugLabel: 'MainScaffold');
 
   const MainScaffold({
     Key? key,
     required this.toggleTheme,
     required this.isDarkMode,
     this.initialIndex = 0,
+    this.initialExercise,
   }) : super(key: key);
 
   @override
@@ -74,10 +84,23 @@ class MainScaffoldState extends State<MainScaffold> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _initializePages();
+    _ensureAnonymousSession();
     _initAuthLogic();
     
     // Track initial screen
     _trackCurrentScreen();
+  }
+
+  Future<void> _ensureAnonymousSession() async {
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) {
+        debugPrint('[AUTH] No session, attempting anonymous login...');
+        await Supabase.instance.client.auth.signInAnonymously();
+      }
+    } catch (e) {
+      debugPrint('[AUTH] Error during anonymous sign in: $e');
+    }
   }
 
   void _trackCurrentScreen() {
@@ -85,11 +108,12 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   void _initializePages() {
-     _pages = [
+    _pages = [
       HomePage(
         key: _homeKey,
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
+        initialExercise: widget.initialExercise,
       ),
       WorkoutPage(
         key: _workoutKey,
@@ -174,8 +198,8 @@ class MainScaffoldState extends State<MainScaffold> {
           // AUTHENTICATED: login / token restore / token refresh
           // Step 1: identify with real UUID (no-op if same user already identified)
           AnalyticsService().identifyUser(session.user.id);
-          // Step 2: App Open - fires once per cold start, deduplicated by flag
-          AnalyticsService().trackAppOpen();
+          // Step 2: App Open — fires once per 30-min session, session-gated by SharedPreferences
+          unawaited(AnalyticsService().trackAppOpen());
           // Step 3: Refresh subscription status cache
           SubscriptionState().refresh();
 
@@ -196,7 +220,7 @@ class MainScaffoldState extends State<MainScaffold> {
           // This is the correct deterministic place to fire App Open for guests.
           // The 500ms fallback timer has been removed - it caused duplicate fires
           // on real devices when the auth stream arrived after the timer.
-          AnalyticsService().trackAppOpen();
+          unawaited(AnalyticsService().trackAppOpen());
 
         } else {
           // OTHER NULL-SESSION EVENTS: tokenRefreshed, userUpdated, etc.
@@ -217,7 +241,7 @@ class MainScaffoldState extends State<MainScaffold> {
     // This fires after 2s ONLY if App Open was not already tracked by the stream.
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
-        AnalyticsService().trackAppOpen(); // no-op if already tracked (deduped by flag)
+        unawaited(AnalyticsService().trackAppOpen()); // no-op if already tracked (session-gated)
       }
     });
 
@@ -227,10 +251,9 @@ class MainScaffoldState extends State<MainScaffold> {
   void _onUserInteraction() {
     if (!_hasInteracted) {
       _hasInteracted = true;
-      if (Supabase.instance.client.auth.currentSession == null) {
-        print('First interaction detected. Starting Auth Timer...');
-        _startAuthTimer();
-      }
+      // Apple Guideline 5.1.1(v): Do NOT start an auth timer on first interaction.
+      // AuthModal is only permitted post-purchase or via explicit login in profile/settings.
+      // The anonymous Supabase session is established at startup by _ensureAnonymousSession().
     }
   }
 
@@ -436,8 +459,28 @@ class MainScaffoldState extends State<MainScaffold> {
     
     if (mounted) {
       setState(() => _currentIndex = index);
+      _updateUrlForIndex(index);
       _trackCurrentScreen();
     }
+  }
+
+  void _updateUrlForIndex(int index) {
+    if (!kIsWeb) return;
+    String path = '/';
+    switch (index) {
+      case 0: path = '/home'; break;
+      case 1: path = '/workout'; break;
+      case 2: path = '/meal-plan'; break;
+      case 3: path = '/progress'; break;
+      case 4: path = '/profile'; break;
+      case 5: path = '/settings'; break;
+      case 6: path = '/calculators/bmi'; break;
+      case 7: path = '/calculators/calorie'; break;
+      case 8: path = '/calculators/macro'; break;
+      case 9: path = '/calculators/body-fat'; break;
+      case 10: path = '/calculators/one-rm'; break;
+    }
+    SystemNavigator.routeInformationUpdated(uri: Uri.parse(path));
   }
 
   /// Refreshes all content pages (called after quiz completion or login).
@@ -448,10 +491,33 @@ class MainScaffoldState extends State<MainScaffold> {
     _profileKey.currentState?.refresh();
   }
 
+  /// Keeps all pages alive simultaneously using a [Stack] with [AnimatedOpacity].
+  /// This prevents page state from being destroyed on tab switch, eliminating
+  /// the "app refresh" feeling. Hidden pages are also wrapped with [IgnorePointer]
+  /// so they don't intercept touches.
+  Widget _buildIndexedStack() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        for (int i = 0; i < _pages.length; i++)
+          AnimatedOpacity(
+            opacity: i == _currentIndex ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            child: IgnorePointer(
+              ignoring: i != _currentIndex,
+              child: _pages[i],
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // PREVENT RENDER UNTIL SYNC COMPLETES
-    if (_isLoadingAuth) {
+    // Only show a full loading screen on the very first cold launch before any auth state known.
+    // Once the user has interacted or pages have loaded, skip this spinner to avoid flicker.
+    if (_isLoadingAuth && !_hasInteracted) {
       return Scaffold(
         backgroundColor: widget.isDarkMode ? const Color(0xFF121212) : Colors.white,
         body: const Center(
@@ -547,20 +613,25 @@ class MainScaffoldState extends State<MainScaffold> {
                         isDarkMode: widget.isDarkMode,
                       ),
                       Expanded(
-                        child: Column(
+                        child: Stack(
                           children: [
-                            Expanded(
-                              child: NotificationListener<ScrollNotification>(
-                                onNotification: (notification) => false, // Handled by parent
-                                child: IndexedStack(
-                                  index: _currentIndex,
-                                  children: _pages,
+                            Column(
+                              children: [
+                                Expanded(
+                                  child: _buildIndexedStack(),
+
                                 ),
-                              ),
+                                WebFooter(
+                                  key: _footerKey,
+                                  isDarkMode: widget.isDarkMode,
+                                ),
+                              ],
                             ),
-                            WebFooter(
-                              key: _footerKey,
-                              isDarkMode: widget.isDarkMode,
+                            const Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: UpdateBanner(),
                             ),
                           ],
                         ),
@@ -572,13 +643,35 @@ class MainScaffoldState extends State<MainScaffold> {
             }
               
               return Scaffold(
-                body: Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  child: IndexedStack(
-                    index: _currentIndex,
-                    children: _pages,
-                  ),
+                body: Stack(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      height: double.infinity,
+                      child: _buildIndexedStack(),
+                    ),
+
+                    const Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: SafeArea(child: UpdateBanner()),
+                    ),
+                    // ── AI Coach floating button (staging-only) ────────────
+                    // Shown on Workout (1), Meal Plan (2), Progress (3) only.
+                    // ValueKey resets dismiss/position state on every tab change.
+                    // Positioned.fill lets AiCoachButton self-manage its drag position.
+                    if (EnvConfig.isStaging && [1, 2].contains(_currentIndex))
+                      Positioned.fill(
+                        child: AiCoachButton(
+                          key: ValueKey('ai_coach_$_currentIndex'),
+                          // 16px above the nav bar — bottom-right corner on all tabs.
+                          // User can drag to avoid any overlapping CTA buttons.
+                          initialBottom: 16.0,
+                          minBottom: 16.0,
+                        ),
+                      ),
+                  ],
                 ),
                 bottomNavigationBar: GymBottomNavBar(
                   currentIndex: _currentIndex,

@@ -19,7 +19,7 @@ class SubscriptionState extends ChangeNotifier {
   bool _hasChecked = false;
 
   /// Returns the cached subscription status.
-  bool get isPro => _isPro;
+  bool get isPro => kDebugMode || _isPro;
 
   bool get hasChecked => _hasChecked;
 

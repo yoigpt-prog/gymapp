@@ -19,6 +19,7 @@ import '../services/subscription_state.dart';
 import '../main.dart';
 import '../widgets/red_header.dart';
 import '../widgets/promo_banner.dart';
+import '../widgets/auth/auth_modal.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
 import 'legal/disclaimer_page.dart';
@@ -35,6 +36,9 @@ import 'calculators/calorie_calculator_page.dart';
 import 'calculators/macro_calculator_page.dart';
 import 'calculators/body_fat_calculator_page.dart';
 import 'calculators/one_rm_calculator_page.dart';
+import '../data/blog_articles.dart';
+import 'ai/ai_transformation_page.dart';
+import 'ai/physique_scan_page.dart';
 
 class ProfilePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -749,11 +753,17 @@ class ProfilePageState extends State<ProfilePage> {
                         ),
                       // ──────────────────────────────────────────────────────
 
-                      const SizedBox(height: 8),
-                      _buildSectionTitle('Physical Stats'),
+
                       const SizedBox(height: 16),
-                      _buildStatsGrid(isMobile: true),
-                      const SizedBox(height: 24),
+
+                      // ── AI Premium Feature Cards ────────────────────────
+                      _buildAITransformationPremiumCard(),
+                      const SizedBox(height: 16),
+                      _buildPhysiqueRatingPremiumCard(),
+                      // ──────────────────────────────────────────────────────
+
+                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
                       _buildSectionTitle('Goals & Preferences'),
                       const SizedBox(height: 16),
                       _buildMobileGoalsGrid(),
@@ -886,6 +896,19 @@ class ProfilePageState extends State<ProfilePage> {
                       ),
                       const SizedBox(height: 24),
 
+                      if (kIsWeb) ...[
+                        // ── FITNESS ARTICLES ─────────────────────────
+                        _buildMobileSectionHeader('Fitness Articles'),
+                        const SizedBox(height: 12),
+                        _buildMobileLegalItem(
+                          icon: Icons.article_outlined,
+                          title: 'Blog / Articles',
+                          subtitle: 'Fitness and nutrition tips',
+                          onTap: () => Navigator.pushNamed(context, '/Blog'),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+
                       // ── LEGAL & PRIVACY ──────────────────────────
                       _buildMobileSectionHeader('Legal & Privacy'),
                       const SizedBox(height: 12),
@@ -975,9 +998,22 @@ class ProfilePageState extends State<ProfilePage> {
                       _buildMobileLegalItem(
                         icon: Icons.headset_mic_outlined,
                         title: 'Contact Support',
-                        subtitle: 'support@gymguide.co',
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const ContactSupportPage())),
+                        subtitle: 'contact@gymguide.co',
+                        onTap: () => Navigator.pushNamed(context, '/contact'),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.quiz_outlined,
+                        title: 'FAQ',
+                        subtitle: 'Frequently asked questions',
+                        onTap: () => Navigator.pushNamed(context, '/faq'),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileLegalItem(
+                        icon: Icons.map_outlined,
+                        title: 'Sitemap',
+                        subtitle: 'Explore all tools & resources',
+                        onTap: () => Navigator.pushNamed(context, '/sitemap'),
                       ),
                       const SizedBox(height: 8),
                       _buildMobileLegalItem(
@@ -1019,6 +1055,351 @@ class ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
+  }
+
+  Widget _buildBulletPoint(IconData icon, String text, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 14, color: const Color(0xFFFF0000)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetric(IconData icon, String label, String score, bool isDark) {
+    return Row(
+      children: [
+        Icon(icon, size: 10, color: isDark ? Colors.white54 : Colors.black54),
+        const SizedBox(width: 4),
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 10, color: isDark ? Colors.white70 : Colors.black87),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          score,
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFF0000)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAITransformationPremiumCard() {
+    final isDark = widget.isDarkMode;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black;
+
+    final cardWidget = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white : Colors.black,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF0000).withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.auto_awesome, color: Color(0xFFFF0000), size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'AI Transformation\nSimulator',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                  height: 1.1,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'See your future body with AI',
+                                style: TextStyle(
+                                  color: isDark ? Colors.white70 : Colors.black54,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _buildBulletPoint(Icons.verified_user_outlined, 'Realistic AI-powered preview', isDark),
+                    _buildBulletPoint(Icons.compare_arrows_rounded, 'Before/after comparison slider', isDark),
+                    _buildBulletPoint(Icons.shield_outlined, 'Private & secure processing', isDark),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.asset(
+                  'assets/beforeafterimg.png',
+                  width: 110,
+                  height: 130,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: () {
+              if (kIsWeb) {
+                _showAppDownloadPopup(context);
+                return;
+              }
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (_, animation, __) => AITransformationPage(
+                    isDarkMode: widget.isDarkMode,
+                  ),
+                  transitionsBuilder: (_, animation, __, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  transitionDuration: const Duration(milliseconds: 400),
+                ),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF0000),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.auto_awesome, color: Colors.white, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'Preview My Future Body',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Realistic physique simulation',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.white, size: 24),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (kIsWeb) {
+      return GestureDetector(
+        onTap: () => _showAppDownloadPopup(context),
+        child: cardWidget,
+      );
+    }
+    return cardWidget;
+  }
+
+  Widget _buildPhysiqueRatingPremiumCard() {
+    final isDark = widget.isDarkMode;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black;
+
+    final cardWidget = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white : Colors.black,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF0000).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.accessibility_new_rounded, color: Color(0xFFFF0000), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Rate My Physique AI',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'AI analyzes your body proportions',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: () {
+              if (kIsWeb) {
+                _showAppDownloadPopup(context);
+                return;
+              }
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (_, animation, __) => PhysiqueScanPage(
+                    isDarkMode: widget.isDarkMode,
+                  ),
+                  transitionsBuilder: (_, animation, __, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  transitionDuration: const Duration(milliseconds: 400),
+                ),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF0000),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Image.asset(
+                    'assets/scanbodyicon.png',
+                    width: 36,
+                    height: 36,
+                    color: Colors.white,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Icon(Icons.broken_image, color: Colors.white),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'Scan Body',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Get your full AI physique analysis',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.white, size: 24),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (kIsWeb) {
+      return GestureDetector(
+        onTap: () => _showAppDownloadPopup(context),
+        child: cardWidget,
+      );
+    }
+    return cardWidget;
   }
 
   Widget _buildMobileGoalsGrid() {
@@ -1182,6 +1563,7 @@ class ProfilePageState extends State<ProfilePage> {
     );
   }
 
+
   /// Returns the correct default avatar based on the user's gender.
   /// Male is the default. Switches to femaleprofile.png when gender is 'Female'.
   Widget _buildDefaultAvatar() {
@@ -1276,7 +1658,6 @@ class ProfilePageState extends State<ProfilePage> {
             ],
           ),
           const SizedBox(height: 16),
-          const SizedBox(height: 8),
           Text(
             _userEmail,
             style: TextStyle(
@@ -1285,6 +1666,21 @@ class ProfilePageState extends State<ProfilePage> {
             ),
             textAlign: TextAlign.center,
           ),
+          if (Supabase.instance.client.auth.currentUser?.isAnonymous == true) ...[
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => AuthModal.show(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF0000),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              ),
+              child: const Text('Sign Up to Save Progress', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 24),
@@ -1596,6 +1992,143 @@ class ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  void _showAppDownloadPopup(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+          ),
+          backgroundColor: Colors.white,
+          elevation: 24,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(28),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                const Text(
+                  'Get the Full Experience',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'To create your personalized custom plan and unlock all features, please install the free GymGuide mobile app.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.black.withOpacity(0.6),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: () async {
+                        final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        }
+                      },
+                      child: Container(
+                        width: 160,
+                        height: 48,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.apple, color: Colors.white, size: 28),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text('Download on the', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                Text('App Store', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () async {
+                        final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        }
+                      },
+                      child: Container(
+                        width: 160,
+                        height: 48,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.asset('assets/svg/logo/playminiicon.png', width: 26, height: 26),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text('GET IT ON', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                Text('Google Play', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.black45,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _resetUserPlan() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -1616,8 +2149,11 @@ class ProfilePageState extends State<ProfilePage> {
       }
 
       await Supabase.instance.client.from('user_meal_plans').delete().eq('user_id', user.id);
+      await Supabase.instance.client.from('user_meal_plan_v2').delete().eq('user_id', user.id);
       await Supabase.instance.client.from('user_workout_progress').delete().eq('user_id', user.id);
       await Supabase.instance.client.from('user_weekly_weights').delete().eq('user_id', user.id);
+      // Delete generated workout plans so the engine creates a fresh one
+      await Supabase.instance.client.from('ai_plans').delete().eq('user_id', user.id);
       // Also clear the user_preferences row so the app treats them as a new user
       await Supabase.instance.client.from('user_preferences').delete().eq('user_id', user.id);
 

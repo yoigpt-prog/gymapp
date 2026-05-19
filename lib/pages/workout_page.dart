@@ -11,6 +11,7 @@ import '../services/subscription_state.dart';
 import '../widgets/promo_banner.dart';
 import 'exercise_detail_page.dart';
 import '../widgets/auth/auth_modal.dart';
+import '../services/set_progress_service.dart';
 import 'dart:async'; // Required for StreamSubscription
 import 'dart:convert';
 import 'dart:math';
@@ -20,6 +21,7 @@ import 'custom_plan_quiz.dart';
 import 'main_scaffold.dart';
 import '../widgets/red_header.dart';
 import '../widgets/polygon_border.dart';
+import '../services/workout_engine_service.dart';
 
 class WorkoutPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -39,9 +41,11 @@ class WorkoutPageState extends State<WorkoutPage> {
   bool _isDarkMode = false;
   Map<String, dynamic>? _generatedPlan;
   bool _isLoadingPlan = true;
+  bool _hasCompletedQuiz = false;
   bool _isRestDay = false;
   int _prefDurationWeeks = 4; // loaded from user_preferences at init
   StreamSubscription<AuthState>? _authStateSubscription;
+  final Set<int> _expandedWorkoutWeeks = {};
 
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
@@ -147,11 +151,18 @@ class WorkoutPageState extends State<WorkoutPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
 
+      final localHasCompletedQuiz = prefs.getBool('hasCompletedQuiz') ?? false;
+      if (mounted) {
+        setState(() {
+          _hasCompletedQuiz = localHasCompletedQuiz;
+        });
+      }
+
       // 1. INTEGER FAST PATH — written by quiz the moment durationWeeks is computed.
       //    No regex, no Supabase round-trip. Always wins if quiz was ever completed.
       final intVal = prefs.getInt('duration_weeks_int');
       if (intVal != null && intVal > 0) {
-        if (mounted) setState(() => _prefDurationWeeks = intVal.clamp(1, 52));
+        if (mounted) setState(() => _prefDurationWeeks = intVal.clamp(1, 104));
         return;
       }
 
@@ -161,9 +172,9 @@ class WorkoutPageState extends State<WorkoutPage> {
         final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(localDuration);
         if (weekMatch != null) {
           final val = int.parse(weekMatch.group(1)!);
-          if (mounted) setState(() => _prefDurationWeeks = val.clamp(1, 52));
+          if (mounted) setState(() => _prefDurationWeeks = val.clamp(1, 104));
           // Back-fill integer key so next launch uses the fast path.
-          await prefs.setInt('duration_weeks_int', val.clamp(1, 52));
+          await prefs.setInt('duration_weeks_int', val.clamp(1, 104));
           return;
         }
       }
@@ -176,11 +187,18 @@ class WorkoutPageState extends State<WorkoutPage> {
           .select('duration_weeks')
           .eq('user_id', user.id)
           .limit(1);
-      if (response.isNotEmpty && response.first['duration_weeks'] != null && mounted) {
-        final dbVal = (response.first['duration_weeks'] as int).clamp(1, 52);
-        setState(() => _prefDurationWeeks = dbVal);
-        // Back-fill so subsequent calls skip Supabase.
-        await prefs.setInt('duration_weeks_int', dbVal);
+      if (response.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _hasCompletedQuiz = true;
+          });
+        }
+        if (response.first['duration_weeks'] != null && mounted) {
+          final dbVal = (response.first['duration_weeks'] as int).clamp(1, 104);
+          setState(() => _prefDurationWeeks = dbVal);
+          // Back-fill so subsequent calls skip Supabase.
+          await prefs.setInt('duration_weeks_int', dbVal);
+        }
       }
     } catch (e) {
       debugPrint('[WorkoutPage] _loadPrefDuration error: $e');
@@ -194,20 +212,30 @@ class WorkoutPageState extends State<WorkoutPage> {
   Future<void> _loadCompletedExercises() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
-      final allCompleted = await SupabaseService().getAllCompletedExercises();
-      if (mounted) {
-        setState(() {
-          _completedExercisesByDay.clear();
-          allCompleted.forEach((key, list) {
-            _completedExercisesByDay[key] = list.toSet();
+      try {
+        final allCompleted = await SupabaseService().getAllCompletedExercises();
+        final allCustomizations = await SupabaseService().getAllWorkoutCustomizations();
+        final favorites = await SupabaseService().getFavoriteExercisesDetails();
+
+        if (mounted) {
+          setState(() {
+            _completedExercisesByDay.clear();
+            allCompleted.forEach((key, list) {
+              _completedExercisesByDay[key] = list.toSet();
+            });
+
+            _dayCustomizations = allCustomizations;
+            _favoriteExercises = favorites.map((json) => ExerciseDetail.fromJson(json)).toList();
+            
+            final dateKey = _getDateKey(_selectedDay);
+            if (_completedExercisesByDay.containsKey(dateKey)) {
+              _completedExercises.clear();
+              _completedExercises.addAll(_completedExercisesByDay[dateKey]!);
+            }
           });
-          
-          final dateKey = _getDateKey(_selectedDay);
-          if (_completedExercisesByDay.containsKey(dateKey)) {
-            _completedExercises.clear();
-            _completedExercises.addAll(_completedExercisesByDay[dateKey]!);
-          }
-        });
+        }
+      } catch (e) {
+        debugPrint('[WorkoutPage] Error loading completed exercises and customizations: $e');
       }
     }
   }
@@ -256,6 +284,9 @@ class WorkoutPageState extends State<WorkoutPage> {
       _loadPrefDuration(),
       _loadGeneratedPlan(),
     ]);
+
+    // Pre-fetch all unique plan exercises in parallel to make day switches 100% instant!
+    await _preFetchAllPlanExercises();
 
     // 3. FETCH progress from cloud (must come after plan so _exercises is populated)
     await _loadCompletedExercises();
@@ -377,6 +408,9 @@ class WorkoutPageState extends State<WorkoutPage> {
           _hasPlan = true;
           _isLoadingPlan = false;
         });
+        _preFetchAllPlanExercises().then((_) {
+          if (mounted) _updateDailyWorkouts();
+        });
       } else {
         if (mounted) {
           setState(() {
@@ -396,10 +430,18 @@ class WorkoutPageState extends State<WorkoutPage> {
   bool _isLoading = true;
   List<ExerciseDetail> _exercises = [];
   List<ExerciseDetail> _allExercisesCache = []; // Master cache
+  final Map<String, Map<String, dynamic>> _exerciseRowsCache = {}; // Cache raw exercise rows by ID
   final Set<String> _completedExercises = {}; // Track completed exercise names
 
   // Track completed exercises per day
   final Map<String, Set<String>> _completedExercisesByDay = {};
+
+  // Track day customizations: DateYMD -> { 'added': [...], 'removed': [...] }
+  Map<String, Map<String, List<String>>> _dayCustomizations = {};
+  // Track pre-fetched day set progress: exerciseId -> list of SetProgress
+  Map<String, List<SetProgress>> _daySetProgress = {};
+  // Track favorite exercise details
+  List<ExerciseDetail> _favoriteExercises = [];
 
   // Helper to get date key
   String _getDateKey(DateTime date) {
@@ -487,15 +529,22 @@ class WorkoutPageState extends State<WorkoutPage> {
 
   // Helper method to get workout progress for any day
   double _getWorkoutProgressForDay(DateTime date) {
-    // We need to calculate global index for THIS 'date', distinct from _selectedDay
     if (_generatedPlan == null) return 0.0;
+    
+    final dateKey = _getDateKey(date);
+    final selectedDateKey = _getDateKey(_selectedDay);
+    
+    // Exact realtime progress for the currently active/selected day!
+    if (dateKey == selectedDateKey) {
+      if (_exercises.isEmpty) return 0.0;
+      return (_completedCount / _exercises.length).clamp(0.0, 1.0);
+    }
 
     final createdAtStr = _generatedPlan!['created_at'];
     if (createdAtStr == null) return 0.0;
 
     final createdAt = DateTime.parse(createdAtStr);
-    final start =
-        DateTime(createdAt.year, createdAt.month, createdAt.day); // midnight
+    final start = DateTime(createdAt.year, createdAt.month, createdAt.day); // midnight
     final current = DateTime(date.year, date.month, date.day);
 
     int diffDays = current.difference(start).inDays;
@@ -504,18 +553,45 @@ class WorkoutPageState extends State<WorkoutPage> {
     int globalIndex = diffDays + 1;
     final dayData = _getDayData(globalIndex);
 
-    if (dayData == null || dayData['type'] == 'rest') return 0.0;
+    final customizations = _dayCustomizations[dateKey];
+    final added = customizations?['added'] as List? ?? [];
+    final removed = customizations?['removed'] as List? ?? [];
 
-    final rawIds = dayData['exercises'] as List? ??
-        dayData['exercise_ids'] as List? ??
-        dayData['exercise_list'] as List? ??
-        [];
-    final totalExercises = rawIds.length;
-    if (totalExercises == 0) return 0.0;
+    final rawIds = dayData != null 
+        ? (dayData['exercises'] as List? ??
+           dayData['exercise_ids'] as List? ??
+           dayData['exercise_list'] as List? ??
+           []) 
+        : [];
+        
+    int totalExercises = rawIds.length;
+    for (final ex in rawIds) {
+      String? realName;
+      if (ex is Map) {
+        realName = ex['name'] ?? ex['exercise_name'];
+      }
+      if (realName == null) {
+        final id = ex is Map ? ex['id']?.toString() : ex.toString();
+        try {
+          realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
+        } catch (_) {
+          realName = id;
+        }
+      }
+      
+      if (realName != null && removed.contains(realName)) {
+        totalExercises--;
+      }
+    }
+    totalExercises += added.length;
 
-    final dateKey = _getDateKey(date);
+    bool isRest = dayData != null && dayData['type'] == 'rest';
+    // If it's a rest day and they added nothing, there's no progress bar.
+    if (isRest && added.isEmpty) return 0.0;
+
+    if (totalExercises <= 0) return 0.0;
+
     final dayCompleted = _completedExercisesByDay[dateKey];
-
     final completedCount = dayCompleted?.length ?? 0;
 
     return (completedCount / totalExercises).clamp(0.0, 1.0);
@@ -570,10 +646,75 @@ class WorkoutPageState extends State<WorkoutPage> {
   }
 
   String _normalizeExerciseId(dynamic v) {
+    if (v is Map) {
+      v = v['id'] ?? v['exercise_id'] ?? '';
+    }
     final s = v.toString().trim();
     if (RegExp(r'^\d{6}$').hasMatch(s)) return s;
     if (RegExp(r'^\d+$').hasMatch(s)) return s.padLeft(6, '0');
     return s;
+  }
+
+  Future<void> _preFetchAllPlanExercises() async {
+    if (_generatedPlan == null) return;
+    final schedule = _generatedPlan!['schedule_json'];
+    if (schedule == null) return;
+
+    final List<String> allPlanExerciseIds = [];
+    try {
+      final weeks = schedule['weeks'];
+      if (weeks is Map) {
+        for (var weekEntry in weeks.values) {
+          var days = weekEntry is Map ? weekEntry['days'] : null;
+          if (days == null && weekEntry is Map) {
+            days = weekEntry;
+          }
+          if (days is Map) {
+            for (var dayEntry in days.values) {
+              if (dayEntry is Map) {
+                final rawList = dayEntry['exercises'] as List? ??
+                    dayEntry['exercise_ids'] as List? ??
+                    dayEntry['exercise_list'] as List? ??
+                    [];
+                for (var e in rawList) {
+                  final normalized = _normalizeExerciseId(e);
+                  if (normalized.isNotEmpty && !allPlanExerciseIds.contains(normalized)) {
+                    allPlanExerciseIds.add(normalized);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[PREFETCH] Error parsing schedule for prefetching: $e');
+    }
+
+    final List<String> missingIds = allPlanExerciseIds
+        .where((id) => !_exerciseRowsCache.containsKey(id))
+        .toList();
+
+    if (missingIds.isEmpty) return;
+
+    debugPrint('[PREFETCH] Fetching ${missingIds.length} unique plan exercises in one background query...');
+    try {
+      final response = await Supabase.instance.client
+          .from('exercises')
+          .select('id, exercise_name, urls, synergist, is_male, is_female, target_muscle, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, exercise_type, equipment')
+          .inFilter('id', missingIds);
+
+      final rows = response as List<dynamic>;
+      for (var r in rows) {
+        final id = _normalizeExerciseId(r['id']);
+        if (id.isNotEmpty) {
+          _exerciseRowsCache[id] = Map<String, dynamic>.from(r);
+        }
+      }
+      debugPrint('[PREFETCH] Successfully cached ${rows.length} exercises. Total cache size: ${_exerciseRowsCache.length}');
+    } catch (e) {
+      debugPrint('[PREFETCH] Warning: Background prefetch failed: $e');
+    }
   }
 
   // Filter exercises strictly from the generated plan for the selected day
@@ -591,8 +732,6 @@ class WorkoutPageState extends State<WorkoutPage> {
       return;
     }
 
-    setState(() => _isLoading = true);
-
     // Sync local completion state from the map
     final dateKey = _getDateKey(_selectedDay);
     final completedForDay = _completedExercisesByDay[dateKey] ?? {};
@@ -601,6 +740,145 @@ class WorkoutPageState extends State<WorkoutPage> {
 
     // MANDATORY: STRICT INDEX CALCULATION
     int globalDayIndex = _getCurrentGlobalDayIndex();
+    final dayData = _getDayData(globalDayIndex);
+
+    if (dayData == null) {
+      setState(() {
+        _exercises = [];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    final dayType = dayData['type'];
+    final isRest = dayType != null && dayType.toString().toLowerCase() == 'rest';
+
+    if (isRest) {
+      setState(() {
+        _exercises = [];
+        _isLoading = false;
+        _isRestDay = true;
+      });
+      return;
+    }
+
+    List rawExercises = dayData['exercises'] as List? ??
+        dayData['exercise_ids'] as List? ??
+        dayData['exercise_list'] as List? ??
+        [];
+    final List<String> idsForDay =
+        rawExercises.map((e) => _normalizeExerciseId(e)).toList();
+
+    // Trigger pre-fetching of set progress for the entire day to make ExerciseDetailPage loads 100% instant!
+    final planIdString = _generatedPlan != null
+        ? _generatedPlan!['id']?.toString() ?? 'free'
+        : 'free';
+    SetProgressService().loadDaySetProgress(
+      planId: planIdString,
+      weekNumber: ((globalDayIndex - 1) ~/ 7) + 1,
+      dayNumber: globalDayIndex,
+    ).then((progressMap) {
+      if (mounted) {
+        setState(() {
+          _daySetProgress = progressMap;
+        });
+      }
+    });
+
+    // SMOOTH FAST PATH: If all exercises for the day are already cached, load them instantly!
+    final bool allCached = idsForDay.every((id) => _exerciseRowsCache.containsKey(id));
+    if (allCached && idsForDay.isNotEmpty) {
+      final Map<String, dynamic> byId = {
+        for (var id in idsForDay) id: _exerciseRowsCache[id]
+      };
+
+      final List<ExerciseDetail> orderedExercises = [];
+      for (var id in idsForDay) {
+        final r = byId[id];
+        if (r != null) {
+          int? sets;
+          int? reps;
+          try {
+            final raw = rawExercises.firstWhere(
+                (e) => _normalizeExerciseId(e) == id,
+                orElse: () => null);
+            if (raw is Map) {
+              sets = raw['sets'] is int
+                  ? raw['sets'] as int
+                  : int.tryParse(raw['sets']?.toString() ?? '');
+              reps = raw['reps'] is int
+                  ? raw['reps'] as int
+                  : int.tryParse(raw['reps']?.toString() ?? '');
+            }
+          } catch (_) {}
+
+          final baseDetail = ExerciseDetail.fromJson(r);
+          orderedExercises.add(baseDetail.copyWith(
+            sets: sets ?? baseDetail.sets,
+            reps: reps ?? baseDetail.reps,
+          ));
+        }
+      }
+
+      final List<ExerciseDetail> finalExercises = [];
+      final customizations = _dayCustomizations[dateKey];
+      final removedNames = customizations?['removed'] ?? [];
+      final addedNames = customizations?['added'] ?? [];
+
+      for (var ex in orderedExercises) {
+        if (!removedNames.contains(ex.name)) {
+          finalExercises.add(ex);
+        }
+      }
+
+      for (var name in addedNames) {
+        ExerciseDetail? found;
+        try {
+          found = _favoriteExercises.firstWhere((ex) => ex.name == name);
+        } catch (_) {}
+        if (found == null) {
+          try {
+            found = _allExercisesCache.firstWhere((ex) => ex.name == name);
+          } catch (_) {}
+        }
+        if (found == null && byId.isNotEmpty) {
+          try {
+            final row = byId.values.firstWhere((r) => r['exercise_name'] == name);
+            found = ExerciseDetail.fromJson(row);
+          } catch (_) {}
+        }
+        if (found != null) {
+          finalExercises.add(found);
+        } else {
+          finalExercises.add(
+            ExerciseDetail(
+              id: name,
+              name: name,
+              slug: name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s-]'), '').replaceAll(RegExp(r'\s+'), '-'),
+              muscleId: 'custom',
+              imagePath: '',
+              target: 'Custom',
+              synergist: 'Various',
+              difficulty: 'Intermediate',
+              steps: ['Perform the custom exercise.'],
+            ),
+          );
+        }
+      }
+
+      setState(() {
+        _exercises = finalExercises;
+        _isLoading = false;
+      });
+
+      final isCompletedDay = completedForDay.length >= finalExercises.length && finalExercises.isNotEmpty;
+      SupabaseService().updateCompletedExercises(dateKey, completedForDay.toList(), isCompletedDay);
+      return;
+    }
+
+    // Fallback: If not cached, proceed with loader and async fetch
+    setState(() => _isLoading = true);
+
     final schedule = _generatedPlan!['schedule_json'];
 
     // Debug Logs as Requested
@@ -641,44 +919,6 @@ class WorkoutPageState extends State<WorkoutPage> {
         }
       }
     }
-
-    // Use strict helper to get day data
-    final dayData = _getDayData(globalDayIndex);
-
-    if (dayData == null) {
-      print('DEBUG: Day data not found for globalDayIndex=$globalDayIndex');
-      print('===========================================');
-      setState(() {
-        _exercises = [];
-        _isLoading = false;
-      });
-      return;
-    }
-
-    final dayType = dayData['type'];
-
-    // 2. STRENGTHENED CHECK: Case-insensitive 'rest'
-    if (dayType != null && dayType.toString().toLowerCase() == 'rest') {
-      // Show REST DAY view
-      // STRICT: NEVER show "No exercises found" for Rest.
-      print('Action: Showing REST UI');
-      setState(() {
-        _exercises = [];
-        _isLoading = false;
-        _isRestDay = true;
-      });
-      return;
-    }
-
-    // Get exercise count
-    // The RPC may use 'exercises', 'exercise_ids', or 'exercise_list'
-    List rawExercises = dayData['exercises'] as List? ??
-        dayData['exercise_ids'] as List? ??
-        dayData['exercise_list'] as List? ??
-        [];
-    print('DEBUG: dayData keys: ${dayData.keys.toList()}, exercises count: ${rawExercises.length}');
-    final List<String> idsForDay =
-        rawExercises.map((e) => _normalizeExerciseId(e)).toList();
 
     // 2. Workout day - fetch exercises
     print(
@@ -723,29 +963,107 @@ class WorkoutPageState extends State<WorkoutPage> {
         for (var r in rows) _normalizeExerciseId(r['id']): r
       };
 
+      // Populate our master rows cache!
+      for (var entry in byId.entries) {
+        _exerciseRowsCache[entry.key] = Map<String, dynamic>.from(entry.value);
+      }
+
       // Reorder: Use ONLY ordered list from template. NO fallback.
       final List<ExerciseDetail> orderedExercises = [];
 
       for (var id in idsForDay) {
         final r = byId[id];
         if (r != null) {
-          orderedExercises.add(ExerciseDetail.fromJson(r));
+          int? sets;
+          int? reps;
+          try {
+            final raw = rawExercises.firstWhere(
+                (e) => _normalizeExerciseId(e) == id,
+                orElse: () => null);
+            if (raw is Map) {
+              sets = raw['sets'] is int
+                  ? raw['sets'] as int
+                  : int.tryParse(raw['sets']?.toString() ?? '');
+              reps = raw['reps'] is int
+                  ? raw['reps'] as int
+                  : int.tryParse(raw['reps']?.toString() ?? '');
+            }
+          } catch (_) {}
+
+          final baseDetail = ExerciseDetail.fromJson(r);
+          orderedExercises.add(baseDetail.copyWith(
+            sets: sets ?? baseDetail.sets,
+            reps: reps ?? baseDetail.reps,
+          ));
         } else {
           print('DEBUG: Missing ID $id in exercises table');
         }
       }
 
-      print('Final Ordered Exercise Count: ${orderedExercises.length}');
+      // Apply Customizations
+      final List<ExerciseDetail> finalExercises = [];
+      final customizations = _dayCustomizations[dateKey];
+      final removedNames = customizations?['removed'] ?? [];
+      final addedNames = customizations?['added'] ?? [];
+
+      // 1. Filter out removed exercises
+      for (var ex in orderedExercises) {
+        if (!removedNames.contains(ex.name)) {
+          finalExercises.add(ex);
+        }
+      }
+
+      // 2. Append added exercises
+      for (var name in addedNames) {
+        ExerciseDetail? found;
+        try {
+          found = _favoriteExercises.firstWhere((ex) => ex.name == name);
+        } catch (_) {}
+
+        if (found == null) {
+          try {
+            found = _allExercisesCache.firstWhere((ex) => ex.name == name);
+          } catch (_) {}
+        }
+
+        if (found == null && rows.isNotEmpty) {
+          try {
+            final row = rows.firstWhere((r) => r['exercise_name'] == name);
+            found = ExerciseDetail.fromJson(row);
+          } catch (_) {}
+        }
+
+        if (found != null) {
+          finalExercises.add(found);
+        } else {
+          // Fallback if not loaded
+          finalExercises.add(
+            ExerciseDetail(
+              id: name,
+              name: name,
+              slug: name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s-]'), '').replaceAll(RegExp(r'\s+'), '-'),
+              muscleId: 'custom',
+              imagePath: '',
+              target: 'Custom',
+              synergist: 'Various',
+              difficulty: 'Intermediate',
+              steps: ['Perform the custom exercise.'],
+            ),
+          );
+        }
+      }
+
+      print('Final Ordered Exercise Count (including customizations): ${finalExercises.length}');
 
       if (mounted) {
         setState(() {
-          _exercises = orderedExercises;
+          _exercises = finalExercises;
           _isLoading = false;
         });
       }
       
       // Now that _exercises is fully populated, evaluate and persist completion state
-      final isCompletedDay = completedForDay.length >= orderedExercises.length && orderedExercises.isNotEmpty;
+      final isCompletedDay = completedForDay.length >= finalExercises.length && finalExercises.isNotEmpty;
       SupabaseService().updateCompletedExercises(dateKey, completedForDay.toList(), isCompletedDay);
       
     } catch (e) {
@@ -832,15 +1150,16 @@ class WorkoutPageState extends State<WorkoutPage> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(context).size.width;
 
-    // Check BOTH flags
-    if (_isLoading || _isLoadingPlan) {
+    // Show loading spinner ONLY if the user is authenticated and has actually completed the quiz.
+    // If they have not completed the quiz, we go straight to setup view.
+    if (_hasCompletedQuiz && (_isLoading || _isLoadingPlan)) {
       return const Scaffold(
         body: Center(
             child: CircularProgressIndicator(color: const Color(0xFFFF0000))),
       );
     }
 
-    if (!_hasPlan) {
+    if (!_hasPlan || !_hasCompletedQuiz) {
       return _buildSetupView(isDarkMode);
     }
 
@@ -1025,105 +1344,308 @@ class WorkoutPageState extends State<WorkoutPage> {
     );
   }
 
-  // Grid view: Dynamic duration with freemium soft locks
+  // Grid view: Collapsible Month & Week grouped timeline matching Meal Plan UI
   Widget _buildGridView(bool isDarkMode) {
-    // 1) Use _prefDurationWeeks (loaded from user_preferences at init)
-    //    We no longer override this with the template's duration.
     int totalWeeks = _prefDurationWeeks > 0 ? _prefDurationWeeks : 4;
-
+    final int totalMonths = (totalWeeks / 4).ceil();
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final isPro = SubscriptionState().isPro;
 
+    // Determine current week from plan creation date
+    DateTime planStart;
+    if (_generatedPlan != null && _generatedPlan!['created_at'] != null) {
+      final createdAt = DateTime.parse(_generatedPlan!['created_at']);
+      planStart = DateTime(createdAt.year, createdAt.month, createdAt.day);
+    } else {
+      final now = DateTime.now();
+      final currentMonday = now.subtract(Duration(days: now.weekday - 1));
+      planStart = DateTime(currentMonday.year, currentMonday.month, currentMonday.day);
+    }
+    final elapsedDays = DateTime.now().difference(planStart).inDays;
+    final currentWeek = (elapsedDays ~/ 7).clamp(0, totalWeeks - 1) + 1;
+
+    final bgCard = isDarkMode ? const Color(0xFF1A1A1A) : Colors.white;
+    final borderCol = isDarkMode ? Colors.white : Colors.black;
+
+    // Calculate overall progress of the workout plan
+    double totalWorkoutProgress = 0.0;
+    int totalWorkoutDays = 0;
+
+    for (int dayNumber = 1; dayNumber <= totalWeeks * 7; dayNumber++) {
+      final dayDate = planStart.add(Duration(days: dayNumber - 1));
+      final dayData = _getDayData(dayNumber);
+      final dayType = dayData != null ? dayData['type'] : 'workout';
+      
+      final dateKey = _getDateKey(dayDate);
+      final customizations = _dayCustomizations[dateKey];
+      final added = customizations?['added'] as List? ?? [];
+      
+      final isRest = dayType.toString().toLowerCase() == 'rest' && added.isEmpty;
+
+      if (!isRest) {
+        totalWorkoutDays++;
+        totalWorkoutProgress += _getWorkoutProgressForDay(dayDate);
+      }
+    }
+
+    final double overallProgress = totalWorkoutDays > 0 ? (totalWorkoutProgress / totalWorkoutDays) : 0.0;
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 3) Dynamic Workout Plan Grid
+        // Progress header card matching Meal Plan UI
         Container(
-          padding: EdgeInsets.all(isSmallScreen ? 16 : 30),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+            color: bgCard,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isDarkMode ? Colors.white : Colors.black,
-              width: 3,
-            ),
+            border: Border.all(color: borderCol, width: 1),
             boxShadow: [
               BoxShadow(
-                color: isDarkMode
-                    ? Colors.black.withOpacity(0.3)
-                    : Colors.black.withOpacity(0.15),
-                blurRadius: 20,
+                color: isDarkMode ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.10),
+                blurRadius: 16,
                 offset: const Offset(0, 4),
-              ),
+              )
             ],
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Title
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$totalWeeks-Week Workout Plan',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 22 : 28,
-                    fontWeight: FontWeight.w700,
-                    color: isDarkMode ? Colors.white : const Color(0xFF333333),
-                  ),
-                  maxLines: 1,
-                ),
-              ),
-              SizedBox(height: isSmallScreen ? 6 : 10),
-              Text(
-                isPro
-                    ? 'Select a day to view your workouts'
-                    : 'Enjoy free workouts · Unlock full plan with Premium',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDarkMode ? Colors.white54 : const Color(0xFF666666),
-                ),
-              ),
-
-              SizedBox(height: isSmallScreen ? 16 : 30),
-
-              // 4) Loop to render each Week with banners between
-              for (int w = 0; w < totalWeeks; w++) ...[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Week ${w + 1}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFFFF0000),
-                          ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your Workout Plan',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: isDarkMode ? Colors.white : const Color(0xFF111111),
                         ),
-                        if (!isPro && w > 0) ...[
-                          const SizedBox(width: 8),
-                          const Icon(Icons.lock, size: 14, color: Color(0xFFFF0000)),
-                        ],
-                      ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Week $currentWeek of $totalWeeks',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFFFF0000),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isPro ? 'Keep going — consistency is key!' : 'Unlock full plan with Premium',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDarkMode ? Colors.white54 : const Color(0xFF888888),
                     ),
-                    const SizedBox(height: 15),
-                    _build14DayGrid((w * 7) + 1, (w * 7) + 7, isDarkMode),
-                  ],
+                  ),
+                  Text(
+                    '${(overallProgress * 100).round()}%',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFFF0000),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: overallProgress.clamp(0.0, 1.0),
+                  backgroundColor: isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+                  minHeight: 5,
                 ),
-                // Insert PromoBanner between weeks (not after the last one)
-                if (w < totalWeeks - 1) ...[
-                  if (!isPro)
-                    PromoBanner(
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      source: 'workout_week_${w + 1}',
-                    )
-                  else
-                    SizedBox(height: isSmallScreen ? 16 : 30),
-                ] else
-                  SizedBox(height: isSmallScreen ? 8 : 16),
-              ],
+              ),
             ],
           ),
+        ),
+        const SizedBox(height: 12),
+        // Month groups timeline matching Meal Plan UI
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: totalMonths,
+          itemBuilder: (context, monthIndex) {
+            final monthNum = monthIndex + 1;
+            final firstWeek = monthIndex * 4 + 1;
+            final lastWeek = (firstWeek + 3).clamp(1, totalWeeks);
+            final weekCount = lastWeek - firstWeek + 1;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: bgCard,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: borderCol, width: 1),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF0000),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Month $monthNum',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Weeks $firstWeek–$lastWeek',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: isDarkMode ? Colors.white54 : const Color(0xFF888888),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: weekCount,
+                    itemBuilder: (ctx, wi) {
+                      final weekNum = firstWeek + wi;
+                      final isCurrentWeek = weekNum == currentWeek;
+                      final isNextWeek = weekNum == currentWeek + 1;
+                      final isExpanded = isCurrentWeek || isNextWeek || _expandedWorkoutWeeks.contains(weekNum);
+                      final isLocked = !isPro && weekNum > 1;
+                      final isPast = weekNum < currentWeek;
+
+                      return Column(
+                        children: [
+                          InkWell(
+                            onTap: () {
+                              if (!isCurrentWeek && !isNextWeek) {
+                                setState(() {
+                                  if (_expandedWorkoutWeeks.contains(weekNum)) {
+                                    _expandedWorkoutWeeks.remove(weekNum);
+                                  } else {
+                                    _expandedWorkoutWeeks.add(weekNum);
+                                  }
+                                });
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              child: Row(
+                                children: [
+                                  if (!isCurrentWeek && !isNextWeek)
+                                    AnimatedRotation(
+                                      turns: isExpanded ? 0.25 : 0,
+                                      duration: const Duration(milliseconds: 180),
+                                      child: Icon(
+                                        Icons.play_arrow_rounded,
+                                        size: 16,
+                                        color: isDarkMode ? Colors.white38 : const Color(0xFFBBBBBB),
+                                      ),
+                                    )
+                                  else
+                                    const SizedBox(width: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Week $weekNum',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: isCurrentWeek ? FontWeight.w800 : FontWeight.w600,
+                                      color: isCurrentWeek
+                                          ? const Color(0xFFFF0000)
+                                          : isPast
+                                              ? (isDarkMode ? Colors.white38 : const Color(0xFFBBBBBB))
+                                              : (isDarkMode ? Colors.white : const Color(0xFF1A1A1A)),
+                                    ),
+                                  ),
+                                  if (isCurrentWeek) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFF0000),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Text(
+                                        'Now',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if (isPast) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.check_circle, size: 14, color: Color(0xFF4CAF50)),
+                                  ],
+                                  if (isLocked && !isPast) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.lock, size: 13, color: Color(0xFFFF0000)),
+                                  ],
+                                  const Spacer(),
+                                  if (!isCurrentWeek && !isNextWeek)
+                                    Icon(
+                                      isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                                      size: 18,
+                                      color: isDarkMode ? Colors.white38 : const Color(0xFFCCCCCC),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          AnimatedCrossFade(
+                            firstChild: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                              child: _build14DayGrid((weekNum - 1) * 7 + 1, weekNum * 7, isDarkMode),
+                            ),
+                            secondChild: const SizedBox.shrink(),
+                            crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                            duration: const Duration(milliseconds: 220),
+                          ),
+                          if (wi < weekCount - 1)
+                            Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: isDarkMode ? Colors.white10 : const Color(0xFFF0F0F0),
+                              indent: 16,
+                              endIndent: 16,
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 4),
+                ],
+              ),
+            );
+          },
         ),
       ],
     );
@@ -1131,6 +1653,9 @@ class WorkoutPageState extends State<WorkoutPage> {
 
   // Detail view: Selected day's workouts
   Widget _buildDetailView(bool isDarkMode) {
+    final globalDayIndex = _getCurrentGlobalDayIndex();
+    final dayData = _getDayData(globalDayIndex);
+
     return Column(
       children: [
         // Back to Days Button
@@ -1147,20 +1672,24 @@ class WorkoutPageState extends State<WorkoutPage> {
               color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: isDarkMode ? Colors.white : Colors.black,
-                width: 2,
+                color: isDarkMode ? Colors.white24 : Colors.black,
+                width: 1.0,
               ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.arrow_back, size: 20),
+                const Icon(
+                  Icons.chevron_left,
+                  color: Color(0xFFFF0000),
+                  size: 24,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Back to Days',
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: isDarkMode ? Colors.white : const Color(0xFF333333),
+                    fontWeight: FontWeight.bold,
+                    color: isDarkMode ? Colors.white : Colors.black,
                   ),
                 ),
               ],
@@ -1170,7 +1699,7 @@ class WorkoutPageState extends State<WorkoutPage> {
 
         const SizedBox(height: 16),
 
-        // Day Header Card
+        // Day Header Card (Premium split layout)
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
@@ -1178,26 +1707,97 @@ class WorkoutPageState extends State<WorkoutPage> {
             color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isDarkMode ? Colors.white : Colors.black,
-              width: 2,
+              color: isDarkMode ? Colors.white24 : Colors.black,
+              width: 1.0,
             ),
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Left Side: DAY + number
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'DAY',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFFF0000),
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      Text(
+                        '${_getSelectedDayNumber()}',
+                        style: TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: isDarkMode ? Colors.white : Colors.black,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Right Side: Completion Percentage
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${(_getWorkoutProgressForDay(_selectedDay) * 100).round()}%',
+                        style: TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: isDarkMode ? Colors.white : Colors.black,
+                          height: 1.1,
+                        ),
+                      ),
+                      const Text(
+                        'complete',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Divider(
+                color: isDarkMode ? Colors.white24 : Colors.black12,
+                thickness: 1.0,
+              ),
+              const SizedBox(height: 12),
+              // Bottom Section: Focus/Type and muscles
               Text(
-                'Day ${_getSelectedDayNumber()}',
+                dayData != null
+                    ? (dayData['type'] != null
+                        ? WorkoutEngineService().getDayLabel(dayData['type'].toString())
+                        : (dayData['name'] ?? dayData['type'] ?? 'Workout Day'))
+                    : 'Workout Day',
                 style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
                   color: Color(0xFFFF0000),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Text(
-                '${(_getWorkoutProgressForDay(_selectedDay) * 100).round()}% Complete',
+                dayData != null
+                    ? (dayData['type'] != null &&
+                            WorkoutEngineService().getMuscleSubtitle(dayData['type'].toString()).isNotEmpty
+                        ? WorkoutEngineService().getMuscleSubtitle(dayData['type'].toString())
+                        : (dayData['focus'] ?? dayData['description'] ?? 'General Exercises'))
+                    : 'General Exercises',
                 style: TextStyle(
-                  fontSize: 16,
-                  color: isDarkMode ? Colors.white54 : const Color(0xFF666666),
+                  fontSize: 14,
+                  color: isDarkMode ? Colors.white60 : Colors.black54,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -1206,15 +1806,15 @@ class WorkoutPageState extends State<WorkoutPage> {
 
         const SizedBox(height: 16),
 
-        // Today's Progress Section
+        // Today's Progress Section (1.0 width border, bold red completed count)
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isDarkMode ? Colors.white : Colors.black,
-              width: 1,
+              color: isDarkMode ? Colors.white24 : Colors.black,
+              width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
@@ -1236,16 +1836,29 @@ class WorkoutPageState extends State<WorkoutPage> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color:
-                          isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                      color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
                     ),
                   ),
-                  Text(
-                    '$_completedCount/$_totalCount exercises',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          isDarkMode ? Colors.white54 : const Color(0xFF999999),
+                  RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '$_completedCount',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFFF0000),
+                            fontSize: 14,
+                          ),
+                        ),
+                        TextSpan(
+                          text: ' / $_totalCount exercises',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDarkMode ? Colors.white54 : const Color(0xFF999999),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -1258,9 +1871,8 @@ class WorkoutPageState extends State<WorkoutPage> {
                   backgroundColor: isDarkMode
                       ? const Color(0xFF2C2C2C)
                       : const Color(0xFFF0F0F0),
-                  valueColor:
-                      const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
-                  minHeight: 6,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)),
+                  minHeight: 8, // Thicker red horizontal bar
                 ),
               ),
             ],
@@ -1271,54 +1883,66 @@ class WorkoutPageState extends State<WorkoutPage> {
         // Exercise List
         _isLoading
             ? const Center(
-                child:
-                    CircularProgressIndicator(color: const Color(0xFFFF0000)),
+                child: CircularProgressIndicator(color: const Color(0xFFFF0000)),
               )
             : _isRestDay
                 ? _buildRestDayCard(isDarkMode)
-                : _exercises.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No exercises found',
-                          style: TextStyle(
-                            color: isDarkMode ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.zero,
-                        itemCount: (() {
-                          final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
-                          return showBanners
-                              ? _exercises.length + (_exercises.length ~/ 3)
-                              : _exercises.length;
-                        })(),
-                        itemBuilder: (context, index) {
-                          final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
-                          const bannerInterval = 3;
+                : Column(
+                    children: [
+                      _exercises.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 24),
+                                child: Text(
+                                  'No exercises found',
+                                  style: TextStyle(
+                                    color: isDarkMode ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: EdgeInsets.zero,
+                              itemCount: (() {
+                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                return showBanners
+                                    ? _exercises.length + (_exercises.length ~/ 3)
+                                    : _exercises.length;
+                              })(),
+                              itemBuilder: (context, index) {
+                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                const bannerInterval = 3;
 
-                          if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
-                            return const PromoBanner(
-                              margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              source: 'workout_page_list',
-                            );
-                          }
+                                if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
+                                  return const PromoBanner(
+                                    margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    source: 'workout_page_list',
+                                  );
+                                }
 
-                          final exerciseIndex = !showBanners
-                              ? index
-                              : index - (index ~/ (bannerInterval + 1));
+                                final exerciseIndex = !showBanners
+                                    ? index
+                                    : index - (index ~/ (bannerInterval + 1));
 
-                          final exercise = _exercises[exerciseIndex];
-                          return _buildExerciseTile(
-                            exercise.name,
-                            '3 sets × 12 reps',
-                            isDarkMode,
-                            isMobile: true,
-                          );
-                        },
-                      ),
+                                final exercise = _exercises[exerciseIndex];
+                                
+                                final setsCount = exercise.sets ?? 3;
+                                final repsText = exercise.reps != null ? '${exercise.reps}' : '12 reps';
+                                final setsRepsStr = '$setsCount sets × $repsText';
+
+                                return _buildExerciseTile(
+                                  exercise.name,
+                                  setsRepsStr,
+                                  isDarkMode,
+                                  isMobile: true,
+                                );
+                              },
+                            ),
+                      _buildAddExerciseCard(isDarkMode),
+                    ],
+                  ),
       ],
     );
   }
@@ -1438,9 +2062,7 @@ class WorkoutPageState extends State<WorkoutPage> {
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 16),
-
-                                  // Today's Progress Section
+                                             // Today's Progress Section
                                   Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
@@ -1450,9 +2072,9 @@ class WorkoutPageState extends State<WorkoutPage> {
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
                                         color: isDarkMode
-                                            ? Colors.white10
-                                            : Colors.black12,
-                                        width: 1,
+                                            ? Colors.white24
+                                            : Colors.black,
+                                        width: 1.0,
                                       ),
                                     ),
                                     child: Column(
@@ -1471,13 +2093,26 @@ class WorkoutPageState extends State<WorkoutPage> {
                                                     : const Color(0xFF1A1A1A),
                                               ),
                                             ),
-                                            Text(
-                                              '$_completedCount/$_totalCount exercises',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: isDarkMode
-                                                    ? Colors.white54
-                                                    : const Color(0xFF999999),
+                                            RichText(
+                                              text: TextSpan(
+                                                children: [
+                                                  TextSpan(
+                                                    text: '$_completedCount',
+                                                    style: const TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Color(0xFFFF0000),
+                                                      fontSize: 14,
+                                                    ),
+                                                  ),
+                                                  TextSpan(
+                                                    text: ' / $_totalCount exercises',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDarkMode ? Colors.white54 : const Color(0xFF999999),
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
@@ -1496,7 +2131,7 @@ class WorkoutPageState extends State<WorkoutPage> {
                                             valueColor:
                                                 const AlwaysStoppedAnimation<
                                                     Color>(Color(0xFFFF0000)),
-                                            minHeight: 6,
+                                            minHeight: 8,
                                           ),
                                         ),
                                       ],
@@ -1521,41 +2156,51 @@ class WorkoutPageState extends State<WorkoutPage> {
                                                 ),
                                               ),
                                             )
-                                          : ListView.builder(
-                                              shrinkWrap: true,
-                                              physics:
-                                                  const NeverScrollableScrollPhysics(),
-                                              padding: EdgeInsets.zero,
-                                              itemCount: (() {
-                                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
-                                                return showBanners
-                                                    ? _exercises.length + (_exercises.length ~/ 3)
-                                                    : _exercises.length;
-                                              })(),
-                                              itemBuilder: (context, index) {
-                                                final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
-                                                const bannerInterval = 3;
+                                          : Column(
+                                              children: [
+                                                ListView.builder(
+                                                  shrinkWrap: true,
+                                                  physics:
+                                                      const NeverScrollableScrollPhysics(),
+                                                  padding: EdgeInsets.zero,
+                                                  itemCount: (() {
+                                                    final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                                    return showBanners
+                                                        ? _exercises.length + (_exercises.length ~/ 3)
+                                                        : _exercises.length;
+                                                  })(),
+                                                  itemBuilder: (context, index) {
+                                                    final showBanners = !SubscriptionState().isPro && _getSelectedDayNumber() != 1;
+                                                    const bannerInterval = 3;
 
-                                                if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
-                                                  return const PromoBanner(
-                                                    margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                                    source: 'workout_page_desktop',
-                                                  );
-                                                }
+                                                    if (showBanners && index > 0 && index % (bannerInterval + 1) == bannerInterval) {
+                                                      return const PromoBanner(
+                                                        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                        source: 'workout_page_desktop',
+                                                      );
+                                                    }
 
-                                                final exerciseIndex = !showBanners
-                                                    ? index
-                                                    : index - (index ~/ (bannerInterval + 1));
+                                                    final exerciseIndex = !showBanners
+                                                        ? index
+                                                        : index - (index ~/ (bannerInterval + 1));
 
-                                                final exercise =
-                                                    _exercises[exerciseIndex];
-                                                return _buildExerciseTile(
-                                                  exercise.name,
-                                                  '3 sets × 12 reps',
-                                                  isDarkMode,
-                                                  isMobile: false,
-                                                );
-                                              },
+                                                    final exercise =
+                                                        _exercises[exerciseIndex];
+                                                    
+                                                    final setsCount = exercise.sets ?? 3;
+                                                    final repsText = exercise.reps != null ? '${exercise.reps}' : '12 reps';
+                                                    final setsRepsStr = '$setsCount sets × $repsText';
+
+                                                    return _buildExerciseTile(
+                                                      exercise.name,
+                                                      setsRepsStr,
+                                                      isDarkMode,
+                                                      isMobile: false,
+                                                    );
+                                                  },
+                                                ),
+                                                _buildAddExerciseCard(isDarkMode),
+                                              ],
                                             ),
                                 ],
                               ),
@@ -1745,16 +2390,16 @@ class WorkoutPageState extends State<WorkoutPage> {
 
   Widget _buildExerciseTile(String title, String subtitle, bool isDarkMode,
       {bool isMobile = false}) {
+    final isCompleted = _completedExercises.contains(title);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
         border: Border.all(
-          color: isMobile
-              ? (isDarkMode ? Colors.white : Colors.black)
-              : Colors.black, // Mobile dark mode white, others black
-          width: 1,
+          color: isDarkMode ? Colors.white24 : Colors.black,
+          width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
@@ -1770,19 +2415,11 @@ class WorkoutPageState extends State<WorkoutPage> {
       child: ListTile(
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        leading: _completedExercises.contains(title)
-            ? Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check,
-                  color: Colors.white,
-                  size: 24,
-                ),
+        leading: isCompleted
+            ? const Icon(
+                Icons.check_circle,
+                color: Colors.green,
+                size: 40,
               )
             : Container(
                 width: 40,
@@ -1812,28 +2449,484 @@ class WorkoutPageState extends State<WorkoutPage> {
             fontSize: 14,
           ),
         ),
-        trailing: Icon(
-          Icons.arrow_forward_ios,
-          color: isDarkMode ? Colors.white54 : Colors.black38,
-          size: 18,
-        ),
-        onTap: () async {
-          final completed = await Navigator.push<bool>(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ExerciseDetailPage(
-                exercise:
-                    _exercises[_exercises.indexWhere((e) => e.name == title)],
-                isDarkMode: isDarkMode,
+        trailing: PopupMenuButton<String>(
+          icon: Icon(
+            Icons.more_vert,
+            color: isDarkMode ? Colors.white54 : Colors.black45,
+          ),
+          onSelected: (value) async {
+            if (value == 'view') {
+              final idx = _exercises.indexWhere((e) => e.name == title);
+              if (idx != -1) {
+                final exId = _normalizeExerciseId(_exercises[idx].id);
+                final result = await Navigator.push<dynamic>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ExerciseDetailPage(
+                      exercise: _exercises[idx],
+                      isDarkMode: isDarkMode,
+                      planId: _generatedPlan != null
+                          ? _generatedPlan!['id']?.toString() ?? 'free'
+                          : 'free',
+                      weekNumber: ((_getCurrentGlobalDayIndex() - 1) ~/ 7) + 1,
+                      dayNumber: _getCurrentGlobalDayIndex(),
+                      initialProgress: _daySetProgress[exId],
+                    ),
+                  ),
+                );
+
+                if (result == true || (result is Map && result['completed'] == true)) {
+                  _markExerciseComplete(title);
+                } else {
+                  _loadCompletedExercises().then((_) {
+                    if (mounted) _updateDailyWorkouts();
+                  });
+                }
+              }
+            } else if (value == 'remove') {
+              _confirmAndRemoveExercise(title);
+            }
+          },
+          itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+            const PopupMenuItem<String>(
+              value: 'view',
+              child: ListTile(
+                leading: Icon(Icons.visibility),
+                title: Text('View Details'),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
               ),
             ),
-          );
+            const PopupMenuItem<String>(
+              value: 'remove',
+              child: ListTile(
+                leading: Icon(Icons.delete, color: Colors.red),
+                title: Text('Remove Exercise', style: TextStyle(color: Colors.red)),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
+            ),
+          ],
+        ),
+        onTap: () async {
+          final idx = _exercises.indexWhere((e) => e.name == title);
+          if (idx != -1) {
+            final exId = _normalizeExerciseId(_exercises[idx].id);
+            final result = await Navigator.push<dynamic>(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ExerciseDetailPage(
+                  exercise: _exercises[idx],
+                  isDarkMode: isDarkMode,
+                  planId: _generatedPlan != null
+                      ? _generatedPlan!['id']?.toString() ?? 'free'
+                      : 'free',
+                  weekNumber: ((_getCurrentGlobalDayIndex() - 1) ~/ 7) + 1,
+                  dayNumber: _getCurrentGlobalDayIndex(),
+                  initialProgress: _daySetProgress[exId],
+                ),
+              ),
+            );
 
-          // Mark exercise as complete if user marked all sets complete
-          if (completed == true) {
-            _markExerciseComplete(title);
+            if (result == true || (result is Map && result['completed'] == true)) {
+              _markExerciseComplete(title);
+            } else {
+              _loadCompletedExercises().then((_) {
+                if (mounted) _updateDailyWorkouts();
+              });
+            }
           }
         },
+      ),
+    );
+  }
+
+  Widget _buildAddExerciseCard(bool isDarkMode) {
+    return GestureDetector(
+      onTap: () => _showAddExerciseBottomSheet(context),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8, bottom: 24),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF1A1A1A) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDarkMode ? Colors.white24 : Colors.black,
+            width: 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(
+              Icons.add,
+              color: Color(0xFFFF0000),
+              size: 22,
+            ),
+            SizedBox(width: 8),
+            Text(
+              'Add Exercise',
+              style: TextStyle(
+                color: Color(0xFFFF0000),
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmAndRemoveExercise(String exerciseName) async {
+    final dateKey = _getDateKey(_selectedDay);
+    final isCompleted = _completedExercises.contains(exerciseName);
+
+    if (isCompleted) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          title: const Text('Remove Exercise'),
+          content: Text('Remove "$exerciseName" from today? You have already completed it.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+    }
+
+    setState(() {
+      _completedExercises.remove(exerciseName);
+      if (_completedExercisesByDay[dateKey] != null) {
+        _completedExercisesByDay[dateKey]!.remove(exerciseName);
+      }
+
+      _dayCustomizations.putIfAbsent(dateKey, () => {'added': [], 'removed': []});
+      _dayCustomizations[dateKey]!['removed'] ??= [];
+      if (!_dayCustomizations[dateKey]!['removed']!.contains(exerciseName)) {
+        _dayCustomizations[dateKey]!['removed']!.add(exerciseName);
+      }
+      
+      if (_dayCustomizations[dateKey]!['added'] != null) {
+        _dayCustomizations[dateKey]!['added']!.remove(exerciseName);
+      }
+    });
+
+    final added = _dayCustomizations[dateKey]?['added'] ?? [];
+    final removed = _dayCustomizations[dateKey]?['removed'] ?? [];
+    await SupabaseService().updateDayCustomizations(dateKey, added, removed);
+
+    final isCompletedDay = (_completedExercisesByDay[dateKey]?.length ?? 0) >= _exercises.length && _exercises.isNotEmpty;
+    final listToSave = _completedExercisesByDay[dateKey]?.toList() ?? [];
+    await SupabaseService().updateCompletedExercises(dateKey, listToSave, isCompletedDay);
+
+    await _updateDailyWorkouts();
+  }
+
+  void _addExerciseToDay(String exerciseName) async {
+    final dateKey = _getDateKey(_selectedDay);
+
+    setState(() {
+      _dayCustomizations.putIfAbsent(dateKey, () => {'added': [], 'removed': []});
+      _dayCustomizations[dateKey]!['added'] ??= [];
+      if (!_dayCustomizations[dateKey]!['added']!.contains(exerciseName)) {
+        _dayCustomizations[dateKey]!['added']!.add(exerciseName);
+      }
+
+      if (_dayCustomizations[dateKey]!['removed'] != null) {
+        _dayCustomizations[dateKey]!['removed']!.remove(exerciseName);
+      }
+    });
+
+    final added = _dayCustomizations[dateKey]?['added'] ?? [];
+    final removed = _dayCustomizations[dateKey]?['removed'] ?? [];
+    await SupabaseService().updateDayCustomizations(dateKey, added, removed);
+
+    await _updateDailyWorkouts();
+  }
+
+  void _showAddExerciseBottomSheet(BuildContext context) {
+    final isDarkMode = widget.isDarkMode;
+    final bottomSheetBg = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        String selectedGroup = 'All';
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            // Extract unique group paths from favorites
+            final uniqueGroups = _favoriteExercises
+                .map((e) => e.muscleId.trim())
+                .where((m) => m.isNotEmpty)
+                .toSet()
+                .toList()
+              ..sort();
+
+            final filteredFavs = selectedGroup == 'All'
+                ? _favoriteExercises
+                : _favoriteExercises
+                    .where((e) => e.muscleId.trim().toLowerCase() == selectedGroup.toLowerCase())
+                    .toList();
+
+            return Container(
+              decoration: BoxDecoration(
+                color: bottomSheetBg,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
+                border: Border.all(
+                  color: isDarkMode ? Colors.white24 : Colors.black12,
+                  width: 1,
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.75,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isDarkMode ? Colors.white30 : Colors.black26,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Add Exercise',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Choose from your favorite exercises to add to today\'s workout:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDarkMode ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Filter Group Path Chips
+                    if (_favoriteExercises.isNotEmpty && uniqueGroups.isNotEmpty) ...[
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              _buildSheetFilterChip(
+                                label: 'All',
+                                isSelected: selectedGroup == 'All',
+                                onTap: () {
+                                  setSheetState(() {
+                                    selectedGroup = 'All';
+                                  });
+                                },
+                                isDarkMode: isDarkMode,
+                              ),
+                              ...uniqueGroups.map((group) {
+                                final displayLabel = group.substring(0, 1).toUpperCase() + group.substring(1);
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _buildSheetFilterChip(
+                                    label: displayLabel,
+                                    isSelected: selectedGroup.toLowerCase() == group.toLowerCase(),
+                                    onTap: () {
+                                      setSheetState(() {
+                                        selectedGroup = group;
+                                      });
+                                    },
+                                    isDarkMode: isDarkMode,
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    _favoriteExercises.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 32),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.favorite_border,
+                                    size: 48,
+                                    color: isDarkMode ? Colors.white24 : Colors.black26,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No favorite exercises yet',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: isDarkMode ? Colors.white60 : Colors.black54,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Heart exercises on the Home or Exercises page to populate this list!',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDarkMode ? Colors.white38 : Colors.black38,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : filteredFavs.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 32),
+                                  child: Text(
+                                    'No favorites found for "$selectedGroup"',
+                                    style: TextStyle(
+                                      color: isDarkMode ? Colors.white54 : Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : Flexible(
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: filteredFavs.length,
+                                  itemBuilder: (context, idx) {
+                                    final fav = filteredFavs[idx];
+                                    final alreadyAdded = _exercises.any((ex) => ex.name == fav.name);
+
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 12),
+                                      decoration: BoxDecoration(
+                                        color: isDarkMode ? const Color(0xFF262626) : Colors.grey.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: isDarkMode ? Colors.white12 : Colors.black12,
+                                        ),
+                                      ),
+                                      child: ListTile(
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                        title: Text(
+                                          fav.name,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: isDarkMode ? Colors.white : Colors.black87,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          '${fav.target} • ${fav.equipment ?? "Bodyweight"}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: isDarkMode ? Colors.white54 : Colors.black54,
+                                          ),
+                                        ),
+                                        trailing: ElevatedButton(
+                                          onPressed: alreadyAdded
+                                              ? null
+                                              : () {
+                                                  _addExerciseToDay(fav.name);
+                                                  Navigator.pop(context);
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text('Added "${fav.name}" to today\'s workout.'),
+                                                      backgroundColor: Colors.green,
+                                                    ),
+                                                  );
+                                                },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: alreadyAdded
+                                                ? Colors.grey
+                                                : const Color(0xFFFF0000),
+                                            foregroundColor: Colors.white,
+                                            elevation: 0,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          ),
+                                          child: Text(
+                                            alreadyAdded ? 'Added' : 'Add',
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildSheetFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required bool isDarkMode,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFFFF0000)
+              : (isDarkMode ? const Color(0xFF262626) : Colors.grey.shade100),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFFFF0000)
+                : (isDarkMode ? Colors.white10 : Colors.black12),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected
+                ? Colors.white
+                : (isDarkMode ? Colors.white70 : Colors.black87),
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            fontSize: 13,
+          ),
+        ),
       ),
     );
   }
@@ -1927,15 +3020,17 @@ class WorkoutPageState extends State<WorkoutPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF4CAF50).withOpacity(0.1),
+              color: isDarkMode ? Colors.white.withOpacity(0.07) : Colors.grey.shade100,
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.spa_rounded,
-              color: Color(0xFF4CAF50),
-              size: 48,
+            child: Image.asset(
+              'assets/rest.png',
+              width: 56,
+              height: 56,
+              fit: BoxFit.contain,
+              color: isDarkMode ? Colors.white : Colors.black87,
             ),
           ),
           const SizedBox(height: 24),
@@ -1962,7 +3057,7 @@ class WorkoutPageState extends State<WorkoutPage> {
     );
   }
 
-  // New methods for 14-day grid layout
+  // Helper methods for 14-day grid layout matching Meal Plan UI
   Widget _build14DayGrid(int startDay, int endDay, bool isDarkMode) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
@@ -1972,9 +3067,9 @@ class WorkoutPageState extends State<WorkoutPage> {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 4,
-        childAspectRatio: 1,
-        crossAxisSpacing: isSmallScreen ? 10 : 18,
-        mainAxisSpacing: isSmallScreen ? 10 : 18,
+        childAspectRatio: 0.82,
+        crossAxisSpacing: isSmallScreen ? 8 : 12,
+        mainAxisSpacing: isSmallScreen ? 8 : 12,
       ),
       itemCount: endDay - startDay + 1,
       itemBuilder: (context, index) {
@@ -1989,13 +3084,11 @@ class WorkoutPageState extends State<WorkoutPage> {
     DateTime planStartDate;
     if (_generatedPlan != null && _generatedPlan!['created_at'] != null) {
       final createdAt = DateTime.parse(_generatedPlan!['created_at']);
-      // Normalize to midnight
       planStartDate = DateTime(createdAt.year, createdAt.month, createdAt.day);
     } else {
       final now = DateTime.now();
       planStartDate = now.subtract(Duration(days: now.weekday - 1));
-      planStartDate =
-          DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
+      planStartDate = DateTime(planStartDate.year, planStartDate.month, planStartDate.day);
     }
 
     final dayDate = planStartDate.add(Duration(days: dayNumber - 1));
@@ -2004,27 +3097,16 @@ class WorkoutPageState extends State<WorkoutPage> {
         dayDate.year == _selectedDay.year;
 
     // Get progress and data
-    final dateKey = _getDateKey(dayDate);
-    final dayCompleted = _completedExercisesByDay[dateKey];
-
     final dayData = _getDayData(dayNumber);
-    final rawIds = dayData != null
-        ? (dayData['exercises'] as List? ??
-            dayData['exercise_ids'] as List? ??
-            dayData['exercise_list'] as List? ??
-            [])
-        : [];
-    final totalExercises = rawIds.length;
-    final dayType = dayData != null
-        ? dayData['type']
-        : 'workout'; // Default to workout if unknown
-
-    final completedCount = dayCompleted?.length ?? 0;
-    final progressPercent = totalExercises == 0
-        ? 0
-        : ((completedCount / totalExercises) * 100).round();
-    final isRest = dayType == 'rest';
-    final isCompleted = !isRest && progressPercent == 100;
+    final dayType = dayData != null ? dayData['type'] : 'workout';
+    final dateKey = _getDateKey(dayDate);
+    final customizations = _dayCustomizations[dateKey];
+    final added = customizations?['added'] as List? ?? [];
+    
+    final isRest = dayType.toString().toLowerCase() == 'rest' && added.isEmpty;
+    final progressVal = _getWorkoutProgressForDay(dayDate);
+    final progressPercent = (progressVal * 100).round();
+    final isCompleted = !isRest && progressPercent >= 100 && (dayData != null || added.isNotEmpty);
 
     // Freemium: Day 1 is always free; remaining days require subscription
     final isPro = SubscriptionState().isPro;
@@ -2039,8 +3121,6 @@ class WorkoutPageState extends State<WorkoutPage> {
             return;
           }
 
-          // Soft gate: user-initiated paywall (not forced)
-          // Go straight to RevenueCatUI — it handles store errors natively.
           AnalyticsService()
               .trackPaywallViewed(source: 'workout_locked_day_$dayNumber');
           await RevenueCatService().showPaywall();
@@ -2049,81 +3129,82 @@ class WorkoutPageState extends State<WorkoutPage> {
         }
         setState(() {
           _selectedDay = dayDate;
-          _showingDayGrid = false;
+          _showingDayGrid = false; // Switch to detail view
         });
         _updateDailyWorkouts();
       },
-      child: Container(
-        decoration: ShapeDecoration(
-          color: isLocked
-              ? (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF0F0F0))
-              : isCompleted
-                  ? const Color(0xFF4CAF50) // Solid green when completed
-                  : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
-          shape: PolygonBorder(
-            sides: 16,
-            borderRadius: 5.0,
-            rotate: 11.25,
-            side: BorderSide(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            decoration: BoxDecoration(
               color: isLocked
-                  ? (isDarkMode ? Colors.white24 : Colors.black12)
-                  : (isDarkMode ? Colors.white : Colors.black),
-              width: 2.5,
+                  ? (isDarkMode ? const Color(0xFF1A1A1A) : const Color(0xFFF0F0F0))
+                  : isCompleted
+                      ? const Color(0xFF4CAF50)
+                      : (isDarkMode ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8)),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isLocked
+                    ? (isDarkMode ? Colors.white24 : Colors.black12)
+                    : (isDarkMode ? Colors.white : Colors.black),
+                width: 1.0,
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double circleWidth = constraints.maxWidth;
+                return Padding(
+                  padding: EdgeInsets.all(circleWidth * 0.10),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Day $dayNumber',
+                          style: TextStyle(
+                            fontSize: circleWidth * 0.35,
+                            fontWeight: FontWeight.w900,
+                            color: isLocked
+                                ? (isDarkMode ? Colors.white30 : Colors.black26)
+                                : isCompleted
+                                    ? Colors.white
+                                    : (isDarkMode ? Colors.white : const Color(0xFF333333)),
+                            letterSpacing: -0.5,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: circleWidth * 0.05),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: isLocked
+                            ? Icon(
+                                Icons.lock,
+                                size: circleWidth * 0.28,
+                                color: isDarkMode ? Colors.white30 : Colors.black26,
+                              )
+                            : Text(
+                                isRest ? 'Rest' : '$progressPercent%',
+                                style: TextStyle(
+                                  fontSize: circleWidth * 0.22,
+                                  fontWeight: FontWeight.bold,
+                                  color: isCompleted
+                                      ? Colors.white
+                                      : (isRest
+                                          ? const Color(0xFFFF0000)
+                                          : const Color(0xFF4CAF50)),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final double circleWidth = constraints.maxWidth;
-            return Padding(
-              padding: EdgeInsets.all(circleWidth * 0.15),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'Day $dayNumber',
-                      style: TextStyle(
-                        fontSize: circleWidth * 0.35,
-                        fontWeight: FontWeight.w900,
-                        color: isLocked
-                            ? (isDarkMode ? Colors.white30 : Colors.black26)
-                            : isCompleted
-                                ? Colors.white
-                                : (isDarkMode ? Colors.white : Colors.black),
-                        letterSpacing: -0.5,
-                        height: 1.0,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: circleWidth * 0.05),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: isLocked
-                        ? Icon(
-                            Icons.lock,
-                            size: circleWidth * 0.28,
-                            color: isDarkMode ? Colors.white30 : Colors.black26,
-                          )
-                        : Text(
-                            isRest ? 'Rest' : (isCompleted ? '100%' : '$progressPercent%'),
-                            style: TextStyle(
-                              fontSize: circleWidth * 0.22,
-                              fontWeight: FontWeight.bold,
-                              color: isCompleted
-                                  ? Colors.white // White text on green background
-                                  : (isRest
-                                      ? const Color(0xFFFF0000)
-                                      : const Color(0xFF4CAF50)),
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+        ],
       ),
     );
   }
@@ -2225,6 +3306,9 @@ class WorkoutPageState extends State<WorkoutPage> {
 
       final dateKey = _getDateKey(dayDate);
       final dayCompleted = _completedExercisesByDay[dateKey];
+      final customizations = _dayCustomizations[dateKey];
+      final added = customizations?['added'] as List? ?? [];
+      final removed = customizations?['removed'] as List? ?? [];
 
       Map<String, dynamic>? dayData;
       if (globalIndex > 0) {
@@ -2233,14 +3317,39 @@ class WorkoutPageState extends State<WorkoutPage> {
 
       final rawIds =
           dayData != null ? (dayData['exercises'] as List? ?? []) : [];
-      final dayTotalExercises = rawIds.length;
+          
+      int dayTotalExercises = rawIds.length;
+      for (final ex in rawIds) {
+        String? realName;
+        if (ex is Map) {
+          realName = ex['name'] ?? ex['exercise_name'];
+        }
+        if (realName == null) {
+          final id = ex is Map ? ex['id']?.toString() : ex.toString();
+          try {
+            realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
+          } catch (_) {
+            realName = id;
+          }
+        }
+        
+        if (realName != null && removed.contains(realName)) {
+          dayTotalExercises--;
+        }
+      }
+      dayTotalExercises += added.length;
+
+      bool isRest = dayData != null && dayData['type'] == 'rest';
+      if (isRest && added.isEmpty) {
+        dayTotalExercises = 0;
+      }
 
       final dayCompletedCount = dayCompleted?.length ?? 0;
 
       totalExercises += dayTotalExercises;
       exercisesLogged += dayCompletedCount;
 
-      if (dayCompletedCount == dayTotalExercises && dayCompletedCount > 0) {
+      if (dayTotalExercises > 0 && dayCompletedCount >= dayTotalExercises) {
         daysComplete++;
       }
     }

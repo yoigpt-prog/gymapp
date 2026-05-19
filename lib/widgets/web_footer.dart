@@ -1,13 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../pages/legal/privacy_policy_page.dart';
-import '../pages/legal/terms_of_service_page.dart';
-import '../pages/legal/disclaimer_page.dart';
-import '../pages/legal/subscription_terms_page.dart';
-import '../pages/legal/copyright_page.dart';
-import '../pages/legal/age_requirement_page.dart';
-import '../pages/legal/ai_transparency_page.dart';
-import '../pages/legal/contact_support_page.dart';
 
 class WebFooter extends StatefulWidget {
   final bool isDarkMode;
@@ -117,6 +109,10 @@ class WebFooterState extends State<WebFooter> {
                     _buildFooterLink('Age', () => _navigateToPage(context, 'age')),
                     _buildSeparator(),
                     _buildFooterLink('AI', () => _navigateToPage(context, 'ai')),
+                    _buildSeparator(),
+                    _buildFooterLink('FAQ', () => _navigateToPage(context, 'faq')),
+                    _buildSeparator(),
+                    _buildFooterLink('Sitemap', () => _navigateToPage(context, 'sitemap')),
                     _buildSeparator(),
                     _buildFooterLink('Contact', () => _navigateToPage(context, 'contact')),
                   ],
@@ -229,11 +225,30 @@ class WebFooterState extends State<WebFooter> {
        // wait, let's just make sure to pushNamed.
         routeName = '/contact';
         break;
+      case 'about':
+        routeName = '/about';
+        break;
+      case 'faq':
+        routeName = '/faq';
+        break;
+      case 'sitemap':
+        routeName = '/sitemap';
+        break;
       default:
         return;
     }
     
-    Navigator.pushNamed(context, routeName);
+    // If we're already on a legal page (not the main scaffold '/' route),
+    // replace the current legal page so routes don't pile up.
+    // If we're on the main scaffold, push on top so MainScaffold stays alive
+    // in the stack (required for popUntil to work when returning from legal pages).
+    final currentRoute = ModalRoute.of(context)?.settings.name ?? '/';
+    final isOnMainScaffold = currentRoute == '/';
+    if (isOnMainScaffold) {
+      Navigator.pushNamed(context, routeName);
+    } else {
+      Navigator.pushReplacementNamed(context, routeName);
+    }
   }
 
   void _showContactInfo(BuildContext context) {

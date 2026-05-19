@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../widgets/auth/auth_modal.dart';
 
 /// Apple-compliant internal promotional banner.
@@ -81,30 +82,154 @@ class _PromoBannerState extends State<PromoBanner>
     if (kIsWeb) {
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.workspace_premium_rounded, color: Color(0xFFFF0000)),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Unlock My Full Program',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+        barrierDismissible: true,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: Colors.black.withOpacity(0.08), width: 1),
+          ),
+          backgroundColor: Colors.white,
+          elevation: 24,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(28),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Icon + Title row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Image.asset(
+                        'assets/progress/program completion.png',
+                        width: 32,
+                        height: 32,
+                      ),
+                      const SizedBox(width: 10),
+                      const Flexible(
+                        child: Text(
+                          'Unlock My Full Program',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Description
+                  const Text(
+                    'In-app purchases are only available on our mobile apps via Apple Pay and Google Play.\n\nPlease download the GymGuide app on iOS or Android to unlock Premium features.',
+                    textAlign: TextAlign.left,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Color(0xFF444444),
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  // Store Buttons
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      GestureDetector(
+                        onTap: () async {
+                          final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                          if (await canLaunchUrl(url)) {
+                            await launchUrl(url);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black12),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.apple, color: Colors.white, size: 28),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Text('Download on the', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                  Text('App Store', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                          if (await canLaunchUrl(url)) {
+                            await launchUrl(url);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black12),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.asset('assets/svg/logo/playminiicon.png', width: 26, height: 26),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Text('GET IT ON', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                  Text('Google Play', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Got it button
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF0000),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      child: const Text(
+                        'Got it',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          content: const Text(
-            'In-app purchases are only available on our mobile apps via Apple Pay and Google Play.\n\nPlease download the GymGuide app on iOS or Android to unlock Premium features.',
-            style: TextStyle(fontSize: 15, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Got it', style: TextStyle(color: Color(0xFFFF0000), fontWeight: FontWeight.bold)),
             ),
-          ],
+          ),
         ),
       );
       return;
@@ -142,11 +267,7 @@ class _PromoBannerState extends State<PromoBanner>
           width: double.infinity,
           margin: widget.margin ?? const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFFF0000), Color(0xFFB50000)],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-            ),
+            color: const Color(0xFFFF0000),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -205,10 +326,10 @@ class _PromoBannerState extends State<PromoBanner>
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Center(
-                          child: Icon(
-                            Icons.workspace_premium_rounded,
-                            color: Colors.white,
-                            size: compact ? 22 : 28,
+                          child: Image.asset(
+                            'assets/progress/program completion.png',
+                            width: compact ? 22 : 28,
+                            height: compact ? 22 : 28,
                           ),
                         ),
                       ),
@@ -290,13 +411,13 @@ class _PromoBannerState extends State<PromoBanner>
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
                                   valueColor: AlwaysStoppedAnimation<Color>(
-                                      Color(0xFFCC0000)),
+                                      Color(0xFFFF0000)),
                                 ),
                               )
                             : Text(
                                 compact ? 'Unlock' : 'Claim Offer',
                                 style: const TextStyle(
-                                  color: Color(0xFFCC0000),
+                                  color: Color(0xFFFF0000),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
                                 ),

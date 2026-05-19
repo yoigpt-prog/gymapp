@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/legal_page_layout.dart';
+import '../../widgets/calculator_seo_content.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -83,202 +84,239 @@ class _BmiCalculatorPageState extends State<BmiCalculatorPage> {
         isDarkMode: widget.isDarkMode,
         onToggleTheme: widget.toggleTheme,
         embedded: true,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Unit Toggle
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildToggleBtn('Metric', _unit == 'Metric'),
-                    const SizedBox(width: 16),
-                    _buildToggleBtn('Imperial', _unit == 'Imperial'),
+        backgroundColor: widget.isDarkMode ? null : Colors.white,
+        child: Column(
+          children: [
+            Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 600),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(widget.isDarkMode ? 0.3 : 0.05),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 32),
-
-                // Inputs
-                Text(
-                  _unit == 'Metric' ? 'Height (cm)' : 'Height (inches)',
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _heightController,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: textColor),
-                  decoration: InputDecoration(
-                    hintText: _unit == 'Metric' ? 'e.g. 175' : 'e.g. 69',
-                    hintStyle: TextStyle(color: textColor.withOpacity(0.5)),
-                    filled: true,
-                    fillColor: widget.isDarkMode
-                        ? const Color(0xFF2A2A2A)
-                        : const Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: widget.isDarkMode
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: widget.isDarkMode
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: Color(0xFFFF0000),
-                        width: 1.8,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                Text(
-                  _unit == 'Metric' ? 'Weight (kg)' : 'Weight (lbs)',
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _weightController,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: textColor),
-                  decoration: InputDecoration(
-                    hintText: _unit == 'Metric' ? 'e.g. 70' : 'e.g. 154',
-                    hintStyle: TextStyle(color: textColor.withOpacity(0.5)),
-                    filled: true,
-                    fillColor: widget.isDarkMode
-                        ? const Color(0xFF2A2A2A)
-                        : const Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: widget.isDarkMode
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: widget.isDarkMode
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: Color(0xFFFF0000),
-                        width: 1.8,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Calculate Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _calculateBmi,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF0000),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Calculate BMI',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-
-                // Result
-                if (_bmi != null) ...[
-                  const SizedBox(height: 32),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: widget.isDarkMode ? Colors.black12 : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: const Color(0xFFFF0000).withOpacity(0.3),
-                      ),
-                    ),
-                    child: Column(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Unit Toggle
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'Your BMI',
-                          style: TextStyle(
-                            color: textColor.withOpacity(0.7),
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _bmi!.toStringAsFixed(1),
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFF0000),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            _bmiCategory,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
+                        _buildToggleBtn('Metric', _unit == 'Metric'),
+                        const SizedBox(width: 16),
+                        _buildToggleBtn('Imperial', _unit == 'Imperial'),
                       ],
                     ),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                _buildDisclaimerFooter(textColor),
+                    const SizedBox(height: 32),
+
+                    // Inputs
+                    Text(
+                      _unit == 'Metric' ? 'Height (cm)' : 'Height (inches)',
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _heightController,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: textColor),
+                      decoration: InputDecoration(
+                        hintText: _unit == 'Metric' ? 'e.g. 175' : 'e.g. 69',
+                        hintStyle: TextStyle(color: textColor.withOpacity(0.5)),
+                        filled: true,
+                        fillColor: widget.isDarkMode
+                            ? const Color(0xFF2A2A2A)
+                            : const Color(0xFFF5F5F5),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white.withOpacity(0.2)
+                                : Colors.grey.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white.withOpacity(0.2)
+                                : Colors.grey.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFFF0000),
+                            width: 1.8,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    Text(
+                      _unit == 'Metric' ? 'Weight (kg)' : 'Weight (lbs)',
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _weightController,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: textColor),
+                      decoration: InputDecoration(
+                        hintText: _unit == 'Metric' ? 'e.g. 70' : 'e.g. 154',
+                        hintStyle: TextStyle(color: textColor.withOpacity(0.5)),
+                        filled: true,
+                        fillColor: widget.isDarkMode
+                            ? const Color(0xFF2A2A2A)
+                            : const Color(0xFFF5F5F5),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white.withOpacity(0.2)
+                                : Colors.grey.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white.withOpacity(0.2)
+                                : Colors.grey.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFFF0000),
+                            width: 1.8,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Calculate Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _calculateBmi,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF0000),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Calculate BMI',
+                          style:
+                              TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+
+                    // Result
+                    if (_bmi != null) ...[
+                      const SizedBox(height: 32),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: widget.isDarkMode ? Colors.black12 : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFFFF0000).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'Your BMI',
+                              style: TextStyle(
+                                color: textColor.withOpacity(0.7),
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _bmi!.toStringAsFixed(1),
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 48,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF0000),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _bmiCategory,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    _buildDisclaimerFooter(textColor),
+                  ],
+                ),
+              ),
+            ),
+            CalculatorSeoContent(
+              calculatorName: "BMI Calculator",
+              isDarkMode: widget.isDarkMode,
+              whatIsDescription: "The Body Mass Index (BMI) is a simple numerical value derived from your height and weight. It's a widely recognized tool used by healthcare professionals and fitness experts to categorize individuals into weight groups like underweight, healthy weight, overweight, and obese. While it doesn't directly measure body fat, it serves as a highly effective screening tool for potential weight-related health issues.\n\nAt GymGuide, we view BMI as a starting point. It provides a quick snapshot of where you stand relative to global health standards, helping you identify if you might benefit from further assessment of your body composition or lifestyle habits.",
+              howItWorksSteps: [
+                {'title': 'Enter Your Stats', 'description': 'Input your current weight and height into the calculator.'},
+                {'title': 'The Formula', 'description': 'BMI is calculated as weight (kg) divided by height squared (m²).'},
+                {'title': 'View Results', 'description': 'Compare your score against the standard health categories.'},
+                {'title': 'Take Action', 'description': 'Use your result to set realistic health and fitness goals.'},
+              ],
+              whyMattersDescription: "Understanding your BMI is crucial because being significantly outside the \"healthy\" range can increase the risk of various health conditions, including cardiovascular disease, type 2 diabetes, and certain musculoskeletal issues. By tracking your BMI over time, you can monitor the effectiveness of your nutrition and exercise programs. It’s a simple metric that keeps you accountable and focused on your long-term wellness journey.",
+              healthyTips: [
+                {'icon': 'water', 'text': 'Stay Hydrated'},
+                {'icon': 'track', 'text': 'Track Progress Weekly'},
+                {'icon': 'consistency', 'text': 'Focus on Consistency'},
+                {'icon': 'fitness', 'text': 'Combine Workouts with Nutrition'},
+              ],
+              faqs: [
+                {'q': 'What is a healthy BMI?', 'a': 'A range between 18.5 and 24.9 is generally considered healthy according to the World Health Organization.'},
+                {'q': 'Is BMI accurate for athletes?', 'a': 'Athletes with high muscle mass may have a high BMI despite low body fat, as muscle weighs more than fat.'},
+                {'q': 'How often should I calculate BMI?', 'a': 'Once a month is sufficient to track long-term trends without getting distracted by daily fluctuations.'},
+                {'q': 'Can BMI predict heart disease?', 'a': 'It is one of several risk factors; however, it is a screening tool, not a diagnostic one. Always consult a doctor.'},
+                {'q': 'Is BMI different for men and women?', 'a': 'The formula is the same for all adults, but fat distribution and body composition often differ between genders.'},
               ],
             ),
-          ),
+          ],
         ),
       );
   }

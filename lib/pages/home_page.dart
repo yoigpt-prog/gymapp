@@ -13,15 +13,18 @@ import '../services/subscription_state.dart';
 import '../services/video_cache_service.dart';
 import 'package:seo/seo.dart';
 import '../widgets/seo_footer_cta.dart';
+import '../widgets/share_dialog.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
   final bool isDarkMode;
+  final ExerciseDetail? initialExercise;
 
   const HomePage({
     Key? key,
     required this.toggleTheme,
     required this.isDarkMode,
+    this.initialExercise,
   }) : super(key: key);
 
   @override
@@ -46,6 +49,7 @@ class _HomePageState extends State<HomePage> {
 
   // Filter state
   bool _filterFavorites = false;
+  String _selectedFavoriteMuscle = 'All';
   Set<String> _selectedDifficulties = {};
   Set<String> _selectedWorkoutTypes = {};
   Set<String> _selectedEquipment = {};
@@ -65,6 +69,12 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    if (widget.initialExercise != null) {
+      _exercises = [widget.initialExercise!];
+      _selectedMuscle = widget.initialExercise!.muscleId;
+      _hasMore = false;
+      _playingIndex = 0;
+    }
     // Auto-open AuthModal removed in favor of MainScaffold timer logic
     _debugCheckData();
   }
@@ -335,6 +345,13 @@ class _HomePageState extends State<HomePage> {
   Widget _buildMobileLayout() {
     final isDark = widget.isDarkMode;
     final textColor = isDark ? Colors.white : Colors.black87;
+    final displayedExercises = _filterFavorites && _selectedFavoriteMuscle != 'All'
+        ? _exercises
+            .where((e) =>
+                e.muscleId.toLowerCase() ==
+                _selectedFavoriteMuscle.toLowerCase())
+            .toList()
+        : _exercises;
 
     return Scaffold(
       body: Container(
@@ -442,6 +459,7 @@ class _HomePageState extends State<HomePage> {
                                         _exercises.clear();
                                         _filterFavorites =
                                             false; // Reset filterFavorites when going back
+                                        _selectedFavoriteMuscle = 'All'; // Reset category
                                       });
                                       if (_isSearchMode) _clearSearch();
                                     },
@@ -465,6 +483,11 @@ class _HomePageState extends State<HomePage> {
                               ),
                             ),
                           ),
+
+                          if (_filterFavorites)
+                            SliverToBoxAdapter(
+                              child: _buildFavoritesMuscleFilters(isDark),
+                            ),
 
                           // Exercise List (with promotional banners every 3 items)
                           SliverList(
@@ -491,7 +514,7 @@ class _HomePageState extends State<HomePage> {
                                     ? index
                                     : index - (index ~/ (bannerInterval + 1));
 
-                                if (exerciseIndex >= _exercises.length) {
+                                if (exerciseIndex >= displayedExercises.length) {
                                   return _isLoading
                                       ? const Center(
                                           child: Padding(
@@ -504,21 +527,21 @@ class _HomePageState extends State<HomePage> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16),
                                   child: ExerciseDetailCard(
-                                    exercise: _exercises[exerciseIndex],
+                                    exercise: displayedExercises[exerciseIndex],
                                     isDarkMode: isDark,
                                     shouldPlay: exerciseIndex == _playingIndex,
                                   ),
                                 );
                               },
                               childCount: SubscriptionState().isPro
-                                  ? _exercises.length + (_isLoading ? 1 : 0)
-                                  : _exercises.length +
-                                      (_exercises.length ~/ 3) +
+                                  ? displayedExercises.length + (_isLoading ? 1 : 0)
+                                  : displayedExercises.length +
+                                      (displayedExercises.length ~/ 3) +
                                       (_isLoading ? 1 : 0),
                             ),
                           ),
 
-                          if (_exercises.isEmpty && !_isLoading)
+                          if (displayedExercises.isEmpty && !_isLoading)
                             SliverToBoxAdapter(
                               child: Padding(
                                 padding: const EdgeInsets.all(32),
@@ -996,6 +1019,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildDesktopExerciseList() {
+    final displayedExercises = _filterFavorites && _selectedFavoriteMuscle != 'All'
+        ? _exercises
+            .where((e) =>
+                e.muscleId.toLowerCase() ==
+                _selectedFavoriteMuscle.toLowerCase())
+            .toList()
+        : _exercises;
+
     return Column(
       children: [
         Padding(
@@ -1010,6 +1041,7 @@ class _HomePageState extends State<HomePage> {
                     _selectedMuscle = null;
                     _exercises.clear();
                     _filterFavorites = false; // Reset filterFavorites
+                    _selectedFavoriteMuscle = 'All'; // Reset category
                   });
                   if (_isSearchMode) _clearSearch();
                 },
@@ -1033,8 +1065,10 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+        if (_filterFavorites)
+          _buildFavoritesMuscleFilters(widget.isDarkMode),
         const SizedBox(height: 16),
-        _exercises.isEmpty && !_isLoading
+        displayedExercises.isEmpty && !_isLoading
             ? Center(
                 child: Text('No exercises found.',
                     style: TextStyle(
@@ -1045,9 +1079,9 @@ class _HomePageState extends State<HomePage> {
                     0), // Reduced from 24 to 0 to reduce gap
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: _exercises.length + (_isLoading ? 1 : 0),
+                itemCount: displayedExercises.length + (_isLoading ? 1 : 0),
                 itemBuilder: (context, index) {
-                  if (index >= _exercises.length) {
+                  if (index >= displayedExercises.length) {
                     return _isLoading
                         ? const Center(
                             child: Padding(
@@ -1058,7 +1092,7 @@ class _HomePageState extends State<HomePage> {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: ExerciseDetailCard(
-                      exercise: _exercises[index],
+                      exercise: displayedExercises[index],
                       isDarkMode: widget.isDarkMode,
                       shouldPlay: false,
                     ),
@@ -1066,6 +1100,63 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
       ],
+    );
+  }
+
+  Widget _buildFavoritesMuscleFilters(bool isDark) {
+    if (!_filterFavorites || _exercises.isEmpty) return const SizedBox.shrink();
+
+    // Extract unique muscleId values from loaded favorites
+    final musclesSet = _exercises.map((e) => e.muscleId.trim()).toSet();
+    final musclesList = musclesSet.where((m) => m.isNotEmpty).toList()..sort();
+
+    // Create choice chips starting with 'All'
+    final List<String> options = ['All', ...musclesList];
+
+    return Container(
+      height: 48,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: options.length,
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final isSelected = _selectedFavoriteMuscle.toLowerCase() == option.toLowerCase();
+
+          // Capitalize option nicely
+          final displayLabel = option == 'All'
+              ? 'All'
+              : option[0].toUpperCase() + option.substring(1);
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(
+                displayLabel,
+                style: TextStyle(
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark ? Colors.white70 : Colors.black87),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              selected: isSelected,
+              selectedColor: const Color(0xFFFF0000), // Red
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200,
+              checkmarkColor: Colors.white,
+              onSelected: (selected) {
+                if (selected) {
+                  setState(() {
+                    _selectedFavoriteMuscle = option;
+                  });
+                }
+              },
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -1991,6 +2082,7 @@ class _HomePageState extends State<HomePage> {
 class ExerciseDetail {
   final String id; // Added ID field
   final String name;
+  final String slug;
   final String muscleId;
   final String imagePath;
   final String target;
@@ -2000,10 +2092,13 @@ class ExerciseDetail {
   final String? gender;
   final String? exerciseType;
   final String? equipment;
+  final int? sets;
+  final int? reps;
 
   ExerciseDetail({
     required this.id, // Required
     required this.name,
+    required this.slug,
     required this.muscleId,
     required this.imagePath,
     required this.target,
@@ -2013,7 +2108,43 @@ class ExerciseDetail {
     this.gender,
     this.exerciseType,
     this.equipment,
+    this.sets,
+    this.reps,
   });
+
+  ExerciseDetail copyWith({
+    String? id,
+    String? name,
+    String? slug,
+    String? muscleId,
+    String? imagePath,
+    String? target,
+    String? synergist,
+    String? difficulty,
+    List<String>? steps,
+    String? gender,
+    String? exerciseType,
+    String? equipment,
+    int? sets,
+    int? reps,
+  }) {
+    return ExerciseDetail(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      slug: slug ?? this.slug,
+      muscleId: muscleId ?? this.muscleId,
+      imagePath: imagePath ?? this.imagePath,
+      target: target ?? this.target,
+      synergist: synergist ?? this.synergist,
+      difficulty: difficulty ?? this.difficulty,
+      steps: steps ?? this.steps,
+      gender: gender ?? this.gender,
+      exerciseType: exerciseType ?? this.exerciseType,
+      equipment: equipment ?? this.equipment,
+      sets: sets ?? this.sets,
+      reps: reps ?? this.reps,
+    );
+  }
 
   factory ExerciseDetail.fromJson(Map<String, dynamic> json) {
     // Helper to get non-null string
@@ -2040,9 +2171,15 @@ class ExerciseDetail {
     final exerciseName = json['exercise_name']?.toString() ?? '';
     final resolvedId = rawId.isNotEmpty ? rawId : exerciseName;
 
+    final rawSlug = getString('exercise_slug');
+    final resolvedSlug = rawSlug.isNotEmpty
+        ? rawSlug
+        : exerciseName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s-]'), '').replaceAll(RegExp(r'\s+'), '-');
+
     return ExerciseDetail(
       id: resolvedId,
       name: getString('exercise_name', defaultVal: 'Unknown Exercise'),
+      slug: resolvedSlug,
       muscleId: getString('group_path'),
       imagePath: getString('urls'),
       target: getString('target_muscle',
@@ -2064,6 +2201,8 @@ class ExerciseDetail {
 
       exerciseType: getString('exercise_type'),
       equipment: getString('equipment'),
+      sets: json['sets'] is int ? json['sets'] as int : int.tryParse(json['sets']?.toString() ?? ''),
+      reps: json['reps'] is int ? json['reps'] as int : int.tryParse(json['reps']?.toString() ?? ''),
     );
   }
 }
@@ -2159,11 +2298,35 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     textAlign: TextAlign.left,
                   ),
                 ),
+                // Share button
+                IconButton(
+                  icon: const Icon(
+                    Icons.share,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  onPressed: () {
+                    final shareUrl =
+                        'https://www.gymguide.co/exercise/${widget.exercise.slug}';
+                    showDialog(
+                      context: context,
+                      builder: (context) => ShareDialog(
+                        shareUrl: shareUrl,
+                        exerciseName: widget.exercise.name,
+                        isDarkMode: widget.isDarkMode,
+                      ),
+                    );
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 4),
+                // Favourite button
                 IconButton(
                   icon: Icon(
                     _isFavorite ? Icons.favorite : Icons.favorite_border,
                     color: Colors.white,
-                    size: 48,
+                    size: 32,
                   ),
                   onPressed: () async {
                     final user = Supabase.instance.client.auth.currentUser;
@@ -2183,7 +2346,6 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                       debugPrint('Error saving favorite: $e');
                     }
 
-                    // Favorites feedback silenced — log only
                     debugPrint(
                         '[HOME] Favorites: ${_isFavorite ? "added" : "removed"} - ${widget.exercise.id}');
                   },
