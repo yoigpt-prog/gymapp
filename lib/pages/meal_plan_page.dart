@@ -379,12 +379,14 @@ class MealPlanPageState extends State<MealPlanPage> {
                       deepGrouped[gDay] = deepGrouped[srcDay]!.map((item) {
                           final cloned = Map<String, dynamic>.from(item);
                           cloned['plan_global_day'] = gDay; // update for any inner usage
+                          cloned['is_eaten'] = false; // Cloned days should not copy eaten status!
                           return cloned;
                       }).toList();
                   }
               }
           }
       }
+      
       
       // 4. Map to UI Slots
       deepGrouped.forEach((gDay, dayItems) {

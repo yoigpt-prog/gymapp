@@ -1512,12 +1512,12 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
         setState(() {
           _saving = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Weight logged successfully!'),
-            backgroundColor: Color(0xFFFF0000),
-          ),
-        );
+        // ScaffoldMessenger.of(context).showSnackBar(
+        //   const SnackBar(
+        //     content: Text('Weight logged successfully!'),
+        //     backgroundColor: Color(0xFFFF0000),
+        //   ),
+        // );
         
         // Let the parent refresh data to update UI
         if (context.findAncestorStateOfType<ProgressPageState>() != null) {
@@ -1528,12 +1528,12 @@ class _WeeklyMetricsEntryCardState extends State<_WeeklyMetricsEntryCard> {
       print('Error logging weight: $e');
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: Could not save weight.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        // ScaffoldMessenger.of(context).showSnackBar(
+        //   SnackBar(
+        //     content: Text('Error: Could not save weight.'),
+        //     backgroundColor: Colors.red,
+        //   ),
+        // );
       }
     }
   }

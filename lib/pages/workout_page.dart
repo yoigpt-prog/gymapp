@@ -240,6 +240,22 @@ class WorkoutPageState extends State<WorkoutPage> {
     }
   }
 
+  Future<void> loadFavoritesOnly() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
+        final favorites = await SupabaseService().getFavoriteExercisesDetails();
+        if (mounted) {
+          setState(() {
+            _favoriteExercises = favorites.map((json) => ExerciseDetail.fromJson(json)).toList();
+          });
+        }
+      } catch (e) {
+        debugPrint('[WorkoutPage] Error loading favorites only: $e');
+      }
+    }
+  }
+
   // Direct injection of plan (No DB fetch needed)
   void setPlan(Map<String, dynamic> plan) {
     if (!mounted) return;
@@ -535,8 +551,7 @@ class WorkoutPageState extends State<WorkoutPage> {
     final selectedDateKey = _getDateKey(_selectedDay);
     
     // Exact realtime progress for the currently active/selected day!
-    if (dateKey == selectedDateKey) {
-      if (_exercises.isEmpty) return 0.0;
+    if (dateKey == selectedDateKey && _exercises.isNotEmpty) {
       return (_completedCount / _exercises.length).clamp(0.0, 1.0);
     }
 
@@ -572,10 +587,15 @@ class WorkoutPageState extends State<WorkoutPage> {
       }
       if (realName == null) {
         final id = ex is Map ? ex['id']?.toString() : ex.toString();
-        try {
-          realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
-        } catch (_) {
-          realName = id;
+        if (_exerciseRowsCache.containsKey(id)) {
+          realName = _exerciseRowsCache[id]?['exercise_name'];
+        }
+        if (realName == null) {
+          try {
+            realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
+          } catch (_) {
+            realName = id;
+          }
         }
       }
       
@@ -622,7 +642,7 @@ class WorkoutPageState extends State<WorkoutPage> {
       final String gender = (stats?['gender']?.toString() ?? 'male').toLowerCase();
 
       var query = Supabase.instance.client.from('exercises').select(
-          'is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
+          'id, is_male, is_female, group_path, exercise_name, target_muscle, synergist, difficulty_level, instruction_1, instruction_2, instruction_3, instruction_4, urls, exercise_type, equipment');
 
       if (gender == 'male') {
         query = query.eq('is_male', true);
@@ -653,6 +673,31 @@ class WorkoutPageState extends State<WorkoutPage> {
     if (RegExp(r'^\d{6}$').hasMatch(s)) return s;
     if (RegExp(r'^\d+$').hasMatch(s)) return s.padLeft(6, '0');
     return s;
+  }
+
+  String _getSetsRepsDisplay(ExerciseDetail exercise) {
+    final exId = _normalizeExerciseId(exercise.id);
+    final progress = _daySetProgress[exId];
+
+    if (progress != null && progress.isNotEmpty) {
+      final sorted = List<SetProgress>.from(progress)
+        ..sort((a, b) => a.setIndex.compareTo(b.setIndex));
+      
+      final setsCount = sorted.length;
+      final distinctReps = sorted.map((s) => s.reps).toSet();
+      
+      String repsText;
+      if (distinctReps.length == 1) {
+        repsText = '${distinctReps.first}';
+      } else {
+        repsText = sorted.map((s) => s.reps).join(', ');
+      }
+      return '$setsCount sets × $repsText';
+    }
+
+    final setsCount = exercise.sets ?? 3;
+    final repsText = exercise.reps != null ? '${exercise.reps}' : '12 reps';
+    return '$setsCount sets × $repsText';
   }
 
   Future<void> _preFetchAllPlanExercises() async {
@@ -779,8 +824,10 @@ class WorkoutPageState extends State<WorkoutPage> {
       dayNumber: globalDayIndex,
     ).then((progressMap) {
       if (mounted) {
+        final normalizedMap = progressMap.map((key, value) =>
+            MapEntry(_normalizeExerciseId(key), value));
         setState(() {
-          _daySetProgress = progressMap;
+          _daySetProgress = normalizedMap;
         });
       }
     });
@@ -1928,9 +1975,7 @@ class WorkoutPageState extends State<WorkoutPage> {
 
                                 final exercise = _exercises[exerciseIndex];
                                 
-                                final setsCount = exercise.sets ?? 3;
-                                final repsText = exercise.reps != null ? '${exercise.reps}' : '12 reps';
-                                final setsRepsStr = '$setsCount sets × $repsText';
+                                final setsRepsStr = _getSetsRepsDisplay(exercise);
 
                                 return _buildExerciseTile(
                                   exercise.name,
@@ -2184,12 +2229,8 @@ class WorkoutPageState extends State<WorkoutPage> {
                                                         ? index
                                                         : index - (index ~/ (bannerInterval + 1));
 
-                                                    final exercise =
-                                                        _exercises[exerciseIndex];
-                                                    
-                                                    final setsCount = exercise.sets ?? 3;
-                                                    final repsText = exercise.reps != null ? '${exercise.reps}' : '12 reps';
-                                                    final setsRepsStr = '$setsCount sets × $repsText';
+                                                    final exercise = _exercises[exerciseIndex];
+                                                    final setsRepsStr = _getSetsRepsDisplay(exercise);
 
                                                     return _buildExerciseTile(
                                                       exercise.name,
@@ -2477,6 +2518,7 @@ class WorkoutPageState extends State<WorkoutPage> {
 
                 if (result == true || (result is Map && result['completed'] == true)) {
                   _markExerciseComplete(title);
+                  _updateDailyWorkouts();
                 } else {
                   _loadCompletedExercises().then((_) {
                     if (mounted) _updateDailyWorkouts();
@@ -2530,6 +2572,7 @@ class WorkoutPageState extends State<WorkoutPage> {
 
             if (result == true || (result is Map && result['completed'] == true)) {
               _markExerciseComplete(title);
+              _updateDailyWorkouts();
             } else {
               _loadCompletedExercises().then((_) {
                 if (mounted) _updateDailyWorkouts();
@@ -2666,9 +2709,33 @@ class WorkoutPageState extends State<WorkoutPage> {
       isScrollControlled: true,
       builder: (context) {
         String selectedGroup = 'All';
+        bool hasFetched = false;
+        bool isLoading = _favoriteExercises.isEmpty;
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            if (!hasFetched) {
+              hasFetched = true;
+              SupabaseService().getFavoriteExercisesDetails().then((favorites) {
+                final favList = favorites.map((json) => ExerciseDetail.fromJson(json)).toList();
+                if (context.mounted) {
+                  setState(() {
+                    _favoriteExercises = favList;
+                  });
+                  setSheetState(() {
+                    isLoading = false;
+                  });
+                }
+              }).catchError((e) {
+                debugPrint('[WorkoutPage] Error fetching favorites in bottom sheet: $e');
+                if (context.mounted) {
+                  setSheetState(() {
+                    isLoading = false;
+                  });
+                }
+              });
+            }
+
             // Extract unique group paths from favorites
             final uniqueGroups = _favoriteExercises
                 .map((e) => e.muscleId.trim())
@@ -2775,51 +2842,61 @@ class WorkoutPageState extends State<WorkoutPage> {
                       const SizedBox(height: 12),
                     ],
 
-                    _favoriteExercises.isEmpty
-                        ? Center(
+                    isLoading
+                        ? const Center(
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 32),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.favorite_border,
-                                    size: 48,
-                                    color: isDarkMode ? Colors.white24 : Colors.black26,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'No favorite exercises yet',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: isDarkMode ? Colors.white60 : Colors.black54,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Heart exercises on the Home or Exercises page to populate this list!',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDarkMode ? Colors.white38 : Colors.black38,
-                                    ),
-                                  ),
-                                ],
+                              padding: EdgeInsets.symmetric(vertical: 32),
+                              child: CircularProgressIndicator(
+                                color: Color(0xFFFF0000),
                               ),
                             ),
                           )
-                        : filteredFavs.isEmpty
+                        : _favoriteExercises.isEmpty
                             ? Center(
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 32),
-                                  child: Text(
-                                    'No favorites found for "$selectedGroup"',
-                                    style: TextStyle(
-                                      color: isDarkMode ? Colors.white54 : Colors.black54,
-                                    ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.favorite_border,
+                                        size: 48,
+                                        color: isDarkMode ? Colors.white24 : Colors.black26,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'No favorite exercises yet',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: isDarkMode ? Colors.white60 : Colors.black54,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Heart exercises on the Home or Exercises page to populate this list!',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isDarkMode ? Colors.white38 : Colors.black38,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               )
-                            : Flexible(
+                            : filteredFavs.isEmpty
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 32),
+                                      child: Text(
+                                        'No favorites found for "$selectedGroup"',
+                                        style: TextStyle(
+                                          color: isDarkMode ? Colors.white54 : Colors.black54,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : Flexible(
+
                                 child: ListView.builder(
                                   shrinkWrap: true,
                                   itemCount: filteredFavs.length,
@@ -2858,12 +2935,12 @@ class WorkoutPageState extends State<WorkoutPage> {
                                               : () {
                                                   _addExerciseToDay(fav.name);
                                                   Navigator.pop(context);
-                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text('Added "${fav.name}" to today\'s workout.'),
-                                                      backgroundColor: Colors.green,
-                                                    ),
-                                                  );
+                                                  // ScaffoldMessenger.of(context).showSnackBar(
+                                                  //   SnackBar(
+                                                  //     content: Text('Added "${fav.name}" to today\'s workout.'),
+                                                  //     backgroundColor: Colors.green,
+                                                  //   ),
+                                                  // );
                                                 },
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: alreadyAdded
@@ -3326,10 +3403,15 @@ class WorkoutPageState extends State<WorkoutPage> {
         }
         if (realName == null) {
           final id = ex is Map ? ex['id']?.toString() : ex.toString();
-          try {
-            realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
-          } catch (_) {
-            realName = id;
+          if (_exerciseRowsCache.containsKey(id)) {
+            realName = _exerciseRowsCache[id]?['exercise_name'];
+          }
+          if (realName == null) {
+            try {
+              realName = _allExercisesCache.firstWhere((c) => c.id == id || c.name == id).name;
+            } catch (_) {
+              realName = id;
+            }
           }
         }
         

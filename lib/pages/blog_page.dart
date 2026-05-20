@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../widgets/legal_page_layout.dart';
 import '../data/blog_content.dart';
 import '../data/blog_articles.dart';
-import 'blog_detail_page.dart';
 
 class BlogPage extends StatefulWidget {
   final VoidCallback? toggleTheme;

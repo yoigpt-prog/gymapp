@@ -448,9 +448,14 @@ class MainScaffoldState extends State<MainScaffold> {
     }
     
     // Refresh Logic when tapping specifically on Tabs
-    if (index == 1 && _currentIndex == 1) {
-       // Only refresh if tapping the tab while already on it
-       _workoutKey.currentState?.refresh(force: true);
+    if (index == 1) {
+      if (_currentIndex == 1) {
+        // Only refresh if tapping the tab while already on it
+        _workoutKey.currentState?.refresh(force: true);
+      } else {
+        // Silently reload user's favorite exercises in the background when switching to Workout tab
+        _workoutKey.currentState?.loadFavoritesOnly();
+      }
     }
     
     if (index == 3) {

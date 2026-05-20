@@ -150,38 +150,18 @@ class SupabaseService {
               await MealEngineV2Service().toggleMealEaten(meal.planId!, isEaten);
           }
 
-          if (isEaten) {
-              // Create a JSON snapshot of ingredients
-              final ingredientsJson = meal.ingredients.map((i) => {
-                  'name': i.name,
-                  'quantity': i.amount,
-                  'calories': i.calories,
-              }).toList();
-
-              await _client.from('meal_logs').insert({
-                  'user_id': user.id,
-                  'meal_id': meal.id,  // the isolated user meal UUID
-                  'meal_name': meal.name,
-                  'total_calories': meal.calories,
-                  'total_protein': meal.protein,
-                  'total_carbs': meal.carbs,
-                  'total_fat': meal.fats,
-                  'ingredients_json': ingredientsJson,
-                  'eaten_at': DateTime.now().toIso8601String(),
-              });
-              print('DEBUG: Inserted full snapshot into meal_logs for ${meal.id}');
-          } else {
-              // If un-marking, delete from meal_logs (taking the most recent for this meal)
+          if (!isEaten && meal.planId != null) {
+              // If un-marking, delete from meal_logs (taking the most recent for this meal UUID)
               final logs = await _client.from('meal_logs')
                   .select('id')
-                  .eq('meal_id', meal.id)
+                  .eq('meal_id', meal.planId!)
                   .eq('user_id', user.id)
                   .order('eaten_at', ascending: false)
                   .limit(1);
                   
               if (logs.isNotEmpty) {
                   await _client.from('meal_logs').delete().eq('id', logs.first['id']);
-                  print('DEBUG: Removed from meal_logs for ${meal.id}');
+                  print('DEBUG: Removed from meal_logs for ${meal.planId}');
               }
           }
       } catch (e) {
@@ -685,7 +665,8 @@ class SupabaseService {
 
   Future<void> logMealEaten(Meal meal, int dayIndex) async {
     final user = _client.auth.currentUser;
-    if (user == null || meal.id == null) return;
+    final mealPlanId = meal.planId;
+    if (user == null || mealPlanId == null) return;
 
     try {
       final ingredientsJson = meal.ingredients.map((i) => {
@@ -700,12 +681,12 @@ class SupabaseService {
           .from('meal_logs')
           .delete()
           .eq('user_id', user.id)
-          .eq('meal_id', meal.id!)
+          .eq('meal_id', mealPlanId)
           .eq('day_index', dayIndex);
 
       await _client.from('meal_logs').insert({
         'user_id': user.id,
-        'meal_id': meal.id,
+        'meal_id': mealPlanId,
         'day_index': dayIndex,
         'meal_name': meal.name,
         'calories': meal.calories,
@@ -715,7 +696,7 @@ class SupabaseService {
         'ingredients': ingredientsJson,
         'eaten_at': DateTime.now().toUtc().toIso8601String(),
       });
-      print('DEBUG: [SupabaseService] Logged meal snapshot for ${meal.id} on day $dayIndex');
+      print('DEBUG: [SupabaseService] Logged meal snapshot for $mealPlanId on day $dayIndex');
     } catch (e) {
       print('DEBUG: [SupabaseService] Error logging meal eaten: $e');
       rethrow; // Surface error so the calling page can react

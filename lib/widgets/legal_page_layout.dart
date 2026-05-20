@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'main_layout_wrapper.dart';
 import 'red_header.dart';
+import 'desktop_side_panel.dart';
 
 class LegalPageLayout extends StatefulWidget {
   final String title;
@@ -46,9 +47,6 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
           // Responsive ad panel: 22% of screen width, clamped to [200, 320]
           final adPanelWidth =
               (constraints.maxWidth * 0.22).clamp(200.0, 320.0);
-          final adAsset = widget.isDarkMode
-              ? 'assets/banner/adblackmode.png'
-              : 'assets/banner/adwhitemode.png';
 
           const double spacing = 16.0;
 
@@ -111,15 +109,16 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
                               ),
                               if (widget.showBanner) ...[
                                 const SizedBox(width: spacing),
-                                SizedBox(width: adPanelWidth), // Spacer for Ad
+                                // Spacer for Desktop Side Panel
+                                SizedBox(width: adPanelWidth),
                               ],
                             ],
                           ),
                         ),
                       ),
                     ),
-                    
-                    // Layer 2: Fixed Ad Panel
+
+                    // Layer 2: Fixed Sidebar (Right Side Panel)
                     if (widget.showBanner)
                       Positioned.fill(
                         child: Padding(
@@ -129,33 +128,15 @@ class _LegalPageLayoutState extends State<LegalPageLayout> {
                             children: [
                               const Expanded(child: SizedBox()), // Allows clicks to pass through
                               const SizedBox(width: spacing),
+                              // Fixed Right Panel
                               SizedBox(
                                 width: adPanelWidth,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: widget.isDarkMode
-                                        ? const Color(0xFF1E1E1E)
-                                        : Colors.white,
-                                    border: Border.all(
-                                      color: widget.isDarkMode ? Colors.white : Colors.black,
-                                      width: 1.0,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: LayoutBuilder(
-                                      builder: (context, constraints) {
-                                        return AnimatedSwitcher(
-                                          duration: const Duration(milliseconds: 50),
-                                          child: Image.asset(
-                                            adAsset,
-                                            key: ValueKey(adAsset),
-                                            fit: BoxFit.fill,
-                                            width: constraints.maxWidth,
-                                            height: constraints.maxHeight,
-                                          ),
-                                        );
-                                      },
+                                child: ScrollConfiguration(
+                                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                                  child: SingleChildScrollView(
+                                    child: DesktopSidePanel(
+                                      isDarkMode: widget.isDarkMode,
+                                      width: adPanelWidth,
                                     ),
                                   ),
                                 ),

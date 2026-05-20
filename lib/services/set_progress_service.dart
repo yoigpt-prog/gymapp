@@ -197,6 +197,35 @@ class SetProgressService {
         'setIndex=$setIndex reps=$reps');
   }
 
+  // ── Delete single set ───────────────────────────────────────────────────────
+  Future<bool> deleteSet({
+    required String planId,
+    required int weekNumber,
+    required int dayNumber,
+    required String exerciseId,
+    required int setIndex,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return false;
+
+    try {
+      final parsedPlanId = _parsePlanId(planId) ?? user.id;
+      await _client
+          .from('user_exercise_set_progress')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('plan_id', parsedPlanId)
+          .eq('week_number', weekNumber)
+          .eq('day_number', dayNumber)
+          .eq('exercise_id', exerciseId)
+          .eq('set_index', setIndex);
+      return true;
+    } catch (e) {
+      debugPrint('[SETS] ERROR deleting set index=$setIndex for exercise_id=$exerciseId: $e');
+      return false;
+    }
+  }
+
   // ── Save all sets (bulk) ────────────────────────────────────────────────────
 
   /// Saves all sets for an exercise at once (used by "Mark Complete & Continue").
@@ -230,6 +259,17 @@ class SetProgressService {
           'updated_at': now,
         });
       }
+
+      // Delete any sets with index >= completedSets.length to clean up removed sets
+      await _client
+          .from('user_exercise_set_progress')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('plan_id', parsedPlanId)
+          .eq('week_number', weekNumber)
+          .eq('day_number', dayNumber)
+          .eq('exercise_id', exerciseId)
+          .gte('set_index', completedSets.length);
 
       await _client.from('user_exercise_set_progress').upsert(
         rows,

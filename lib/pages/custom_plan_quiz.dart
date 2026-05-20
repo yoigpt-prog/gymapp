@@ -3144,135 +3144,144 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 500),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(height: spacing),
-                SizedBox(
-                  height: progressSize,
-                  width: progressSize,
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 0.0, end: progressPercent / 100.0),
-                    duration: const Duration(milliseconds: 800),
-                    builder: (context, value, child) {
-                      return Stack(
-                        children: [
-                          Center(
-                            child: SizedBox(
-                              width: progressSize,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: CustomScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    slivers: [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(height: spacing),
+                            SizedBox(
                               height: progressSize,
-                              child: CircularProgressIndicator(
-                                value: value,
-                                strokeWidth: isSmall ? 10 : 14,
-                                backgroundColor: const Color(0xFF1E1E2A), // Darker track
-                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)), // Vibrant red
+                              width: progressSize,
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween<double>(begin: 0.0, end: progressPercent / 100.0),
+                                duration: const Duration(milliseconds: 800),
+                                builder: (context, value, child) {
+                                  return Stack(
+                                    children: [
+                                      Center(
+                                        child: SizedBox(
+                                          width: progressSize,
+                                          height: progressSize,
+                                          child: CircularProgressIndicator(
+                                            value: value,
+                                            strokeWidth: isSmall ? 10 : 14,
+                                            backgroundColor: const Color(0xFF1E1E2A), // Darker track
+                                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF0000)), // Vibrant red
+                                          ),
+                                        ),
+                                      ),
+                                      Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              '${(value * 100).toInt()}%',
+                                              style: TextStyle(
+                                                fontSize: percentageSize,
+                                                fontWeight: FontWeight.w900,
+                                                color: textColor,
+                                                letterSpacing: -1,
+                                              ),
+                                            ),
+                                            if (value >= 1.0)
+                                              Text(
+                                                'COMPLETE',
+                                                style: TextStyle(
+                                                  fontSize: percentageSize * 0.3,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white70,
+                                                  letterSpacing: 2,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ),
-                          ),
-                          Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '${(value * 100).toInt()}%',
-                                  style: TextStyle(
-                                    fontSize: percentageSize,
-                                    fontWeight: FontWeight.w900,
-                                    color: textColor,
-                                    letterSpacing: -1,
-                                  ),
-                                ),
-                                if (value >= 1.0)
-                                  Text(
-                                    'COMPLETE',
-                                    style: TextStyle(
-                                      fontSize: percentageSize * 0.3,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white70,
-                                      letterSpacing: 2,
-                                    ),
-                                  ),
-                              ],
+                            SizedBox(height: smallSpacing * 1.5),
+                            Text(
+                              progressStatus,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: isVerySmall ? 18 : 22,
+                                fontWeight: FontWeight.w800,
+                                color: textColor,
+                                height: 1.2,
+                              ),
                             ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-                SizedBox(height: smallSpacing * 1.5),
-                Text(
-                  progressStatus,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: isVerySmall ? 18 : 22,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    height: 1.2,
-                  ),
-                ),
-                SizedBox(height: spacing * 1.2),
-                _buildProgressStepCompact('Analyzing your body & goals', 'assets/quizemojis/Analyzing your body & goals.png', currentStep >= 2, currentStep == 1, isDark, stepFont, stepVPad),
-                _buildProgressStepCompact('Designing your workout plan', 'assets/quizemojis/Designing your workout plan.png', currentStep >= 3, currentStep == 2, isDark, stepFont, stepVPad),
-                _buildProgressStepCompact('Generating your meal plan', 'assets/quizemojis/Generating your meal plan .png', currentStep >= 4, currentStep == 3, isDark, stepFont, stepVPad),
-                _buildProgressStepCompact('Optimizing for fastest results', 'assets/quizemojis/Optimizing for fastest results.png', currentStep >= 5, currentStep == 4, isDark, stepFont, stepVPad),
-                const Spacer(),
-                // Button appears only when animation completes
-                AnimatedOpacity(
-                  opacity: _introComplete ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: _introComplete
-                      ? SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: _isGenerating ? null : () async {
-                              await _presentRevenueCatPaywall();
-                              if (!mounted) return;
+                            SizedBox(height: spacing * 1.2),
+                            _buildProgressStepCompact('Analyzing your body & goals', 'assets/quizemojis/Analyzing your body & goals.png', currentStep >= 2, currentStep == 1, isDark, stepFont, stepVPad),
+                            _buildProgressStepCompact('Designing your workout plan', 'assets/quizemojis/Designing your workout plan.png', currentStep >= 3, currentStep == 2, isDark, stepFont, stepVPad),
+                            _buildProgressStepCompact('Generating your meal plan', 'assets/quizemojis/Generating your meal plan .png', currentStep >= 4, currentStep == 3, isDark, stepFont, stepVPad),
+                            _buildProgressStepCompact('Optimizing for fastest results', 'assets/quizemojis/Optimizing for fastest results.png', currentStep >= 5, currentStep == 4, isDark, stepFont, stepVPad),
+                            const Spacer(),
+                            // Button appears only when animation completes
+                            AnimatedOpacity(
+                              opacity: _introComplete ? 1.0 : 0.0,
+                              duration: const Duration(milliseconds: 500),
+                              child: _introComplete
+                                  ? SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton(
+                                        onPressed: _isGenerating ? null : () async {
+                                          await _presentRevenueCatPaywall();
+                                          if (!mounted) return;
 
-                              Navigator.pop(context, {
-                                'completed': true,
-                                'navIndex': widget.quizType == 'workout' ? 1 : 2,
-                              });
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF0000),
-                              foregroundColor: Colors.white,
-                              padding: EdgeInsets.symmetric(vertical: btnVPad),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(50),
-                              ),
-                              elevation: 8,
-                              shadowColor: const Color(0xFFFF0000).withOpacity(0.5),
+                                          Navigator.pop(context, {
+                                            'completed': true,
+                                            'navIndex': widget.quizType == 'workout' ? 1 : 2,
+                                          });
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFFFF0000),
+                                          foregroundColor: Colors.white,
+                                          padding: EdgeInsets.symmetric(vertical: btnVPad),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(50),
+                                          ),
+                                          elevation: 8,
+                                          shadowColor: const Color(0xFFFF0000).withOpacity(0.5),
+                                        ),
+                                        child: _isGenerating
+                                            ? const SizedBox(
+                                                height: 22,
+                                                width: 22,
+                                                child: CircularProgressIndicator(
+                                                  color: Colors.white,
+                                                  strokeWidth: 2.5,
+                                                ),
+                                              )
+                                            : const Text(
+                                                'Start My Program',
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.w800,
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                      ),
+                                    )
+                                  : const SizedBox(height: 56),
                             ),
-                            child: _isGenerating
-                                ? const SizedBox(
-                                    height: 22,
-                                    width: 22,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2.5,
-                                    ),
-                                  )
-                                : const Text(
-                                    'Start My Program',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                          ),
-                        )
-                      : const SizedBox(height: 56),
+                            SizedBox(height: bottomGap),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                  SizedBox(height: bottomGap),
-                ],
               ),
             ),
-          ),
-        ),
-      );
+          );
+
     },
   );
     }

@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../widgets/main_layout_wrapper.dart';
 import '../widgets/red_header.dart';
 import '../data/blog_articles.dart';
+import 'main_scaffold.dart';
 
 class BlogDetailPage extends StatefulWidget {
   final String title;
@@ -77,6 +78,74 @@ class _BlogDetailPageState extends State<BlogDetailPage> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  void _handleInternalNavigation(String path) {
+    // Strip leading slash if any
+    String cleanPath = path;
+    if (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.substring(1);
+    }
+    // Split by query parameters or hash to get clean route path
+    cleanPath = cleanPath.split('?').first.split('#').first.toLowerCase();
+
+    int targetTabIndex = 0;
+    String? routeName;
+
+    if (cleanPath.contains('macro-calculator')) {
+      targetTabIndex = 8;
+      routeName = '/calculators/macro';
+    } else if (cleanPath.contains('calorie-calculator')) {
+      targetTabIndex = 7;
+      routeName = '/calculators/calorie';
+    } else if (cleanPath.contains('bmi-calculator')) {
+      targetTabIndex = 6;
+      routeName = '/calculators/bmi';
+    } else if (cleanPath.contains('body-fat-calculator')) {
+      targetTabIndex = 9;
+      routeName = '/calculators/body-fat';
+    } else if (cleanPath.contains('one-rm-calculator')) {
+      targetTabIndex = 10;
+      routeName = '/calculators/one-rm';
+    } else if (cleanPath.contains('exercises') || cleanPath.contains('workout')) {
+      targetTabIndex = 1;
+      routeName = '/workout';
+    } else if (cleanPath.contains('meal')) {
+      targetTabIndex = 2;
+      routeName = '/meal-plan';
+    } else if (cleanPath.contains('progress')) {
+      targetTabIndex = 3;
+      routeName = '/progress';
+    } else if (cleanPath.contains('profile')) {
+      targetTabIndex = 4;
+      routeName = '/profile';
+    } else if (cleanPath.contains('settings')) {
+      targetTabIndex = 5;
+      routeName = '/settings';
+    } else if (cleanPath == '' || cleanPath == 'home') {
+      targetTabIndex = 0;
+      routeName = '/';
+    }
+
+    if (routeName == null) {
+      // Handle other subroutes like /blog/... or /exercise/...
+      final newRoute = path.startsWith('/') ? path : '/$path';
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pushReplacementNamed(newRoute);
+      } else {
+        Navigator.of(context).pushNamed(newRoute);
+      }
+      return;
+    }
+
+    if (MainScaffold.globalKey.currentState != null) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      MainScaffold.globalKey.currentState?.changeTab(targetTabIndex);
+    } else {
+      Navigator.of(context).pushReplacementNamed(routeName);
     }
   }
 
@@ -202,23 +271,6 @@ class _BlogDetailPageState extends State<BlogDetailPage> {
                     letterSpacing: -1.0,
                   ),
                 ),
-                const SizedBox(height: 12),
-                
-                // Metadata
-                Row(
-                  children: [
-                    const Icon(Icons.access_time, color: Colors.white70, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      '10 MIN READ',
-                      style: GoogleFonts.outfit(
-                        color: Colors.white70,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
@@ -296,7 +348,30 @@ class _BlogDetailPageState extends State<BlogDetailPage> {
               else if (_markdownContent != null)
                 MarkdownBody(
                   data: _markdownContent!,
-                  selectable: true,
+                  selectable: false,
+                  onTapLink: (text, href, title) async {
+                    if (href == null) return;
+                    final cleanHref = href.trim();
+                    final isExercises = cleanHref.contains('exercises') || cleanHref.contains('workout');
+                    if (!isExercises && (cleanHref.startsWith('http://') || cleanHref.startsWith('https://'))) {
+                      final uri = Uri.parse(cleanHref);
+                      final host = uri.host.toLowerCase();
+                      if (host == 'gymguide.co' || host == 'www.gymguide.co') {
+                        _handleInternalNavigation(uri.path);
+                      } else {
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      }
+                    } else if (!isExercises && cleanHref.startsWith('/')) {
+                      _handleInternalNavigation(cleanHref);
+                    } else {
+                      final uri = Uri.parse(cleanHref);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    }
+                  },
                   styleSheet: MarkdownStyleSheet(
                     p: GoogleFonts.outfit(
                       fontSize: 18,

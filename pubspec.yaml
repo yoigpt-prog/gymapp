@@ -60,6 +60,7 @@ flutter:
     - assets/svg/mealsicons/
     - assets/svg/socialmedia/
     - assets/banner/
+    - assets/banner/adgymguide.png
     - assets/quizimg.png
     - assets/beforeafterimg.png
     - assets/scanbodyicon.png

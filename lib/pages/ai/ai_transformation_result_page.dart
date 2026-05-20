@@ -349,22 +349,24 @@ class _AITransformationResultPageState
   // ── Snackbars ─────────────────────────────────────────────────────────────
   void _showSuccess(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
-      backgroundColor: Colors.green.shade600,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ));
+    debugPrint('[AI SUCCESS] $message');
+    // ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    //   content: Text(message),
+    //   backgroundColor: Colors.green.shade600,
+    //   behavior: SnackBarBehavior.floating,
+    //   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    // ));
   }
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
-      backgroundColor: Colors.red.shade700,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ));
+    debugPrint('[AI ERROR] $message');
+    // ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    //   content: Text(message),
+    //   backgroundColor: Colors.red.shade700,
+    //   behavior: SnackBarBehavior.floating,
+    //   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    // ));
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────

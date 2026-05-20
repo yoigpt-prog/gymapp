@@ -94,70 +94,78 @@ class _RedHeaderState extends State<RedHeader> {
 
   // Web layout with logo, search, and settings
   Widget _buildWebHeader(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        // Logo
-        GestureDetector(
-          onTap: () {
-            widget.onLogoTap?.call();
-            final scaffold = context.findAncestorStateOfType<MainScaffoldState>()
-                ?? MainScaffold.globalKey.currentState;
-            if (scaffold != null) {
-              scaffold.changeTab(0);
-              Navigator.of(context).popUntil((route) => route.settings.name == '/' || route.isFirst);
-            } else {
-              Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-            }
-          },
-          child: SvgPicture.asset(
-            'assets/svg/logo/gymguideicon.svg',
-            height: 35,
-          ),
-        ),
-        const SizedBox(width: 40),
-        // Navigation Links
-        Row(
-          mainAxisSize: MainAxisSize.min,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
+        final showStores = availableWidth > 1050;
+        final reducedSpacing = availableWidth < 1150;
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildHeaderLink(context, 'Home', '/'),
-            _buildHeaderSeparator(),
-            _buildHeaderLink(context, 'Blog', '/Blog'),
-            _buildHeaderSeparator(),
-            _buildHeaderLink(context, 'About Us', '/about'),
-            _buildHeaderSeparator(),
-            _buildHeaderLink(context, 'Contact', '/contact'),
-          ],
-        ),
-        // Spacer moved here
-        const Spacer(),
-        const SizedBox(width: 16),
+            // Logo
+            GestureDetector(
+              onTap: () {
+                widget.onLogoTap?.call();
+                final scaffold = context.findAncestorStateOfType<MainScaffoldState>()
+                    ?? MainScaffold.globalKey.currentState;
+                if (scaffold != null) {
+                  scaffold.changeTab(0);
+                  Navigator.of(context).popUntil((route) => route.settings.name == '/' || route.isFirst);
+                } else {
+                  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                }
+              },
+              child: SvgPicture.asset(
+                'assets/svg/logo/gymguideicon.svg',
+                height: 35,
+              ),
+            ),
+            SizedBox(width: reducedSpacing ? 16 : 40),
+            // Navigation Links
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildHeaderLink(context, 'Home', '/'),
+                _buildHeaderSeparator(),
+                _buildHeaderLink(context, 'Blog', '/Blog'),
+                _buildHeaderSeparator(),
+                _buildHeaderLink(context, 'About Us', '/about'),
+                _buildHeaderSeparator(),
+                _buildHeaderLink(context, 'Contact', '/contact'),
+              ],
+            ),
+            // Spacer moved here
+            const Spacer(),
+            const SizedBox(width: 16),
 
-        // App Store Icons
-        GestureDetector(
-          onTap: () => _launchStore(
-            'https://apps.apple.com/us/app/gym-guide-app/id6760553535',
-          ),
-          child: _buildAppleStoreIcon(),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: () => _launchStore(
-            'https://play.google.com/store/apps/details?id=com.gymguide.app',
-          ),
-          child: _buildPlayStoreIcon(),
-        ),
-        const SizedBox(width: 8),
-        _buildQrCodeIconButton(context),
-        const SizedBox(width: 20),
+            // App Store Icons
+            if (showStores) ...[
+              GestureDetector(
+                onTap: () => _launchStore(
+                  'https://apps.apple.com/us/app/gym-guide-app/id6760553535',
+                ),
+                child: _buildAppleStoreIcon(),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _launchStore(
+                  'https://play.google.com/store/apps/details?id=com.gymguide.app',
+                ),
+                child: _buildPlayStoreIcon(),
+              ),
+              const SizedBox(width: 8),
+            ],
+            _buildQrCodeIconButton(context),
+            const SizedBox(width: 20),
 
-        // Search bar
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          width: _isSearchExpanded ? 280 : 36,
-          height: 36,
-          clipBehavior: Clip.antiAlias,
+            // Search bar
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              width: _isSearchExpanded ? 280 : 36,
+              height: 36,
+              clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(18),
@@ -194,7 +202,7 @@ class _RedHeaderState extends State<RedHeader> {
                         focusNode: _searchFocusNode,
                         onChanged: widget.onSearch,
                         decoration: InputDecoration(
-                          hintText: 'Explore 1800+ Free Exercises..',
+                          hintText: 'Explore 1800+ Free Exercises...  ',
                           hintStyle: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 14,
@@ -238,6 +246,8 @@ class _RedHeaderState extends State<RedHeader> {
           ),
         ),
       ],
+        );
+      },
     );
   }
 

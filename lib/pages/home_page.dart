@@ -14,6 +14,7 @@ import '../services/video_cache_service.dart';
 import 'package:seo/seo.dart';
 import '../widgets/seo_footer_cta.dart';
 import '../widgets/share_dialog.dart';
+import '../widgets/desktop_side_panel.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -115,7 +116,6 @@ class _HomePageState extends State<HomePage> {
   void _onScroll() {
     _handleHeaderVisibility();
     _handlePagination();
-    _handleVideoAutoplay();
   }
 
   void _handleHeaderVisibility() {
@@ -285,6 +285,19 @@ class _HomePageState extends State<HomePage> {
         _hasMore = newExercises.length == _pageSize;
         _isLoading = false;
       });
+
+      // Prefetch video URLs for the new batch in background (best-effort).
+      final videoUrls = newExercises
+          .map((e) => e.imagePath.trim())
+          .where((url) =>
+              url.isNotEmpty &&
+              (url.endsWith('.mp4') ||
+                  url.endsWith('.mov') ||
+                  url.endsWith('.webm')))
+          .toList();
+      if (videoUrls.isNotEmpty) {
+        VideoCacheService.instance.prefetch(videoUrls);
+      }
     } catch (e) {
       debugPrint('Error loading exercises: $e');
       setState(() {
@@ -598,7 +611,7 @@ class _HomePageState extends State<HomePage> {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: 'Explore 1800+ exercises (free & premium)',
+                          hintText: 'Explore 1800+ Free Exercises...  ',
                           hintStyle:
                               TextStyle(color: subTextColor, fontSize: 14),
                           border: InputBorder.none,
@@ -738,6 +751,9 @@ class _HomePageState extends State<HomePage> {
                             // Actual Scrollable Center Content
                             Expanded(
                               child: Container(
+                                height: (_selectedMuscle == null && !_isSearchMode && !_filterFavorites)
+                                    ? (constraints.maxHeight - 2 * spacing)
+                                    : null,
                                 decoration: BoxDecoration(
                                   color: isDark
                                       ? const Color(0xFF1E1E1E)
@@ -754,52 +770,77 @@ class _HomePageState extends State<HomePage> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.stretch,
                                     children: [
-                                      _buildDesktopMuscleMap(),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 24),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Seo.text(
-                                              text:
-                                                  "Gym Guide: The Ultimate Fitness App & Workout Plan App",
-                                              style: TextTagStyle.h1,
-                                              child: const SizedBox.shrink(),
-                                            ),
-                                            const SizedBox(height: 12),
-                                            Seo.text(
-                                              text:
-                                                  "Get your custom workout and meal plan in seconds. Whether your goal is to build muscle, lose body fat, or improve your overall health, Gym Guide generates a personalized fitness plan tailored just for you. Explore our database of over 1800 exercises with detailed instructions and 3D muscle maps.",
-                                              style: TextTagStyle.p,
-                                              child: const SizedBox.shrink(),
-                                            ),
-                                            const SizedBox(height: 12),
-                                            Seo.text(
-                                              text:
-                                                  "Stop guessing what to do at the gym. Our smart algorithms design the perfect workout plan app experience and match it with a customized meal plan app structure. Download Gym Guide today to unlock your full potential and achieve the physique you've always wanted.",
-                                              style: TextTagStyle.p,
-                                              child: const SizedBox.shrink(),
-                                            ),
-                                          ],
+                                      if (_selectedMuscle == null && !_isSearchMode && !_filterFavorites)
+                                        Expanded(
+                                          child: _buildDesktopMuscleMap(),
+                                        )
+                                      else
+                                        _buildDesktopMuscleMap(),
+                                      if (_selectedMuscle != null || _isSearchMode || _filterFavorites) ...[
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 24),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Seo.text(
+                                                text:
+                                                    "Gym Guide: The Ultimate Fitness App & Workout Plan App",
+                                                style: TextTagStyle.h1,
+                                                child: const SizedBox.shrink(),
+                                              ),
+                                              const SizedBox(height: 12),
+                                              Seo.text(
+                                                text:
+                                                    "Get your custom workout and meal plan in seconds. Whether your goal is to build muscle, lose body fat, or improve your overall health, Gym Guide generates a personalized fitness plan tailored just for you. Explore our database of over 1800 exercises with detailed instructions and 3D muscle maps.",
+                                                style: TextTagStyle.p,
+                                                child: const SizedBox.shrink(),
+                                              ),
+                                              const SizedBox(height: 12),
+                                              Seo.text(
+                                                text:
+                                                    "Stop guessing what to do at the gym. Our smart algorithms design the perfect workout plan app experience and match it with a customized meal plan app structure. Download Gym Guide today to unlock your full potential and achieve the physique you've always wanted.",
+                                                style: TextTagStyle.p,
+                                                child: const SizedBox.shrink(),
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                      ),
-                                      SeoFooterCTA(isDarkMode: isDark),
+                                        SeoFooterCTA(isDarkMode: isDark),
+                                      ] else ...[
+                                        // Invisible SEO nodes when muscle map is showing (no padding to prevent overflow)
+                                        Seo.text(
+                                          text: "Gym Guide: The Ultimate Fitness App & Workout Plan App",
+                                          style: TextTagStyle.h1,
+                                          child: const SizedBox.shrink(),
+                                        ),
+                                        Seo.text(
+                                          text: "Get your custom workout and meal plan in seconds. Whether your goal is to build muscle, lose body fat, or improve your overall health, Gym Guide generates a personalized fitness plan tailored just for you. Explore our database of over 1800 exercises with detailed instructions and 3D muscle maps.",
+                                          style: TextTagStyle.p,
+                                          child: const SizedBox.shrink(),
+                                        ),
+                                        Seo.text(
+                                          text: "Stop guessing what to do at the gym. Our smart algorithms design the perfect workout plan app experience and match it with a customized meal plan app structure. Download Gym Guide today to unlock your full potential and achieve the physique you've always wanted.",
+                                          style: TextTagStyle.p,
+                                          child: const SizedBox.shrink(),
+                                        ),
+                                        SeoFooterCTA(isDarkMode: isDark),
+                                      ],
                                     ],
                                   ),
                                 ),
                               ),
                             ),
                             SizedBox(width: spacing),
-                            // Spacer for Banner
+                            // Spacer for Desktop Side Panel
                             SizedBox(width: panelWidth),
                           ],
                         ),
                       ),
                     ),
 
-                    // Layer 2: Fixed Sidebars (Filters & Banner)
+                    // Layer 2: Fixed Sidebars (Filters & Right Side Panel)
                     Positioned.fill(
                       child: Padding(
                         padding: EdgeInsets.all(spacing),
@@ -823,25 +864,19 @@ class _HomePageState extends State<HomePage> {
                                 child: _buildDesktopFilterPanel(),
                               ),
                             ),
+                            const Expanded(child: SizedBox()), // Allows clicks to pass through
                             SizedBox(width: spacing),
-                            // Spacer for Center (allows clicks to pass through)
-                            const Expanded(child: SizedBox()),
-                            SizedBox(width: spacing),
-                            // Fixed Banner
+                            // Fixed Right Panel
                             SizedBox(
                               width: panelWidth,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? const Color(0xFF1E1E1E)
-                                      : Colors.white,
-                                  border: Border.all(
-                                    color: isDark ? Colors.white : Colors.black,
-                                    width: 1.0,
+                              child: ScrollConfiguration(
+                                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                                child: SingleChildScrollView(
+                                  child: DesktopSidePanel(
+                                    isDarkMode: isDark,
+                                    width: panelWidth,
                                   ),
                                 ),
-                                clipBehavior: Clip.antiAlias,
-                                child: _buildDesktopRightPanel(),
                               ),
                             ),
                           ],
@@ -980,16 +1015,16 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final screenHeight = MediaQuery.of(context).size.height;
-              // Use 60% of viewport height, minus header and padding
-              final muscleMapHeight = (screenHeight - 200).clamp(300.0, 800.0);
-              return SizedBox(
-                height: muscleMapHeight,
-                child: Row(
-                  children: [
-                    Expanded(
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: 1080,
+                      height: 1920,
                       child: MuscleMap(
                         gender: _gender,
                         side: 'front',
@@ -998,8 +1033,16 @@ class _HomePageState extends State<HomePage> {
                         onTapMuscle: (m) => _onMuscleTap(m),
                       ),
                     ),
-                    const SizedBox(width: 24),
-                    Expanded(
+                  ),
+                ),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: 1080,
+                      height: 1920,
                       child: MuscleMap(
                         gender: _gender,
                         side: 'back',
@@ -1008,10 +1051,10 @@ class _HomePageState extends State<HomePage> {
                         onTapMuscle: (m) => _onMuscleTap(m),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
         ],
       ),
@@ -1090,7 +1133,7 @@ class _HomePageState extends State<HomePage> {
                         : const SizedBox.shrink();
                   }
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
                     child: ExerciseDetailCard(
                       exercise: displayedExercises[index],
                       isDarkMode: widget.isDarkMode,
@@ -1406,31 +1449,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildDesktopRightPanel() {
-    final adAsset = widget.isDarkMode
-        ? 'assets/banner/adblackmode.png'
-        : 'assets/banner/adwhitemode.png';
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 50),
-      color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-      padding: const EdgeInsets.all(12),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return AnimatedSwitcher(
-            duration: const Duration(milliseconds: 50),
-            child: Image.asset(
-              adAsset,
-              key: ValueKey(adAsset),
-              fit: BoxFit.fill,
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   Widget _buildToggleChip({
     required String label,
@@ -2259,6 +2277,7 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(1.0),
       decoration: BoxDecoration(
         color: cardBg,
         border: Border.all(
@@ -2522,7 +2541,10 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
         cleanUrl.toLowerCase().endsWith('.webm');
 
     if (isVideo) {
-      return VideoPlayerWidget(videoUrl: cleanUrl);
+      return VideoPlayerWidget(
+        videoUrl: cleanUrl,
+        shouldPlay: widget.shouldPlay,
+      );
     } else {
       return Image.network(
         cleanUrl,
@@ -2554,8 +2576,15 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
 
 class VideoPlayerWidget extends StatefulWidget {
   final String videoUrl;
+  /// When true, the video plays; when false, it pauses.
+  /// Driven by the scroll-based _playingIndex in the parent.
+  final bool shouldPlay;
 
-  const VideoPlayerWidget({Key? key, required this.videoUrl}) : super(key: key);
+  const VideoPlayerWidget({
+    Key? key,
+    required this.videoUrl,
+    this.shouldPlay = true,
+  }) : super(key: key);
 
   @override
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
@@ -2565,6 +2594,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _hasError = false;
+  int _retryCount = 0;
+  static const int _maxRetries = 5;
 
   @override
   void initState() {
@@ -2572,42 +2603,70 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _loadFromCache();
   }
 
+  @override
+  void didUpdateWidget(VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isInitialized && _controller != null) {
+      if (!_controller!.value.isPlaying) {
+        _controller!.play();
+      }
+    }
+  }
+
   Future<void> _loadFromCache() async {
-    // Fast path: already cached.
-    if (VideoCacheService.instance.isReady(widget.videoUrl)) {
-      final cached =
-          await VideoCacheService.instance.getController(widget.videoUrl);
-      if (mounted && cached != null) {
-        setState(() {
-          _controller = cached;
-          _isInitialized = true;
-        });
+    if (!mounted) return;
+
+    final controller =
+        await VideoCacheService.instance.getController(widget.videoUrl);
+    if (!mounted) {
+      if (controller != null) {
+        VideoCacheService.instance.release(widget.videoUrl);
       }
       return;
     }
 
-    // Slow path: first fetch (only once per URL per session).
-    final controller =
-        await VideoCacheService.instance.getController(widget.videoUrl);
-    if (!mounted) return;
-    setState(() {
-      _controller = controller;
-      _isInitialized = controller != null;
-      _hasError = controller == null;
-    });
+    if (controller != null) {
+      controller.setLooping(true);
+      controller.setVolume(0.0);
+      if (!controller.value.isPlaying) controller.play();
+
+      setState(() {
+        _controller = controller;
+        _isInitialized = true;
+        _hasError = false;
+      });
+    } else {
+      if (_retryCount < _maxRetries) {
+        _retryCount++;
+        debugPrint(
+            '[VideoPlayerWidget] Retry $_retryCount/$_maxRetries for: ${widget.videoUrl}');
+        await Future.delayed(Duration(seconds: 1 + 2 * _retryCount));
+        _loadFromCache();
+      } else {
+        if (mounted) setState(() => _hasError = true);
+      }
+    }
   }
 
   @override
   void dispose() {
     // ⚠️  Do NOT dispose — VideoCacheService owns the controller lifetime.
+    // Pause when card is scrolled offscreen or page is closed to conserve resources
+    if (_controller != null) {
+      _controller!.pause();
+      VideoCacheService.instance.release(widget.videoUrl);
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_hasError) {
-      return const Center(
-        child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(
+          child: Icon(Icons.broken_image, size: 32, color: Colors.grey),
+        ),
       );
     }
     if (_isInitialized && _controller != null) {
@@ -2616,7 +2675,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         child: VideoPlayer(_controller!),
       );
     }
-    return const Center(child: CircularProgressIndicator());
+    return const AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.0,
+            color: Color(0xFFFF0000),
+          ),
+        ),
+      ),
+    );
   }
 }
 

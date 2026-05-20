@@ -55,6 +55,40 @@ class ShareDialog extends StatelessWidget {
     }
   }
 
+  /// Email: opens the default email client with populated subject and body.
+  Future<void> _shareToEmail(BuildContext context) async {
+    final String subject = Uri.encodeComponent('Check out $exerciseName on GymGuide!');
+    final String body = Uri.encodeComponent('Check out how to do $exerciseName on GymGuide:\n$shareUrl');
+    final Uri emailUri = Uri.parse('mailto:?subject=$subject&body=$body');
+
+    try {
+      if (await canLaunchUrl(emailUri)) {
+        await launchUrl(emailUri);
+      } else {
+        Clipboard.setData(ClipboardData(text: shareUrl));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open email client. Link copied to clipboard!'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error launching email: $e');
+      Clipboard.setData(ClipboardData(text: shareUrl));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open email client. Link copied to clipboard!'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bgColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
@@ -123,19 +157,17 @@ class ShareDialog extends StatelessWidget {
               },
               textColor: textColor,
             ),
-            if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) ...[
-              const SizedBox(height: 12),
-              _ShareButton(
-                icon: Icons.ios_share_rounded,
-                label: 'More options…',
-                color: const Color(0xFFFF0000),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await Share.shareUri(Uri.parse(shareUrl));
-                },
-                textColor: textColor,
-              ),
-            ],
+            const SizedBox(height: 12),
+            _ShareButton(
+              icon: Icons.mail_outline,
+              label: 'Share via Email',
+              color: const Color(0xFFEA4335),
+              onTap: () async {
+                Navigator.of(context).pop();
+                await _shareToEmail(context);
+              },
+              textColor: textColor,
+            ),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,

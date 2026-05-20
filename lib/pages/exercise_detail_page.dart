@@ -202,12 +202,19 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
 
   void _removeSet() {
     if (_completedSets.length <= 1) return;
+    final indexToDelete = _completedSets.length - 1;
     setState(() {
       _completedSets.removeLast();
       _repsPerSet.removeLast();
     });
-    // No explicit delete needed — the row for that index is simply no longer shown.
-    // If user re-adds a set it will upsert over the old row.
+    // Explicitly delete from DB so it doesn't linger
+    _svc.deleteSet(
+      planId: widget.planId,
+      weekNumber: widget.weekNumber,
+      dayNumber: widget.dayNumber,
+      exerciseId: _exerciseId,
+      setIndex: indexToDelete,
+    );
   }
 
   // ── Mark complete ────────────────────────────────────────────────────────────
@@ -268,16 +275,31 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // ── Media ───────────────────────────────────────────────────
-                LayoutBuilder(builder: (context, constraints) {
-                  final h = (constraints.maxWidth * 9 / 16).clamp(220.0, 420.0);
-                  return Container(
-                    width: double.infinity,
-                    height: h,
-                    color: isDark ? Colors.black26 : Colors.grey.shade300,
-                    child: widget.exercise.imagePath.isNotEmpty
-                        ? _buildMediaPreview(widget.exercise.imagePath, h)
-                        : const Center(child: Icon(Icons.fitness_center, size: 64, color: Colors.grey)),
-                  );
+                Builder(builder: (context) {
+                  final cleanUrl = widget.exercise.imagePath.trim();
+                  final isVideo = cleanUrl.toLowerCase().endsWith('.mp4') ||
+                      cleanUrl.toLowerCase().endsWith('.mov') ||
+                      cleanUrl.toLowerCase().endsWith('.webm');
+
+                  if (isVideo) {
+                    return Container(
+                      width: double.infinity,
+                      color: isDark ? Colors.black26 : Colors.grey.shade300,
+                      child: VideoPlayerWidget(videoUrl: cleanUrl),
+                    );
+                  }
+
+                  return LayoutBuilder(builder: (context, constraints) {
+                    final h = (constraints.maxWidth * 9 / 16).clamp(220.0, 420.0);
+                    return Container(
+                      width: double.infinity,
+                      height: h,
+                      color: isDark ? Colors.black26 : Colors.grey.shade300,
+                      child: cleanUrl.isNotEmpty
+                          ? _buildMediaPreview(cleanUrl, h)
+                          : const Center(child: Icon(Icons.fitness_center, size: 64, color: Colors.grey)),
+                    );
+                  });
                 }),
 
                 // ── Save error banner ────────────────────────────────────────
@@ -641,6 +663,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _hasError = false;
+  int _retryCount = 0;
+  static const int _maxRetries = 5;
 
   @override
   void initState() {
@@ -649,52 +673,81 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   }
 
   Future<void> _loadFromCache() async {
-    if (VideoCacheService.instance.isReady(widget.videoUrl)) {
-      final cached = await VideoCacheService.instance.getController(widget.videoUrl);
-      if (mounted && cached != null) {
-        setState(() {
-          _controller = cached;
-          _isInitialized = true;
-        });
+    if (!mounted) return;
+
+    final controller = await VideoCacheService.instance.getController(widget.videoUrl);
+    if (!mounted) {
+      if (controller != null) {
+        VideoCacheService.instance.release(widget.videoUrl);
       }
       return;
     }
-    final controller = await VideoCacheService.instance.getController(widget.videoUrl);
-    if (!mounted) return;
-    setState(() {
-      _controller = controller;
-      _isInitialized = controller != null;
-      _hasError = controller == null;
-    });
+
+    if (controller != null) {
+      // Ensure looping, muted, and playing — the service sets these but guard
+      // in case the controller was retrieved from cache in a paused state.
+      controller.setLooping(true);
+      controller.setVolume(0.0);
+      if (!controller.value.isPlaying) controller.play();
+
+      setState(() {
+        _controller = controller;
+        _isInitialized = true;
+        _hasError = false;
+      });
+    } else {
+      if (_retryCount < _maxRetries) {
+        _retryCount++;
+        debugPrint('[VideoPlayerWidget] Retry $_retryCount/$_maxRetries for: ${widget.videoUrl}');
+        await Future.delayed(Duration(seconds: 1 + 2 * _retryCount));
+        _loadFromCache();
+      } else {
+        if (mounted) setState(() => _hasError = true);
+      }
+    }
   }
 
   @override
   void dispose() {
+    // ⚠️  Do NOT dispose — VideoCacheService owns the controller lifetime.
+    if (_controller != null) {
+      _controller!.pause();
+      VideoCacheService.instance.release(widget.videoUrl);
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final h = widget.height ?? 250;
     if (_hasError) {
-      return SizedBox(
-          height: h,
-          child: Center(child: Icon(Icons.broken_image, size: 64, color: Colors.grey.shade400)));
-    }
-    if (_isInitialized && _controller != null) {
-      return SizedBox(
-        width: double.infinity,
-        height: h,
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: _controller!.value.size.width,
-            height: _controller!.value.size.height,
-            child: VideoPlayer(_controller!),
-          ),
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(
+          child: Icon(Icons.broken_image, size: 32, color: Colors.grey),
         ),
       );
     }
-    return SizedBox(height: h, child: const Center(child: CircularProgressIndicator()));
+
+    if (_isInitialized && _controller != null) {
+      return AspectRatio(
+        aspectRatio: _controller!.value.aspectRatio,
+        child: VideoPlayer(_controller!),
+      );
+    }
+
+    // Small red spinner while initialising / retrying.
+    return const AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.0,
+            color: Color(0xFFFF0000),
+          ),
+        ),
+      ),
+    );
   }
 }
