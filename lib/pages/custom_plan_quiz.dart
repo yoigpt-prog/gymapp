@@ -18,6 +18,7 @@ import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/notification_permission_service.dart';
 
 class CustomPlanQuizPage extends StatefulWidget {
   final String quizType; // 'workout' or 'meal'
@@ -240,6 +241,21 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     if (!mounted) return;
 
     try {
+      // Resolve planDuration string → integer weeks once and early
+      int durationWeeks;
+      if (planDuration == 'Smart Timeline') {
+        durationWeeks = _smartWeeks;
+      } else if (planDuration == '1 Year') {
+        durationWeeks = 52;
+      } else {
+        final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(planDuration);
+        if (weekMatch != null) {
+          durationWeeks = int.parse(weekMatch.group(1)!);
+        } else {
+          durationWeeks = 4; // safe default
+        }
+      }
+
       final quizService = QuizService();
       final Map<String, dynamic> answersJson = {
         'gender': gender,
@@ -250,7 +266,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         'experience': experience,
         'training_days': trainingDays,
         'workout_location': workoutLocation,
-        'plan_duration': planDuration,
+        'plan_duration': '$durationWeeks Weeks',
         'meals_per_day': 4,
         'diet_type': dietType,
         'allergies': allergies,
@@ -266,20 +282,6 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         currentStep = 1;
       });
 
-      // Resolve planDuration string → integer weeks
-      int durationWeeks;
-      if (planDuration == 'Smart Timeline') {
-        durationWeeks = _smartWeeks;
-      } else if (planDuration == '1 Year') {
-        durationWeeks = 52;
-      } else {
-        final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(planDuration);
-        if (weekMatch != null) {
-          durationWeeks = int.parse(weekMatch.group(1)!);
-        } else {
-          durationWeeks = 4; // safe default
-        }
-      }
       // Save integer immediately — WorkoutPage/_MealPlanPage read this on refresh.
       // This is the FASTEST and most reliable path; no regex, no Supabase round-trip.
       await prefs.setInt('duration_weeks_int', durationWeeks);
@@ -337,7 +339,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
           dietType:        normalized['diet_type'] as String? ?? 'no_preference',
           excludedFoods:   (normalized['excluded_foods'] as List<dynamic>?)?.cast<String>() ?? [],
           macroPreference: normalized['macro_preference'] as String,
-          timelineWeeks:   normalized['timeline_weeks'] as int,
+          timelineWeeks:   durationWeeks,
         );
         print('DEBUG: [Quiz] user_quiz_profile saved for v2 engine');
       } catch (e) {
@@ -353,8 +355,13 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
 
       final planService = PlanService();
       try {
-        await planService.generateWorkoutPlan();
-        print('DEBUG: Workout plan generated successfully.');
+        final res = await planService.generateWorkoutPlan();
+        final status = (res is Map) ? res['status']?.toString() : null;
+        if (status == 'success') {
+          print('DEBUG: Workout plan generated successfully.');
+        } else {
+          print('WARNING: Workout plan generation returned non-success: $res');
+        }
       } catch (e) {
         print('WARNING: Workout plan generation failed: $e');
       }
@@ -671,6 +678,11 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                                   _showAppDownloadPopup(context);
                                   return;
                                 }
+
+                                if (kIsWeb) {
+                                  NotificationPermissionService().maybeShowWebPushBrandedPrompt(context);
+                                }
+
                                 // Apple Guideline 5.1.1(v): Do NOT show AuthModal before onboarding.
                                 // Users proceed as anonymous RevenueCat users through quiz → paywall.
                                 AnalyticsService().trackQuizStarted();
@@ -1897,7 +1909,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         ? (targetWeightUnit == 'kg' ? 0.5 : 1.1)
         : (targetWeightUnit == 'kg' ? 0.25 : 0.55);
     final int weeks =
-        diff > 0 ? (diff / weeklyRate).ceil().clamp(1, 104) : 1;
+        diff > 0 ? (diff / weeklyRate).ceil().clamp(1, 999) : 1;
     final double percent = currentW > 0 ? (diff / currentW * 100) : 0;
     final DateTime td = DateTime.now().add(Duration(days: weeks * 7));
     const mo = ['Jan','Feb','Mar','Apr','May','Jun',
@@ -3395,16 +3407,23 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                 ),
               ),
               const SizedBox(width: 12),
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 300),
-                style: TextStyle(
-                  fontSize: fontSize,
-                  color: isCompleted 
-                      ? Colors.white
-                      : (isActive ? Colors.white : Colors.white54),
-                  fontWeight: isCompleted || isActive ? FontWeight.w700 : FontWeight.w500,
+              Flexible(
+                flex: 10,
+                child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 300),
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    color: isCompleted 
+                        ? Colors.white
+                        : (isActive ? Colors.white : Colors.white54),
+                    fontWeight: isCompleted || isActive ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                child: Text(label),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -3497,7 +3516,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                   children: [
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://apps.apple.com/us/app/gym-guide-app/id6760553535'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }
@@ -3530,7 +3550,8 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                     ),
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://play.google.com/store/apps/details?id=com.gymguide.app'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }

@@ -1,0 +1,3 @@
+-- Migration: Add timezone to public.notification_preferences
+ALTER TABLE IF EXISTS public.notification_preferences
+ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC';

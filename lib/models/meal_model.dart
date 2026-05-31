@@ -30,7 +30,7 @@ class Meal {
   });
 
   factory Meal.fromJson(Map<String, dynamic> json) {
-    final type = json['meal_type'] as String? ?? 'Snack';
+    final type = json['plan_meal_type'] as String? ?? json['meal_type'] as String? ?? 'Snack';
 
     // Parse ingredients — handle all possible key shapes from both old table and meals_v2
     // scaled_ingredients (v2): [{name, amount, kcal}] where kcal may be a string
@@ -46,10 +46,10 @@ class Meal {
     ingredients = rawList
         .whereType<Map<String, dynamic>>()
         .map((e) => MealIngredient(
-              e['name'] as String? ?? '',
+              e['name'] as String? ?? e['ingredient'] as String? ?? '',
               // amount field — v2 uses 'amount', old uses 'quantity'
-              e['amount'] as String?
-                  ?? e['quantity'] as String?
+              e['amount']?.toString()
+                  ?? e['quantity']?.toString()
                   ?? '',
               // kcal may be int or string — handle both
               _parseCalories(e['kcal'])
@@ -162,8 +162,8 @@ class MealIngredient {
 
   factory MealIngredient.fromJson(Map<String, dynamic> json) {
     return MealIngredient(
-      json['name'] as String? ?? '',
-      json['amount'] as String? ?? json['quantity'] as String? ?? '',
+      json['name'] as String? ?? json['ingredient'] as String? ?? '',
+      json['amount']?.toString() ?? json['quantity']?.toString() ?? '',
       Meal._parseCalories(json['kcal'])
           ?? Meal._parseCalories(json['calories'])
           ?? 0,

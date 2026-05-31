@@ -4,6 +4,7 @@ import 'meal_engine_v2_service.dart';
 import '../config/env_config.dart';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'notification_sync_service.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -265,6 +266,8 @@ class SupabaseService {
       'diet': dietGroup,
       'duration_weeks': durationWeeks,
       'allergies': cleanAllergies,
+      'quiz_started': true,
+      'quiz_completed': true,
     };
     if (trainingLocation != null) upsertData['training_location'] = trainingLocation;
     if (gender != null) upsertData['gender'] = gender;
@@ -280,6 +283,13 @@ class SupabaseService {
     // Single atomic upsert — all fields together
     await _client.from('user_preferences').upsert(upsertData, onConflict: 'user_id');
     print('DEBUG: user_preferences saved successfully (single upsert).');
+
+    // Sync notification preferences and tags on quiz completion
+    try {
+      await NotificationSyncService().syncFullState();
+    } catch (e) {
+      print('DEBUG: Error syncing notifications after quiz completion: $e');
+    }
   }
 
   // ---------------------------------------------------------------

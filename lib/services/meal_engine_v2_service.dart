@@ -42,7 +42,7 @@ class MealEngineV2Service {
       'diet_type':        _normalizeDiet(dietType),
       'excluded_foods':   _cleanList(excludedFoods),
       'macro_preference': _normalizeMacro(macroPreference),
-      'timeline_weeks':   timelineWeeks.clamp(1, 104),
+      'timeline_weeks':   timelineWeeks.clamp(1, 999),
       'updated_at':       DateTime.now().toUtc().toIso8601String(),
     };
     if (targetWeightKg != null) payload['target_weight_kg'] = targetWeightKg;
@@ -137,10 +137,27 @@ class MealEngineV2Service {
     if (week != null) query = query.eq('week_number', week);
     if (day  != null) query = query.eq('day_number',  day);
 
-    final rows = await query
-        .order('week_number', ascending: true)
-        .order('day_number',  ascending: true)
-        .order('meal_type',   ascending: true) as List<dynamic>;
+    final List<dynamic> rows = [];
+    bool hasMore = true;
+    int offset = 0;
+    const int chunkSize = 1000;
+
+    while (hasMore) {
+      final chunkQuery = query
+          .order('week_number', ascending: true)
+          .order('day_number',  ascending: true)
+          .order('meal_type',   ascending: true)
+          .range(offset, offset + chunkSize - 1);
+
+      final chunk = await chunkQuery as List<dynamic>;
+      rows.addAll(chunk);
+
+      if (chunk.length < chunkSize) {
+        hasMore = false;
+      } else {
+        offset += chunkSize;
+      }
+    }
 
     if (rows.isEmpty) return [];
 
@@ -157,7 +174,39 @@ class MealEngineV2Service {
       // Use pre-scaled ingredients if available, else fall back to meals_v2 raw
       final scaledIngs    = row['scaled_ingredients'];
       final rawIngs       = meal['ingredients_json'];
-      final ingredients   = scaledIngs ?? rawIngs;
+      
+      List<dynamic>? mergedIngredients;
+      if (scaledIngs != null && rawIngs != null && scaledIngs is List && rawIngs is List) {
+         mergedIngredients = [];
+         for (int i = 0; i < scaledIngs.length; i++) {
+             final scaled = scaledIngs[i] as Map<String, dynamic>;
+             final raw = (i < rawIngs.length) ? rawIngs[i] as Map<String, dynamic> : null;
+             
+             final name = raw?['name'] ?? scaled['ingredient'] ?? scaled['name'];
+             
+             // Format amount to 1 decimal place and append 'g'
+             dynamic rawAmount = scaled['amount'];
+             String formattedAmount = '';
+             if (rawAmount is num) {
+                 formattedAmount = '${rawAmount.toStringAsFixed(1)}g';
+             } else if (rawAmount != null) {
+                 formattedAmount = rawAmount.toString();
+                 if (double.tryParse(formattedAmount) != null) {
+                     formattedAmount = '${double.parse(formattedAmount).toStringAsFixed(1)}g';
+                 }
+             }
+
+             mergedIngredients.add({
+                 'name': name,
+                 'amount': formattedAmount,
+                 'kcal': raw?['calories'] ?? raw?['kcal'],
+             });
+         }
+      } else {
+         mergedIngredients = scaledIngs ?? rawIngs;
+      }
+
+      final ingredients = mergedIngredients;
 
       enriched.add({
         // Plan position

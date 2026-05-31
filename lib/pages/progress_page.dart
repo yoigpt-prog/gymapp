@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
 import '../widgets/red_header.dart';
 import '../config/env_config.dart';
+import '../services/plan_duration_service.dart';
 
 // ---------------------------------------------------------------------------
 // Shared data model loaded once by ProgressPage
@@ -156,7 +157,7 @@ class ProgressPageState extends State<ProgressPage> {
     final String weightUnit = prefs.getString('weight_unit') ?? 'kg';
 
     // ── 1. User preferences ─────────────────────────────────────────────────
-    int durationWeeksFromPrefs = 4;
+    int durationWeeksFromPrefs = await PlanDurationService().getPreferredDurationWeeks();
     String goalLabel = 'Custom Plan';
     DateTime? planStartFromPrefs;
 
@@ -168,7 +169,6 @@ class ProgressPageState extends State<ProgressPage> {
           .select('duration_weeks, training_days, goal, created_at')
           .eq('user_id', user.id)
           .maybeSingle();
-      durationWeeksFromPrefs = (pref?['duration_weeks'] as int?) ?? 4;
       trainingDaysPerWeek = (pref?['training_days'] as int?) ?? 4;
       goalLabel = _goalLabel(pref?['goal'] as String?);
       if (pref?['created_at'] != null) {
@@ -182,13 +182,27 @@ class ProgressPageState extends State<ProgressPage> {
     DateTime? planStartFromPlan;
 
     try {
-      final mealRows = await _supabase
-          .from('user_meal_plan_v2')
-          .select('week_number, day_number, is_eaten, generated_at, created_at')
-          .eq('user_id', user.id);
+      final List<dynamic> mealRows = [];
+      bool _hasMore = true;
+      int _offset = 0;
+      const int _chunkSize = 1000;
+      while (_hasMore) {
+        final _chunk = await _supabase
+            .from('user_meal_plan_v2')
+            .select('week_number, day_number, is_eaten, generated_at, created_at')
+            .eq('user_id', user.id)
+            .order('week_number')
+            .range(_offset, _offset + _chunkSize - 1) as List<dynamic>;
+        mealRows.addAll(_chunk);
+        if (_chunk.length < _chunkSize) {
+          _hasMore = false;
+        } else {
+          _offset += _chunkSize;
+        }
+      }
 
-      if (mealRows != null && (mealRows as List).isNotEmpty) {
-        final firstRow = (mealRows as List).first;
+      if (mealRows.isNotEmpty) {
+        final firstRow = mealRows.first;
         final createdVal = firstRow['created_at'] ?? firstRow['generated_at'];
         if (createdVal != null) {
           final parsed = DateTime.tryParse(createdVal.toString());

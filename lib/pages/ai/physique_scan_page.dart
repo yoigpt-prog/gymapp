@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:math' as math;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/physique_service.dart';
-import '../../models/physique_analysis_model.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 import '../../services/revenue_cat_service.dart';
+import '../../services/analytics_service.dart';
+import '../../config/env_config.dart';
+import '../../models/physique_analysis_model.dart';
 import '../custom_plan_quiz.dart';
 import '../main_scaffold.dart';
 
@@ -98,7 +105,75 @@ class _PhysiqueScanPageState extends State<PhysiqueScanPage>
           _validationError = null;
         });
         _fadeController.reset();
-        await _runAnalysis(bytes);
+
+        if (kIsWeb) {
+          setState(() {
+            _isAnalyzing = true;
+            _statusMessage = 'Validating photo...';
+          });
+          await Future.delayed(const Duration(milliseconds: 1500));
+          try {
+            if (bytes.isEmpty) {
+              throw PhysiqueValidationException('Empty file', 'The selected file appears to be empty.');
+            }
+            if (bytes.length > 8 * 1024 * 1024) {
+              final mb = (bytes.length / 1024 / 1024).toStringAsFixed(1);
+              throw PhysiqueValidationException('File too large', 'Please choose a photo under 8MB (yours is ${mb}MB).');
+            }
+            final header = bytes.sublist(0, math.min(bytes.length, 4));
+            bool validFormat = false;
+            if (header.length >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) validFormat = true;
+            if (header.length >= 4 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) validFormat = true;
+            if (bytes.length >= 12 &&
+                bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+                bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) validFormat = true;
+            if (!validFormat) {
+              throw PhysiqueValidationException('Unsupported format', 'Please upload a JPG, PNG, or WebP photo.');
+            }
+            if (bytes.length < 8192) {
+              throw PhysiqueValidationException('Photo not clear enough', 'Please upload a clear full-body photo with good lighting.');
+            }
+            
+            final sampleEnd = math.min(bytes.length, 20480);
+            int sum = 0;
+            int count = 0;
+            for (int i = 0; i < sampleEnd; i += 8) {
+              sum += bytes[i];
+              count++;
+            }
+            if (count > 0) {
+              final avg = sum ~/ count;
+              if (avg < 8) {
+                throw PhysiqueValidationException('Photo too dark', 'Your photo appears too dark. Please use better lighting and try again.');
+              }
+              if (avg > 247) {
+                throw PhysiqueValidationException('Photo too bright', 'Your photo appears overexposed. Please try again with even lighting.');
+              }
+            }
+
+            if (mounted) {
+              setState(() {
+                _isAnalyzing = false;
+              });
+            }
+          } on PhysiqueValidationException catch (e) {
+            if (mounted) {
+              setState(() {
+                _isAnalyzing = false;
+                _validationError = e;
+              });
+            }
+          } catch (e) {
+            if (mounted) {
+              setState(() {
+                _isAnalyzing = false;
+                _errorMessage = e.toString();
+              });
+            }
+          }
+        } else {
+          await _runAnalysis(bytes);
+        }
       }
     } catch (e) {
       debugPrint('[PhysiqueScan] pick error: $e');
@@ -263,6 +338,10 @@ class _PhysiqueScanPageState extends State<PhysiqueScanPage>
                     const SizedBox(height: 24),
                     _buildTips(),
                   ],
+                  if (kIsWeb) ...[
+                    const SizedBox(height: 24),
+                    _buildRateMyBodyButton(),
+                  ],
                   const SizedBox(height: 48),
                 ],
               ),
@@ -364,6 +443,8 @@ class _PhysiqueScanPageState extends State<PhysiqueScanPage>
   }
 
   Widget _buildImagePreview() {
+    final bool isPhotoValidated = kIsWeb && !_isAnalyzing && _validationError == null && _errorMessage == null;
+
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -371,6 +452,28 @@ class _PhysiqueScanPageState extends State<PhysiqueScanPage>
           borderRadius: BorderRadius.circular(18),
           child: Image.memory(_imageBytes!, fit: BoxFit.cover),
         ),
+        if (isPhotoValidated)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Container(color: Colors.black.withOpacity(0.35)),
+          ),
+        if (isPhotoValidated)
+          const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle, color: Colors.greenAccent, size: 52),
+                SizedBox(height: 8),
+                Text(
+                  'Photo validated ✓',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16),
+                ),
+              ],
+            ),
+          ),
         if (_isAnalyzing)
           ClipRRect(
             borderRadius: BorderRadius.circular(18),
@@ -587,6 +690,185 @@ class _PhysiqueScanPageState extends State<PhysiqueScanPage>
               )),
         ],
       ),
+    );
+  }
+
+  Widget _buildRateMyBodyButton() {
+    final bool canProceed = _imageBytes != null && !_isAnalyzing && _validationError == null && _errorMessage == null;
+
+    return GestureDetector(
+      onTap: canProceed ? () => _showInstallAppPopup(context) : null,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        decoration: BoxDecoration(
+          color: canProceed ? _red : Colors.grey.shade400,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: canProceed
+              ? [
+                  BoxShadow(
+                    color: _red.withOpacity(0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : [],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.accessibility_new_rounded, color: Colors.white, size: 22),
+            const SizedBox(width: 10),
+            Text(
+              canProceed ? 'Rate My Body' : 'Upload a Valid Photo First',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showInstallAppPopup(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+          ),
+          backgroundColor: Colors.white,
+          elevation: 24,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(28),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Install the App',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'AI physique analysis is available in the GymGuide mobile app. Install the app to scan your body and get your personalized analysis.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.black.withOpacity(0.6),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      GestureDetector(
+                        onTap: () async {
+                          await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+                          final url = Uri.parse(AnalyticsService().appendVisitorId('https://apps.apple.com/us/app/gym-guide-app/id6760553535'));
+                          if (await canLaunchUrl(url)) {
+                            await launchUrl(url);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white.withOpacity(0.2)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Icon(Icons.apple, color: Colors.white, size: 28),
+                              SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('Download on the', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                  Text('App Store', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+                          final url = Uri.parse(AnalyticsService().appendVisitorId('https://play.google.com/store/apps/details?id=com.gymguide.app'));
+                          if (await canLaunchUrl(url)) {
+                            await launchUrl(url);
+                          }
+                        },
+                        child: Container(
+                          width: 160,
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white.withOpacity(0.2)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.asset('assets/svg/logo/playminiicon.png', width: 26, height: 26),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Text('GET IT ON', style: TextStyle(fontSize: 10, color: Colors.white, height: 1)),
+                                  Text('Google Play', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.black45,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -16,19 +16,24 @@ class SubscriptionState extends ChangeNotifier {
   SubscriptionState._internal();
 
   bool _isPro = false;
+  bool _isTrial = false;
   bool _hasChecked = false;
 
   /// Returns the cached subscription status.
-  bool get isPro => kDebugMode || _isPro;
+  bool get isPro => _isPro;
+  
+  /// Returns whether the user is currently on an active free trial.
+  bool get isTrial => _isTrial;
 
   bool get hasChecked => _hasChecked;
 
   /// Fetches fresh status from RevenueCat and notifies listeners.
   Future<void> refresh() async {
     try {
-      final result = await RevenueCatService().isProUser();
-      if (_isPro != result || !_hasChecked) {
-        _isPro = result;
+      final result = await RevenueCatService().getSubscriptionStatus();
+      if (_isPro != result.isPro || _isTrial != result.isTrial || !_hasChecked) {
+        _isPro = result.isPro;
+        _isTrial = result.isTrial;
         _hasChecked = true;
         notifyListeners();
       } else {
@@ -53,6 +58,7 @@ class SubscriptionState extends ChangeNotifier {
   /// Call on sign-out to reset the cached state.
   void reset() {
     _isPro = false;
+    _isTrial = false;
     _hasChecked = false;
     notifyListeners();
   }

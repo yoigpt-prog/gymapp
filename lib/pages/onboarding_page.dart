@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/notification_permission_service.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({Key? key}) : super(key: key);
@@ -28,6 +29,22 @@ class _OnboardingPageState extends State<OnboardingPage> {
           data: {'full_name': name},
         ),
       );
+
+      // Track quiz start in Supabase to enable Smart Notifications for users who drop off
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        await Supabase.instance.client.from('user_preferences').upsert({
+          'user_id': user.id,
+          'quiz_started': true,
+          'quiz_completed': false,
+          'premium': false,
+        });
+      }
+
+      // Request push permissions
+      if (mounted) {
+        await NotificationPermissionService().requestPermission(context);
+      }
 
       if (mounted) {
         Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);

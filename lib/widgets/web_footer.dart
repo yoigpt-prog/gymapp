@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class WebFooter extends StatefulWidget {
   final bool isDarkMode;
@@ -124,15 +125,15 @@ class WebFooterState extends State<WebFooter> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildSocialIcon('assets/svg/socialmedia/facebookicon.png', 'https://facebook.com'),
+                _buildSocialIcon('assets/svg/socialmedia/facebookicon.png', 'https://www.facebook.com/people/Gym-Guide/61590379891853/'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/instagramicon.png', 'https://instagram.com'),
+                _buildSocialIcon('assets/svg/socialmedia/instagramicon.png', 'https://www.instagram.com/gymguide.co/'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/pinteresticon.png', 'https://pinterest.com'),
+                _buildSocialIcon('assets/svg/socialmedia/pinteresticon.png', 'https://www.pinterest.com/gymguideofficial1/'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/tiktokicon.png', 'https://tiktok.com'),
+                _buildSocialIcon('assets/svg/socialmedia/tiktokicon.png', 'https://www.tiktok.com/@gymguide.coapp'),
                 const SizedBox(width: 8),
-                _buildSocialIcon('assets/svg/socialmedia/youtubeicon.png', 'https://youtube.com'),
+                _buildSocialIcon('assets/svg/socialmedia/youtubeicon.png', 'https://www.youtube.com/@GymGuideOfficial'),
               ],
             ),
           ],
@@ -166,27 +167,39 @@ class WebFooterState extends State<WebFooter> {
   }
 
   Widget _buildSocialIcon(String pngPath, String url) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () {
-          // Snackbar silenced — log only
-          debugPrint('[FOOTER] Opening $url');
-        },
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Image.asset(
-              pngPath,
-              width: 24,
-              height: 24,
-              color: Colors.white,
-              colorBlendMode: BlendMode.srcIn,
+    return Tooltip(
+      message: url,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () async {
+            debugPrint('[FOOTER] Opening $url');
+            final uri = Uri.parse(url);
+            try {
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } else {
+                debugPrint('[FOOTER] Could not launch $url');
+              }
+            } catch (e) {
+              debugPrint('[FOOTER] Error launching $url: $e');
+            }
+          },
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Image.asset(
+                pngPath,
+                width: 24,
+                height: 24,
+                color: Colors.white,
+                colorBlendMode: BlendMode.srcIn,
+              ),
             ),
           ),
         ),

@@ -37,9 +37,13 @@ import 'pages/auth_page.dart';
 import 'pages/onboarding_page.dart';
 import 'pages/main_scaffold.dart';
 import 'pages/ai/ai_transformation_share_page.dart';
+import 'pages/ai/ai_transformation_page.dart';
+import 'pages/ai/physique_scan_page.dart';
 import 'pages/welcome_screen.dart';
 import 'services/revenue_cat_service.dart';
 import 'services/analytics_service.dart';
+import 'services/push_notification_service.dart';
+import 'services/notification_sync_service.dart';
 import 'pages/calculators/bmi_calculator_page.dart';
 import 'package:seo/seo.dart';
 import 'pages/calculators/calorie_calculator_page.dart';
@@ -62,10 +66,12 @@ Future<void> main() async {
     anonKey: EnvConfig.supabaseAnonKey,
   );
 
+  NotificationSyncService.initializeAuthListener();
+
   // Initialize RevenueCat (no-op on Web)
   await RevenueCatService().initialize();
 
-  // Initialize Mixpanel analytics SDK only — no identity or event tracking here.
+  // Initialize PostHog analytics SDK only — no identity or event tracking here.
   // Supabase session is NOT guaranteed to be restored by this point on real devices.
   // All identity (identifyUser) and tracking (trackAppOpen) happen inside
   // MainScaffold._initAuthLogic() via the Supabase auth state stream.
@@ -91,6 +97,8 @@ Future<void> main() async {
 
 class GymGuideApp extends StatefulWidget {
   const GymGuideApp({Key? key}) : super(key: key);
+
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   State<GymGuideApp> createState() => _GymGuideAppState();
@@ -140,6 +148,9 @@ class _GymGuideAppState extends State<GymGuideApp> {
   void initState() {
     super.initState();
     _isDark = _themeMode == ThemeMode.dark;
+    
+    // Initialize Push Notifications
+    PushNotificationService().initialize(GymGuideApp.navigatorKey);
   }
 
   void _toggleTheme() async {
@@ -191,6 +202,7 @@ class _GymGuideAppState extends State<GymGuideApp> {
             enabled: true,
             tree: WidgetTree(context: context),
             child: MaterialApp(
+        navigatorKey: GymGuideApp.navigatorKey,
         title: 'GymGuide',
         debugShowCheckedModeBanner: false,
         themeMode: _themeMode,
@@ -209,6 +221,19 @@ class _GymGuideAppState extends State<GymGuideApp> {
         initialRoute: kIsWeb ? Uri.base.path : '/',
         onGenerateInitialRoutes: (initialRoute) {
           debugPrint('[Router] onGenerateInitialRoutes: initialRoute=$initialRoute');
+          
+          if (!kIsWeb) {
+            try {
+              // Add a fake host to parse query parameters even for simple paths like /?visitor_id=XYZ
+              final uri = Uri.tryParse('http://localhost$initialRoute');
+              if (uri != null && uri.queryParameters.containsKey('visitor_id')) {
+                AnalyticsService().setSourceVisitorId(uri.queryParameters['visitor_id']!);
+              }
+            } catch (e) {
+              debugPrint('[Router] initialRoute parse error: $e');
+            }
+          }
+
           if (initialRoute.startsWith('/transformation/share/')) {
             var token = initialRoute.substring('/transformation/share/'.length);
             if (token.contains('?')) {
@@ -370,6 +395,12 @@ class _GymGuideAppState extends State<GymGuideApp> {
             break;
           case '/download':
             builder = (context) => DownloadPage(toggleTheme: _toggleTheme);
+            break;
+          case '/ai-transformation-simulator':
+            builder = (context) => AITransformationPage(isDarkMode: _themeMode == ThemeMode.dark);
+            break;
+          case '/rate-your-body':
+            builder = (context) => PhysiqueScanPage(isDarkMode: _themeMode == ThemeMode.dark);
             break;
           case '/calculators/bmi':
             builder = (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);

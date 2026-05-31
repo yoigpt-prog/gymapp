@@ -983,6 +983,14 @@ class MealPlanPageState extends State<MealPlanPage> {
                 color: isDarkMode ? Colors.white : Colors.black,
                 width: 1,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                  spreadRadius: 0,
+                ),
+              ],
             ),
             child: Row(
               children: [
@@ -1017,6 +1025,14 @@ class MealPlanPageState extends State<MealPlanPage> {
               color: isDarkMode ? Colors.white : Colors.black,
               width: 1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: isDarkMode ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+                spreadRadius: 0,
+              ),
+            ],
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 22),
@@ -1102,31 +1118,6 @@ class MealPlanPageState extends State<MealPlanPage> {
         ),
 
         const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.info_outline,
-                size: 16,
-                color: isDarkMode ? Colors.white54 : Colors.black54,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Recommendations and nutrition estimates may not always be accurate. Use your judgment and consult a professional when needed.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDarkMode ? Colors.white54 : Colors.black54,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 32),
       ],
     );
   }
@@ -1250,68 +1241,84 @@ class MealPlanPageState extends State<MealPlanPage> {
       ),
       child: Column(
         children: [
-          // Circular Calorie Indicator
-          Stack(
-            alignment: Alignment.center,
+          // Top Section: Side-by-Side Layout
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SizedBox(
-                width: 180,
-                height: 180,
-                child: CircularProgressIndicator(
-                  value: targetCalories > 0 ? (currentCalories / targetCalories).clamp(0.0, 1.0) : 0.0,
-                  strokeWidth: 12,
-                  backgroundColor: isDarkMode ? Colors.white10 : Colors.grey.shade100,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
-                ),
-              ),
+              // Left: Circular Calorie Indicator
               Column(
                 children: [
-                  Text(
-                    'Remaining',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: isDarkMode ? Colors.white70 : Colors.grey[600],
-                    ),
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 130, // Scaled down for side-by-side
+                        height: 130,
+                        child: CircularProgressIndicator(
+                          value: targetCalories > 0 ? (currentCalories / targetCalories).clamp(0.0, 1.0) : 0.0,
+                          strokeWidth: 10,
+                          backgroundColor: isDarkMode ? Colors.white10 : Colors.grey.shade100,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.teal),
+                        ),
+                      ),
+                      Column(
+                        children: [
+                          Text(
+                            'Remaining',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDarkMode ? Colors.white70 : Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '$remainingCalories',
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                              height: 1.1,
+                            ),
+                          ),
+                          Text(
+                            'kcal',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDarkMode ? Colors.white70 : Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 12),
                   Text(
-                    '$remainingCalories',
+                    'Total $targetCalories kcal',
                     style: TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: textColor,
-                    ),
-                  ),
-                  Text(
-                    'kcal',
-                    style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                       color: isDarkMode ? Colors.white70 : Colors.grey[600],
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
+              const SizedBox(width: 24),
+              
+              // Right: Macros
+              Expanded(
+                child: Column(
+                  children: [
+                    _buildMacroRow('Carbs', currentCarbs, targetCarbs, Colors.blue, isDarkMode),
+                    const SizedBox(height: 16),
+                    _buildMacroRow('Protein', currentProtein, targetProtein, Colors.purple, isDarkMode),
+                    const SizedBox(height: 16),
+                    _buildMacroRow('Fat', currentFat, targetFat, Colors.amber, isDarkMode),
+                  ],
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            'Total $targetCalories kcal',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: isDarkMode ? Colors.white70 : Colors.grey[600],
-            ),
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // Macros
-          _buildMacroRow('Carbs', currentCarbs, targetCarbs, Colors.blue, isDarkMode),
-          const SizedBox(height: 16),
-          _buildMacroRow('Protein', currentProtein, targetProtein, Colors.red, isDarkMode),
-          const SizedBox(height: 16),
-          _buildMacroRow('Fat', currentFat, targetFat, Colors.orange, isDarkMode),
           
           const SizedBox(height: 24),
           Divider(color: isDarkMode ? Colors.white12 : Colors.grey[200]),
@@ -1359,59 +1366,58 @@ class MealPlanPageState extends State<MealPlanPage> {
   }
 
   Widget _buildMacroRow(String label, int current, int target, Color color, bool isDarkMode) {
-    final remaining = target - current;
     final progress = target > 0 ? (current / target).clamp(0.0, 1.0) : 0.0;
     
+    final textStyle = TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      color: isDarkMode ? Colors.white : Colors.black87,
+    );
+
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return FittedBox(
+              fit: BoxFit.scaleDown,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: constraints.maxWidth,
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: isDarkMode ? Colors.white : Colors.black87,
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          label,
+                          style: textStyle,
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '${current}g / ${target}g',
+                      style: textStyle,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            RichText(
-              text: TextSpan(
-                style: TextStyle(fontSize: 14, color: isDarkMode ? Colors.white70 : Colors.black54),
-                children: [
-                  TextSpan(
-                    text: '${current}g',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold, 
-                      color: isDarkMode ? Colors.white : Colors.black87
-                    )
-                  ),
-                  TextSpan(text: ' / ${target}g '),
-                  TextSpan(
-                    text: '${remaining > 0 ? remaining : 0}g left',
-                    style: const TextStyle(color: Colors.red),
-                  ),
-                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: progress,
-            minHeight: 8,
+            minHeight: 6,
             backgroundColor: color.withOpacity(0.2),
             valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
@@ -1984,6 +1990,29 @@ class MealPlanPageState extends State<MealPlanPage> {
                     ),
             ),
             ),
+          ),
+          
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 14,
+                color: isDarkMode ? Colors.white30 : Colors.black38,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Recommendations and nutrition estimates may not always be accurate. Use your judgment and consult a professional when needed.',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: isDarkMode ? Colors.white30 : Colors.black38,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

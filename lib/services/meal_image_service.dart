@@ -49,6 +49,9 @@ class MealImageService {
     }
     await prefs.setString(_key(mealId), destPath);
 
+    // Asynchronously cleanup any orphaned images (fire and forget)
+    cleanupOrphanedImages();
+
     return destPath;
   }
 
@@ -62,6 +65,40 @@ class MealImageService {
         if (file.existsSync()) await file.delete();
       } catch (_) {}
       await prefs.remove(_key(mealId));
+    }
+  }
+
+  /// Scans the application documents directory for any meal images that are no
+  /// longer referenced by SharedPreferences (orphaned) and deletes them.
+  static Future<void> cleanupOrphanedImages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().where((k) => k.startsWith(_keyPrefix));
+      
+      final activePaths = <String>{};
+      for (final key in keys) {
+        final path = prefs.getString(key);
+        if (path != null) activePaths.add(path);
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final files = dir.listSync();
+      
+      for (final entity in files) {
+        if (entity is File) {
+          final fileName = entity.uri.pathSegments.last;
+          // Only touch files created by this service
+          if (fileName.startsWith('meal_img_') && fileName.endsWith('.jpg')) {
+            if (!activePaths.contains(entity.path)) {
+              try {
+                await entity.delete();
+              } catch (_) {}
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silently fail if directory read fails
     }
   }
 }

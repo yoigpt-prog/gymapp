@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../pages/main_scaffold.dart';
+import '../services/analytics_service.dart';
 
 /// Reusable red header widget used across all pages for consistency
 class RedHeader extends StatefulWidget {
@@ -500,7 +501,12 @@ class _RedHeaderState extends State<RedHeader> {
 
   /// Opens a store URL in an external browser
   Future<void> _launchStore(String url) async {
-    final uri = Uri.parse(url);
+    if (url.contains('apple.com')) {
+      await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+    } else if (url.contains('google.com')) {
+      await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+    }
+    final uri = Uri.parse(AnalyticsService().appendVisitorId(url));
     try {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);

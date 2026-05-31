@@ -112,7 +112,7 @@ class PlanService {
       'gender': gender,
       'goal': goalCode,
       'location': trainingLocation,
-      'weeks_count': (planDurationDays / 7).ceil().clamp(1, 104),
+      'weeks_count': (planDurationDays / 7).ceil().clamp(1, 999),
       'days_per_week': trainingDays,
       'weeks': {},
       'metadata': {'note': 'plan_templates removed'},

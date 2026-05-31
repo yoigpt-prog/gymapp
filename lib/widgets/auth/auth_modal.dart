@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../services/revenue_cat_service.dart';
+import '../../services/notification_sync_service.dart';
 
 enum AuthMode { login, signup }
 enum SignupStep { email, otp, password }
@@ -131,6 +132,7 @@ class _AuthModalState extends State<AuthModal> {
           AuthModal.isVisible = false;
           Navigator.pop(context);
           _showSuccess('Welcome!');
+          unawaited(NotificationSyncService().syncFullState());
         }
       }
     } catch (e) {
@@ -184,6 +186,7 @@ class _AuthModalState extends State<AuthModal> {
             AuthModal.isVisible = false;
             Navigator.pop(context);
             _showSuccess('Welcome!');
+            unawaited(NotificationSyncService().syncFullState());
           }
         } catch (nativeError) {
           final errorStr = nativeError.toString().toLowerCase();
@@ -239,6 +242,7 @@ class _AuthModalState extends State<AuthModal> {
         AuthModal.isVisible = false;
         Navigator.pop(context);
         _showSuccess('Welcome back!');
+        unawaited(NotificationSyncService().syncFullState());
       }
     } catch (e) {
       if (mounted) _showError(e.toString());
@@ -328,6 +332,7 @@ class _AuthModalState extends State<AuthModal> {
         AuthModal.isVisible = false;
         Navigator.pop(context);
         _showSuccess('Account created successfully!');
+        unawaited(NotificationSyncService().syncFullState());
       }
     } catch (e) {
       if (mounted) _showError(e.toString());
@@ -744,7 +749,9 @@ class _AuthModalState extends State<AuthModal> {
             final session = Supabase.instance.client.auth.currentSession;
             if (session == null) {
               try {
-                await Supabase.instance.client.auth.signInAnonymously();
+                await NotificationSyncService().ensureAnonymousSession();
+                debugPrint('[AUTH] Anonymous sign-in successful. Syncing notifications...');
+                unawaited(NotificationSyncService().syncFullState());
               } catch (e) {
                 debugPrint('[AUTH ERROR] Anonymous sign-in failed: $e');
                 if (mounted) {
@@ -757,6 +764,9 @@ class _AuthModalState extends State<AuthModal> {
                 }
                 return; // Stop and don't close modal
               }
+            } else {
+              debugPrint('[AUTH] Session already exists. Syncing notifications...');
+              unawaited(NotificationSyncService().syncFullState());
             }
             if (mounted) {
               AuthModal.isVisible = false;

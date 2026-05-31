@@ -125,7 +125,7 @@ class QuizService {
     }
 
     // 11. Timeline in weeks
-    final int timelineWeeks = (duration / 7).ceil().clamp(1, 104);
+    final int timelineWeeks = (duration / 7).ceil().clamp(1, 999);
 
     print('DEBUG: Meal Params -> Meals:$meals, Diet:$diet, Allergy:$allergy');
     print('DEBUG: V2 Params -> Activity:$activityLevel, Macro:$macroPreference, Weeks:$timelineWeeks');

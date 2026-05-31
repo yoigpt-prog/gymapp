@@ -15,6 +15,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/supabase_service.dart';
 import '../services/revenue_cat_service.dart';
+import '../services/analytics_service.dart';
 import '../services/subscription_state.dart';
 import '../main.dart';
 import '../widgets/red_header.dart';
@@ -80,6 +81,7 @@ class ProfilePageState extends State<ProfilePage> {
 
   // Subscription state for Upgrade card
   bool _isPro = false;
+  bool _isTrial = false;
 
   final ScrollController _scrollController = ScrollController();
 
@@ -90,17 +92,35 @@ class ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+    _isPro = SubscriptionState().isPro;
+    _isTrial = SubscriptionState().isTrial;
+    SubscriptionState().addListener(_onSubscriptionChanged);
+
     _loadProfileImage();
     _loadUserData();
-    // Listen to subscription state changes
-    SubscriptionState().addListener(_onSubscriptionChanged);
+
+    // Re-check profile when returning
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUserData();
+    });
+
     SubscriptionState().refresh().then((_) {
-      if (mounted) setState(() => _isPro = SubscriptionState().isPro);
+      if (mounted) {
+        setState(() {
+          _isPro = SubscriptionState().isPro;
+          _isTrial = SubscriptionState().isTrial;
+        });
+      }
     });
   }
 
   void _onSubscriptionChanged() {
-    if (mounted) setState(() => _isPro = SubscriptionState().isPro);
+    if (mounted) {
+      setState(() {
+        _isPro = SubscriptionState().isPro;
+        _isTrial = SubscriptionState().isTrial;
+      });
+    }
   }
 
   Future<void> _loadProfileImage() async {
@@ -746,13 +766,7 @@ class ProfilePageState extends State<ProfilePage> {
                       _buildUserProfileCard(isMobile: true),
                       const SizedBox(height: 16),
 
-                      // ── Upgrade to Premium card (non-subscribers only) ──────
-                      if (!_isPro)
-                        const PromoBanner(
-                          source: 'profile_page',
-                        ),
-                      // ──────────────────────────────────────────────────────
-
+                      // PromoBanner is now integrated inside _buildUserProfileCard
 
                       const SizedBox(height: 16),
 
@@ -1191,7 +1205,10 @@ class ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 16),
           GestureDetector(
             onTap: () {
-              if (kIsWeb) {
+              final isMobileLayout = MediaQuery.of(context).size.width <= 800 ||
+                  defaultTargetPlatform == TargetPlatform.iOS ||
+                  defaultTargetPlatform == TargetPlatform.android;
+              if (kIsWeb && !isMobileLayout) {
                 _showAppDownloadPopup(context);
                 return;
               }
@@ -1252,7 +1269,10 @@ class ProfilePageState extends State<ProfilePage> {
       ),
     );
 
-    if (kIsWeb) {
+    final isMobileLayout = MediaQuery.of(context).size.width <= 800 ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    if (kIsWeb && !isMobileLayout) {
       return GestureDetector(
         onTap: () => _showAppDownloadPopup(context),
         child: cardWidget,
@@ -1320,7 +1340,10 @@ class ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 16),
           GestureDetector(
             onTap: () {
-              if (kIsWeb) {
+              final isMobileLayout = MediaQuery.of(context).size.width <= 800 ||
+                  defaultTargetPlatform == TargetPlatform.iOS ||
+                  defaultTargetPlatform == TargetPlatform.android;
+              if (kIsWeb && !isMobileLayout) {
                 _showAppDownloadPopup(context);
                 return;
               }
@@ -1393,7 +1416,10 @@ class ProfilePageState extends State<ProfilePage> {
       ),
     );
 
-    if (kIsWeb) {
+    final isMobileLayout = MediaQuery.of(context).size.width <= 800 ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    if (kIsWeb && !isMobileLayout) {
       return GestureDetector(
         onTap: () => _showAppDownloadPopup(context),
         child: cardWidget,
@@ -1585,22 +1611,206 @@ class ProfilePageState extends State<ProfilePage> {
     final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
     final subTextColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
 
-    // Determine border color: black for mobile, subtle for desktop
+    // Determine border color
     final borderColor = isMobile
-        ? Colors.black
+        ? (widget.isDarkMode ? Colors.white : Colors.black)
         : (widget.isDarkMode ? Colors.white12 : Colors.black12);
 
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: borderColor, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // Top Row: Profile Pic (Left) and Stats (Right)
+            Row(
+              children: [
+                // Profile Picture Stack
+                Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    GestureDetector(
+                      onTap: _pickImage,
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFFF0000).withOpacity(0.1),
+                          border: Border.all(color: const Color(0xFFFF0000), width: 2),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _profileImageBytes != null
+                            ? Image.memory(_profileImageBytes!, fit: BoxFit.cover, width: 100, height: 100)
+                            : _buildDefaultAvatar(),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _pickImage,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF0000),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: cardColor, width: 2),
+                        ),
+                        child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 20),
+                // Stats Column
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildCompactStatRow(Icons.calendar_month, 'Member Since', _memberSince.isEmpty ? '—' : _memberSince, textColor),
+                      const SizedBox(height: 16),
+                      _buildCompactStatRow(
+                        Icons.shield_outlined, 
+                        'Plan Status', 
+                        _isPro ? (_isTrial ? 'Free Trial' : 'Premium') : 'Free', 
+                        _isPro ? const Color(0xFFFF0000) : (widget.isDarkMode ? Colors.white70 : Colors.black54),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (Supabase.instance.client.auth.currentUser?.isAnonymous == true) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => AuthModal.show(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF0000),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Sign Up to Save Progress', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+              ),
+            ],
+            if (!_isPro) ...[
+              const SizedBox(height: 20),
+              Divider(color: borderColor),
+              const SizedBox(height: 16),
+              // Inner Unlock Banner
+              GestureDetector(
+                onTap: () {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  if (user == null) {
+                    AuthModal.show(context);
+                  } else {
+                    AnalyticsService().trackPaywallViewed(source: 'profile_page_card');
+                    RevenueCatService().showPaywall();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF0000),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF0000),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
+                        ),
+                        child: Center(
+                          child: Image.asset(
+                            'assets/progress/program completion.png',
+                            width: 24,
+                            height: 24,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Unlock Full Program',
+                                maxLines: 1,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Continue your transformation without limits',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white.withOpacity(0.85),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Unlock',
+                          style: TextStyle(
+                            color: Color(0xFFFF0000),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    // DESKTOP LAYOUT (unchanged behavior)
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(isMobile ? 12 : 20),
-        border: Border.all(
-          color: isMobile
-              ? (widget.isDarkMode ? Colors.white : Colors.black)
-              : borderColor,
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -1614,7 +1824,6 @@ class ProfilePageState extends State<ProfilePage> {
           Stack(
             alignment: Alignment.bottomRight,
             children: [
-              // Profile Image: user-uploaded > SVG default based on gender
               GestureDetector(
                 onTap: _pickImage,
                 child: Container(
@@ -1623,49 +1832,26 @@ class ProfilePageState extends State<ProfilePage> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFFFF0000).withOpacity(0.1),
-                    border:
-                        Border.all(color: const Color(0xFFFF0000), width: 2),
+                    border: Border.all(color: const Color(0xFFFF0000), width: 2),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: _profileImageBytes != null
-                      // User has set a custom photo
-                      ? Image.memory(
-                          _profileImageBytes!,
-                          fit: BoxFit.cover,
-                          width: 120,
-                          height: 120,
-                        )
-                      // Show gender-appropriate SVG default
+                      ? Image.memory(_profileImageBytes!, fit: BoxFit.cover, width: 120, height: 120)
                       : _buildDefaultAvatar(),
                 ),
               ),
-              // Camera button
               GestureDetector(
                 onTap: _pickImage,
                 child: Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFF0000),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.camera_alt,
-                    color: Colors.white,
-                    size: 20,
-                  ),
+                  decoration: const BoxDecoration(color: Color(0xFFFF0000), shape: BoxShape.circle),
+                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          Text(
-            _userEmail,
-            style: TextStyle(
-              fontSize: 16,
-              color: subTextColor,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          Text(_userEmail, style: TextStyle(fontSize: 16, color: subTextColor), textAlign: TextAlign.center),
           if (Supabase.instance.client.auth.currentUser?.isAnonymous == true) ...[
             const SizedBox(height: 12),
             ElevatedButton(
@@ -1673,9 +1859,7 @@ class ProfilePageState extends State<ProfilePage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF0000),
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               ),
               child: const Text('Sign Up to Save Progress', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1684,17 +1868,38 @@ class ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 24),
           const Divider(),
           const SizedBox(height: 24),
-          _buildProfileStatRow(
-            'Member Since',
-            _memberSince.isEmpty ? '—' : _memberSince,
-            textColor,
-          ),
+          _buildProfileStatRow('Member Since', _memberSince.isEmpty ? '—' : _memberSince, textColor),
           const SizedBox(height: 16),
-          _buildProfileStatRow(
-              'Plan Status', 'Free Trial', const Color(0xFFFF0000)),
+          _buildProfileStatRow('Plan Status', 'Free Trial', const Color(0xFFFF0000)),
           const SizedBox(height: 8),
         ],
       ),
+    );
+  }
+
+  Widget _buildCompactStatRow(IconData icon, String label, String value, Color valueColor) {
+    final subTextColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: widget.isDarkMode ? Colors.white12 : Colors.grey[200],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 16, color: subTextColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(fontSize: 12, color: subTextColor)),
+              Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: valueColor)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -2039,7 +2244,8 @@ class ProfilePageState extends State<ProfilePage> {
                   children: [
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://apps.apple.com/us/app/gym-guide-app/id6760553535'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }
@@ -2072,7 +2278,8 @@ class ProfilePageState extends State<ProfilePage> {
                     ),
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://play.google.com/store/apps/details?id=com.gymguide.app'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }

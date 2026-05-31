@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:seo/seo.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../widgets/legal_page_layout.dart';
+import '../services/analytics_service.dart';
 
 class DownloadPage extends StatelessWidget {
   final VoidCallback? toggleTheme;
@@ -9,7 +10,12 @@ class DownloadPage extends StatelessWidget {
   const DownloadPage({Key? key, this.toggleTheme}) : super(key: key);
 
   Future<void> _launchURL(String urlString) async {
-    final uri = Uri.parse(urlString);
+    if (urlString.contains('apple.com')) {
+      await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+    } else if (urlString.contains('google.com')) {
+      await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+    }
+    final uri = Uri.parse(AnalyticsService().appendVisitorId(urlString));
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

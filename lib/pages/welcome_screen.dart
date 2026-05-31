@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'auth_page.dart';
+import '../services/notification_permission_service.dart';
+import '../services/analytics_service.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const _kBg = Color(0xFF000000);
@@ -73,6 +75,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       return;
     }
 
+    if (kIsWeb) {
+      NotificationPermissionService().maybeShowWebPushBrandedPrompt(context);
+    }
+
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const AuthPage(),
@@ -132,7 +138,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                   children: [
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://apps.apple.com/us/app/gym-guide-app/id6760553535'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }
@@ -165,7 +172,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     ),
                     GestureDetector(
                       onTap: () async {
-                        final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                        await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+                        final url = Uri.parse(AnalyticsService().appendVisitorId('https://play.google.com/store/apps/details?id=com.gymguide.app'));
                         if (await canLaunchUrl(url)) {
                           await launchUrl(url);
                         }

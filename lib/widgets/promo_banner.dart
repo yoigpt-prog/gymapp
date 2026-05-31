@@ -141,7 +141,8 @@ class _PromoBannerState extends State<PromoBanner>
                     children: [
                       GestureDetector(
                         onTap: () async {
-                          final url = Uri.parse('https://apps.apple.com/us/app/gym-guide-app/id6760553535');
+                          await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+                          final url = Uri.parse(AnalyticsService().appendVisitorId('https://apps.apple.com/us/app/gym-guide-app/id6760553535'));
                           if (await canLaunchUrl(url)) {
                             await launchUrl(url);
                           }
@@ -174,7 +175,8 @@ class _PromoBannerState extends State<PromoBanner>
                       ),
                       GestureDetector(
                         onTap: () async {
-                          final url = Uri.parse('https://play.google.com/store/apps/details?id=com.gymguide.app');
+                          await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+                          final url = Uri.parse(AnalyticsService().appendVisitorId('https://play.google.com/store/apps/details?id=com.gymguide.app'));
                           if (await canLaunchUrl(url)) {
                             await launchUrl(url);
                           }

@@ -7,7 +7,6 @@ import 'package:video_player/video_player.dart';
 import '../widgets/red_header.dart';
 import '../widgets/auth/auth_modal.dart';
 import '../widgets/promo_banner.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
 import '../services/subscription_state.dart';
 import '../services/video_cache_service.dart';
@@ -15,6 +14,8 @@ import 'package:seo/seo.dart';
 import '../widgets/seo_footer_cta.dart';
 import '../widgets/share_dialog.dart';
 import '../widgets/desktop_side_panel.dart';
+import '../services/notification_permission_service.dart';
+import '../services/notification_sync_service.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -78,6 +79,7 @@ class _HomePageState extends State<HomePage> {
     }
     // Auto-open AuthModal removed in favor of MainScaffold timer logic
     _debugCheckData();
+    unawaited(NotificationSyncService().syncFullState());
   }
 
   Future<void> _debugCheckData() async {
@@ -286,18 +288,7 @@ class _HomePageState extends State<HomePage> {
         _isLoading = false;
       });
 
-      // Prefetch video URLs for the new batch in background (best-effort).
-      final videoUrls = newExercises
-          .map((e) => e.imagePath.trim())
-          .where((url) =>
-              url.isNotEmpty &&
-              (url.endsWith('.mp4') ||
-                  url.endsWith('.mov') ||
-                  url.endsWith('.webm')))
-          .toList();
-      if (videoUrls.isNotEmpty) {
-        VideoCacheService.instance.prefetch(videoUrls);
-      }
+
     } catch (e) {
       debugPrint('Error loading exercises: $e');
       setState(() {
@@ -413,6 +404,9 @@ class _HomePageState extends State<HomePage> {
                                       if (_highlightedMuscle == m) {
                                         _selectedMuscle = m;
                                         _resetExercises();
+                                        if (kIsWeb) {
+                                          NotificationPermissionService().maybeShowWebPushBrandedPrompt(context);
+                                        }
                                       } else {
                                         _highlightedMuscle = m;
                                       }
@@ -1209,6 +1203,10 @@ class _HomePageState extends State<HomePage> {
         // Proceed with muscle selection directly
         _selectedMuscle = m;
         _resetExercises();
+
+        if (kIsWeb) {
+          NotificationPermissionService().maybeShowWebPushBrandedPrompt(context);
+        }
 
         // TRIGGER REQ: Show AuthModal 3 seconds after entering Exercises page
         Future.delayed(const Duration(seconds: 3), () {

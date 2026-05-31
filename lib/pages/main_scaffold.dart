@@ -25,6 +25,7 @@ import '../widgets/auth/auth_modal.dart'; // Import AuthModal
 import '../services/revenue_cat_service.dart';
 import '../services/analytics_service.dart';
 import '../services/subscription_state.dart';
+import '../services/notification_sync_service.dart';
 import '../widgets/update_banner.dart';
 import '../widgets/ai_coach_button.dart';
 import '../config/env_config.dart';
@@ -76,7 +77,8 @@ class MainScaffoldState extends State<MainScaffold> {
   StreamSubscription<AuthState>? _authSubscription;
   bool _isEmailVerified = true; 
   bool _isLoadingAuth = true;
-  bool _hasInteracted = false; // New Interaction Flag
+  bool _hasInteracted = false;
+  String? _currentUserId; // Tracks authenticated user ID
   int _schedulingId = 0; // incremented on every cancel to invalidate stale async prompts
 
   @override
@@ -93,10 +95,16 @@ class MainScaffoldState extends State<MainScaffold> {
 
   Future<void> _ensureAnonymousSession() async {
     try {
+      await NotificationSyncService.waitForAuthInit();
       final session = Supabase.instance.client.auth.currentSession;
       if (session == null) {
-        debugPrint('[AUTH] No session, attempting anonymous login...');
-        await Supabase.instance.client.auth.signInAnonymously();
+        debugPrint('[AUTH] No session, attempting anonymous login via sync service...');
+        await NotificationSyncService().ensureAnonymousSession();
+        debugPrint('[AUTH] Anonymous sign-in successful. Syncing notifications...');
+        unawaited(NotificationSyncService().syncFullState());
+      } else {
+        debugPrint('[AUTH] Session already exists on app startup. Syncing notifications...');
+        unawaited(NotificationSyncService().syncFullState());
       }
     } catch (e) {
       debugPrint('[AUTH] Error during anonymous sign in: $e');
@@ -180,6 +188,7 @@ class MainScaffoldState extends State<MainScaffold> {
 
         if (event == AuthChangeEvent.signedOut) {
           // LOGOUT: clear all identity and flags
+          // Sign out: clear all identity and flags, reset current user
           AnalyticsService().reset();
           SubscriptionState().reset();
           SharedPreferences.getInstance().then((prefs) {
@@ -189,6 +198,7 @@ class MainScaffoldState extends State<MainScaffold> {
             prefs.remove('duration_weeks_int');
           });
           setState(() => _currentIndex = 0);
+          _currentUserId = null; // clear stored user id
           _workoutKey.currentState?.refresh(force: true);
           _mealPlanKey.currentState?.refresh();
           _progressKey.currentState?.refresh(force: true);
@@ -196,18 +206,26 @@ class MainScaffoldState extends State<MainScaffold> {
 
         } else if (session != null) {
           // AUTHENTICATED: login / token restore / token refresh
-          // Step 1: identify with real UUID (no-op if same user already identified)
-          AnalyticsService().identifyUser(session.user.id);
-          // Step 2: App Open — fires once per 30-min session, session-gated by SharedPreferences
-          unawaited(AnalyticsService().trackAppOpen());
-          // Step 3: Refresh subscription status cache
-          SubscriptionState().refresh();
+          // Identify user and guard duplicate refreshes
+          if (_currentUserId != session.user.id) {
+            // New or changed user – perform full refresh actions
+            AnalyticsService().identifyUser(session.user.id);
+            unawaited(AnalyticsService().trackAppOpen());
+            SubscriptionState().refresh();
+            unawaited(NotificationSyncService().syncFullState());
 
-          _cancelAuthTimer();
-          _workoutKey.currentState?.refresh(force: true);
-          _mealPlanKey.currentState?.refresh();
-          _progressKey.currentState?.refresh(force: true);
-          _profileKey.currentState?.refresh();
+            _cancelAuthTimer();
+            _workoutKey.currentState?.refresh(force: true);
+            _mealPlanKey.currentState?.refresh();
+            _progressKey.currentState?.refresh(force: true);
+            _profileKey.currentState?.refresh();
+
+            _currentUserId = session.user.id; // store current user
+          } else {
+            // Same user – only ensure Analytics identifies (idempotent) and maybe track app open
+            AnalyticsService().identifyUser(session.user.id);
+            unawaited(AnalyticsService().trackAppOpen());
+          }
 
           if (AuthModal.isVisible && !AuthModal.isInMultiStep) {
             AuthModal.isVisible = false;
@@ -315,12 +333,10 @@ class MainScaffoldState extends State<MainScaffold> {
   }
 
   Future<void> _scheduleNextAuthPrompt() async {
-    // Capture the current scheduling generation so stale async calls become no-ops
     final myId = _schedulingId;
 
     final prefs = await SharedPreferences.getInstance();
 
-    // If _cancelAuthTimer was called while we were awaiting, bail out
     if (!mounted || _schedulingId != myId) return;
     // If user signed in while we were awaiting SharedPreferences, bail out
     if (Supabase.instance.client.auth.currentSession != null) return;
@@ -425,11 +441,13 @@ class MainScaffoldState extends State<MainScaffold> {
                 _workoutKey.currentState?.setPlan(res['plan']);
                 _mealPlanKey.currentState?.refresh(); // Refresh meals too
                 _profileKey.currentState?.refresh();  // Refresh profile stats
+                unawaited(NotificationSyncService().syncFullState());
              } else if (res is Map && res['completed'] == true) {
                 // Determine if we need to force reload if plan object missing but completed
                _workoutKey.currentState?.refresh(force: true);
                _mealPlanKey.currentState?.refresh(); // Refresh meals too
                _profileKey.currentState?.refresh();  // Refresh profile stats
+               unawaited(NotificationSyncService().syncFullState());
              }
           }
 
@@ -598,7 +616,6 @@ class MainScaffoldState extends State<MainScaffold> {
         },
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // ... (Rest of build methods) ...
             final isDesktop = constraints.maxWidth > 800 && defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
         
               if (isDesktop) {

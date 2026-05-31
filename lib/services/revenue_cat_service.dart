@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
@@ -19,6 +20,11 @@ class RevenueCatService {
   static const String _offeringId   = 'paywellgymguidev2';
 
   bool _initialized = false;
+  bool _initializing = false; // Prevent concurrent init calls
+
+  // Coalescing concurrent futures
+  Future<bool>? _isProUserFuture;
+  Future<bool>? _checkOfferingsReadyFuture;
 
   // ── Initialization ────────────────────────────────────────────────────────────
 
@@ -32,6 +38,11 @@ class RevenueCatService {
       debugPrint('[RC] Already initialized — skipping.');
       return;
     }
+    if (_initializing) {
+      debugPrint('[RC] Initialization already in progress — skipping duplicate call.');
+      return;
+    }
+    _initializing = true;
 
     try {
       // Enable verbose logging to diagnose Error 23 / product issues.
@@ -103,17 +114,45 @@ class RevenueCatService {
   /// Returns true if the user has the "premium" entitlement active.
   /// Returns false on Web since RevenueCat SDK is unsupported.
   Future<bool> isProUser() async {
-    if (kDebugMode) return true;
     if (kIsWeb) return false;
     if (!_initialized) return false;
+    if (_isProUserFuture != null) {
+      debugPrint('[RC] isProUser → sharing in-flight check');
+      return _isProUserFuture!;
+    }
+
+    final completer = Completer<bool>();
+    _isProUserFuture = completer.future;
+
     try {
       final info = await Purchases.getCustomerInfo();
       final hasPro = info.entitlements.active.containsKey(_entitlement);
       debugPrint('[RC] isProUser → $hasPro (active: ${info.entitlements.active.keys.toList()})');
+      completer.complete(hasPro);
       return hasPro;
     } catch (e) {
       debugPrint('[RC] isProUser error: $e');
+      completer.complete(false);
       return false;
+    } finally {
+      _isProUserFuture = null;
+    }
+  }
+
+  /// Returns detailed subscription status including if the user is on a free trial.
+  Future<({bool isPro, bool isTrial})> getSubscriptionStatus() async {
+    if (kIsWeb || !_initialized) return (isPro: false, isTrial: false);
+    try {
+      final info = await Purchases.getCustomerInfo();
+      final entitlement = info.entitlements.active[_entitlement];
+      if (entitlement != null) {
+        final isTrial = entitlement.periodType == PeriodType.intro;
+        return (isPro: true, isTrial: isTrial);
+      }
+      return (isPro: false, isTrial: false);
+    } catch (e) {
+      debugPrint('[RC] getSubscriptionStatus error: $e');
+      return (isPro: false, isTrial: false);
     }
   }
 
@@ -181,6 +220,30 @@ class RevenueCatService {
   /// Retries up to 3 times with 1-second delays to handle slow sandbox connections.
   Future<bool> checkOfferingsReady({int maxRetries = 3}) async {
     if (kIsWeb || !_initialized) return false;
+    if (_checkOfferingsReadyFuture != null) {
+      debugPrint('[RC] checkOfferingsReady → sharing in-flight check');
+      return _checkOfferingsReadyFuture!;
+    }
+
+    final completer = Completer<bool>();
+    _checkOfferingsReadyFuture = completer.future;
+
+    try {
+      final result = await _checkOfferingsReadyInternal(maxRetries);
+      completer.complete(result);
+      if (!result) {
+        // Clear on failure to allow retry next time
+        _checkOfferingsReadyFuture = null;
+      }
+      return result;
+    } catch (e) {
+      completer.complete(false);
+      _checkOfferingsReadyFuture = null;
+      return false;
+    }
+  }
+
+  Future<bool> _checkOfferingsReadyInternal(int maxRetries) async {
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         final offerings = await Purchases.getOfferings();
@@ -235,8 +298,14 @@ class RevenueCatService {
   Future<PaywallResult?> showPaywall() async {
     if (kIsWeb || !_initialized) return null;
 
-    debugPrint('[RC] showPaywall() — presenting RevenueCatUI paywall (no pre-check)…');
+    debugPrint('[RC] showPaywall() — checking offerings before presenting RevenueCatUI paywall…');
     try {
+      final offerings = await Purchases.getOfferings();
+      if (offerings.current == null) {
+        debugPrint('[RC] No current offering available. Bypassing RevenueCatUI to prevent native error dialogs.');
+        return null;
+      }
+      
       final result = await RevenueCatUI.presentPaywall();
       debugPrint('[RC] Paywall result: $result');
       return result;

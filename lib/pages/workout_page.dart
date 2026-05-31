@@ -47,6 +47,13 @@ class WorkoutPageState extends State<WorkoutPage> {
   StreamSubscription<AuthState>? _authStateSubscription;
   final Set<int> _expandedWorkoutWeeks = {};
 
+  // Coalesced refresh structures to prevent duplicate startup calls
+  Future<void>? _activeRefreshFuture;
+  String? _lastFetchedUserId;
+
+  // Blocklist of users with missing user_preferences to prevent repeated RPC calls
+  static final Set<String> _usersWithMissingPrefs = {};
+
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
   bool _showHeader = true;
@@ -162,7 +169,7 @@ class WorkoutPageState extends State<WorkoutPage> {
       //    No regex, no Supabase round-trip. Always wins if quiz was ever completed.
       final intVal = prefs.getInt('duration_weeks_int');
       if (intVal != null && intVal > 0) {
-        if (mounted) setState(() => _prefDurationWeeks = intVal.clamp(1, 104));
+        if (mounted) setState(() => _prefDurationWeeks = intVal.clamp(1, 999));
         return;
       }
 
@@ -172,9 +179,9 @@ class WorkoutPageState extends State<WorkoutPage> {
         final weekMatch = RegExp(r'(\d+)\s*[Ww]eeks?').firstMatch(localDuration);
         if (weekMatch != null) {
           final val = int.parse(weekMatch.group(1)!);
-          if (mounted) setState(() => _prefDurationWeeks = val.clamp(1, 104));
+          if (mounted) setState(() => _prefDurationWeeks = val.clamp(1, 999));
           // Back-fill integer key so next launch uses the fast path.
-          await prefs.setInt('duration_weeks_int', val.clamp(1, 104));
+          await prefs.setInt('duration_weeks_int', val.clamp(1, 999));
           return;
         }
       }
@@ -194,7 +201,7 @@ class WorkoutPageState extends State<WorkoutPage> {
           });
         }
         if (response.first['duration_weeks'] != null && mounted) {
-          final dbVal = (response.first['duration_weeks'] as int).clamp(1, 104);
+          final dbVal = (response.first['duration_weeks'] as int).clamp(1, 999);
           setState(() => _prefDurationWeeks = dbVal);
           // Back-fill so subsequent calls skip Supabase.
           await prefs.setInt('duration_weeks_int', dbVal);
@@ -276,40 +283,70 @@ class WorkoutPageState extends State<WorkoutPage> {
   }
 
   // Public refresh method
-  Future<void> refresh({bool force = false}) => _refresh();
+  Future<void> refresh({bool force = false}) => _refresh(force: force);
 
   // Robust refresh: Fetch plan -> Then fetch workouts
-  Future<void> _refresh() async {
-    // 1. CLEAR CACHE & RESET STATE
-    if (mounted) {
-      setState(() {
-        _generatedPlan = null;
-        _exercises = [];
-        _isRestDay = false;
-        _isLoadingPlan = true;
-        _selectedDay = DateTime.now(); // Reset selection to Today
-      });
+  Future<void> _refresh({bool force = false}) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    final userId = user?.id;
+
+    if (force && userId != null) {
+      _usersWithMissingPrefs.remove(userId);
     }
 
-    print('----------------------------------------------------------------');
-    print('PLAN CACHE CLEARED -> FETCHING LATEST PLAN...');
+    if (!force && _generatedPlan != null && _lastFetchedUserId == userId) {
+      debugPrint('[WorkoutPage] _refresh skipped — plan already loaded for user: $userId');
+      return;
+    }
 
-    // Re-read duration_weeks from user_preferences in parallel with plan load.
-    // This ensures the correct week count is shown immediately after quiz.
-    await Future.wait([
-      _loadPrefDuration(),
-      _loadGeneratedPlan(),
-    ]);
+    if (_activeRefreshFuture != null) {
+      debugPrint('[WorkoutPage] _refresh → sharing in-flight refresh');
+      return _activeRefreshFuture!;
+    }
 
-    // Pre-fetch all unique plan exercises in parallel to make day switches 100% instant!
-    await _preFetchAllPlanExercises();
+    final completer = Completer<void>();
+    _activeRefreshFuture = completer.future;
 
-    // 3. FETCH progress from cloud (must come after plan so _exercises is populated)
-    await _loadCompletedExercises();
+    try {
+      // 1. CLEAR CACHE & RESET STATE
+      if (mounted) {
+        setState(() {
+          _generatedPlan = null;
+          _exercises = [];
+          _isRestDay = false;
+          _isLoadingPlan = true;
+          _selectedDay = DateTime.now(); // Reset selection to Today
+        });
+      }
 
-    // 4. UPDATE VIEW
-    if (mounted) {
-      await _updateDailyWorkouts(enableRetry: false);
+      print('----------------------------------------------------------------');
+      print('PLAN CACHE CLEARED -> FETCHING LATEST PLAN...');
+
+      // Re-read duration_weeks from user_preferences in parallel with plan load.
+      // This ensures the correct week count is shown immediately after quiz.
+      await Future.wait([
+        _loadPrefDuration(),
+        _loadGeneratedPlan(),
+      ]);
+
+      // Pre-fetch all unique plan exercises in parallel to make day switches 100% instant!
+      await _preFetchAllPlanExercises();
+
+      // 3. FETCH progress from cloud (must come after plan so _exercises is populated)
+      await _loadCompletedExercises();
+
+      // 4. UPDATE VIEW
+      if (mounted) {
+        await _updateDailyWorkouts(enableRetry: false);
+      }
+
+      _lastFetchedUserId = userId;
+      completer.complete();
+    } catch (e) {
+      debugPrint('[WorkoutPage] _refresh error: $e');
+      completer.complete();
+    } finally {
+      _activeRefreshFuture = null;
     }
   }
 
@@ -394,7 +431,7 @@ class WorkoutPageState extends State<WorkoutPage> {
         final weeks = sched?['weeks'];
         final weeksEmpty = weeks == null || (weeks is Map && weeks.isEmpty);
 
-        if (planRow == null || weeksEmpty) {
+        if ((planRow == null || weeksEmpty) && !_usersWithMissingPrefs.contains(user.id)) {
           print(
               'DEBUG: Plan missing or weeks empty — calling generate_user_workout_plan RPC...');
           try {
@@ -403,18 +440,33 @@ class WorkoutPageState extends State<WorkoutPage> {
               params: {'p_user_id': user.id},
             );
             print('DEBUG: RPC response: $rpcResponse');
-            print('DEBUG: RPC succeeded — re-fetching plan...');
-            final refreshed = await Supabase.instance.client
-                .from('ai_plans')
-                .select('id, schedule_json, created_at')
-                .eq('user_id', user.id)
-                .order('created_at', ascending: false)
-                .limit(1)
-                .maybeSingle();
-            if (refreshed != null) planRow = refreshed;
+
+            final isMap = rpcResponse is Map;
+            final status = isMap ? rpcResponse['status']?.toString() : null;
+            final message = isMap ? rpcResponse['message']?.toString() : null;
+
+            if (status == 'success') {
+              print('DEBUG: RPC succeeded — re-fetching plan...');
+              final refreshed = await Supabase.instance.client
+                  .from('ai_plans')
+                  .select('id, schedule_json, created_at')
+                  .eq('user_id', user.id)
+                  .order('created_at', ascending: false)
+                  .limit(1)
+                  .maybeSingle();
+              if (refreshed != null) planRow = refreshed;
+            } else {
+              print('DEBUG: RPC response status is not "success" — skipping refetch.');
+              if (message != null && message.toLowerCase().contains('user_preferences')) {
+                print('DEBUG: user_preferences missing. Adding to blocklist to prevent repeated RPC calls.');
+                _usersWithMissingPrefs.add(user.id);
+              }
+            }
           } catch (e) {
             print('WARNING: auto-generate workout plan failed: $e');
           }
+        } else if (_usersWithMissingPrefs.contains(user.id)) {
+          print('DEBUG: Skipping generate_user_workout_plan RPC because user_preferences are known to be missing for this user.');
         }
       }
 

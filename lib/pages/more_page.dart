@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/analytics_service.dart';
 import '../widgets/red_header.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
@@ -15,11 +16,12 @@ import 'legal/subscription_terms_page.dart';
 import 'legal/data_export_page.dart';
 import 'legal/delete_account_page.dart';
 import 'legal/ai_transparency_page.dart';
-import 'legal/ai_transparency_page.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import '../services/revenue_cat_service.dart';
+import '../services/notification_sync_service.dart';
 import '../widgets/auth/auth_modal.dart';
 import '../widgets/desktop_right_panel.dart';
+import 'settings/notification_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -36,8 +38,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool notificationsOn = true;
-
   static const Color _red = Color(0xFFE53935);
   static const Color _redLight = Color(0xFFFFEBEE);
 
@@ -280,14 +280,14 @@ class _SettingsPageState extends State<SettingsPage> {
             section('Preferences', [
               mobileItem(
                 icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                sub: notificationsOn ? 'On' : 'Off',
-                trailing: Switch(
-                  value: notificationsOn,
-                  activeTrackColor: const Color(0xFFE53935),
-                  activeColor: Colors.white,
-                  onChanged: (v) => setState(() => notificationsOn = v),
-                ),
+                label: 'Push Notifications',
+                sub: 'Workout, meal & sleep reminders',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NotificationSettingsPage()),
+                  );
+                },
               ),
               Divider(height: 1, indent: 52, color: widget.isDarkMode ? Colors.white12 : Colors.black12),
               mobileItem(
@@ -384,6 +384,39 @@ class _SettingsPageState extends State<SettingsPage> {
                 labelColor: const Color(0xFFE53935),
                 trailing: const Icon(Icons.chevron_right, size: 20, color: Color(0xFFE53935)),
                 onTap: _confirmSignOut,
+              ),
+            ]),
+            section('Developer Options', [
+              mobileItem(
+                icon: Icons.sync,
+                label: 'Force Sync Notifications',
+                sub: 'Manually trigger notification sync',
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () async {
+                  try {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Syncing notifications...')),
+                    );
+                    await NotificationSyncService().syncFullState();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Sync completed! Check console for log details.'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Sync failed: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
               ),
             ]),
             const SizedBox(height: 24),
@@ -983,6 +1016,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }) {
     return GestureDetector(
       onTap: () async {
+        if (url.contains('apple.com')) {
+          await AnalyticsService().trackDownloadLinkClicked(store: 'app_store');
+        } else if (url.contains('google.com')) {
+          await AnalyticsService().trackDownloadLinkClicked(store: 'google_play');
+        }
         final uri = Uri.parse(url);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -1070,15 +1108,15 @@ class _SettingsPageState extends State<SettingsPage> {
     return _card([
       _tile(
         icon: Icons.notifications_outlined,
-        label: 'Notifications',
-        subtitle: notificationsOn ? 'Notifications are on' : 'Notifications are off',
-        trailing: Switch(
-          value: notificationsOn,
-          activeColor: Colors.white,
-          activeTrackColor: _red,
-          onChanged: (val) => setState(() => notificationsOn = val),
-        ),
-        onTap: null,
+        label: 'Push Notifications',
+        subtitle: 'Workout, meal & sleep reminders',
+        trailing: Icon(Icons.chevron_right, size: 20, color: widget.isDarkMode ? Colors.white24 : Colors.black26),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const NotificationSettingsPage()),
+          );
+        },
       ),
       _tile(
         icon: widget.isDarkMode ? Icons.dark_mode_outlined : Icons.wb_sunny_outlined,

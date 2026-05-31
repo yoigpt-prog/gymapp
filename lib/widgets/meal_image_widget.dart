@@ -67,9 +67,9 @@ class _MealImageWidgetState extends State<MealImageWidget> {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source,
-        imageQuality: 85,
-        maxWidth: 1080,
-        maxHeight: 1080,
+        imageQuality: 50,
+        maxWidth: 600,
+        maxHeight: 600,
       );
       if (pickedFile == null) return;
 
