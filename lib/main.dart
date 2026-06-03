@@ -285,12 +285,17 @@ class _GymGuideAppState extends State<GymGuideApp> {
               ),
             ];
           }
-          WidgetBuilder? builder = _resolveBuilder(initialRoute);
+          String normalizedRoute = initialRoute;
+          if (normalizedRoute.length > 1 && normalizedRoute.endsWith('/')) {
+            normalizedRoute = normalizedRoute.substring(0, normalizedRoute.length - 1);
+          }
+
+          WidgetBuilder? builder = _resolveBuilder(normalizedRoute);
           if (builder != null) {
             return [
               MaterialPageRoute(
                 builder: builder,
-                settings: RouteSettings(name: initialRoute),
+                settings: RouteSettings(name: normalizedRoute),
               ),
             ];
           }
@@ -311,14 +316,19 @@ class _GymGuideAppState extends State<GymGuideApp> {
         if (EnvConfig.isStaging) {
           debugPrint('[Router] onGenerateRoute: name=${settings.name} arguments=${settings.arguments}');
         }
-        WidgetBuilder? builder = _resolveBuilder(settings.name);
+        String? normalizedRoute = settings.name;
+        if (normalizedRoute != null && normalizedRoute.length > 1 && normalizedRoute.endsWith('/')) {
+          normalizedRoute = normalizedRoute.substring(0, normalizedRoute.length - 1);
+        }
+
+        WidgetBuilder? builder = _resolveBuilder(normalizedRoute);
 
         // Main scaffold routes — instant (tab switching handled internally)
         if (builder != null && [
           '/', '/home', '/workout', '/meal-plan', '/progress', '/profile', '/settings',
           '/calculators/bmi', '/calculators/calorie',
           '/calculators/macro', '/calculators/body-fat', '/calculators/one-rm',
-        ].contains(settings.name)) {
+        ].contains(normalizedRoute)) {
           return PageRouteBuilder(
             settings: settings,
             pageBuilder: (context, animation, secondaryAnimation) => builder!(context),
