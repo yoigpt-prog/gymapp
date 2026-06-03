@@ -285,6 +285,16 @@ class _GymGuideAppState extends State<GymGuideApp> {
               ),
             ];
           }
+          WidgetBuilder? builder = _resolveBuilder(initialRoute);
+          if (builder != null) {
+            return [
+              MaterialPageRoute(
+                builder: builder,
+                settings: RouteSettings(name: initialRoute),
+              ),
+            ];
+          }
+
           return [
             MaterialPageRoute(
               builder: (context) => MainScaffold(
@@ -301,169 +311,7 @@ class _GymGuideAppState extends State<GymGuideApp> {
         if (EnvConfig.isStaging) {
           debugPrint('[Router] onGenerateRoute: name=${settings.name} arguments=${settings.arguments}');
         }
-        WidgetBuilder? builder;
-        
-        // Handle deep links for exercises
-        if (settings.name != null && settings.name!.startsWith('/transformation/share/')) {
-          final token = settings.name!.substring('/transformation/share/'.length);
-          builder = (context) => AITransformationSharePage(shareToken: token);
-        } else if (settings.name != null && settings.name!.startsWith('/exercise/')) {
-          var uri = Uri.tryParse('http://localhost${settings.name!}');
-          var slug = '';
-          String? gender;
-          String? view;
-          
-          if (uri != null) {
-            final pathParts = uri.path.split('/');
-            if (pathParts.length > 2) {
-              slug = pathParts[2];
-            }
-            gender = uri.queryParameters['gender'];
-            view = uri.queryParameters['view'];
-          }
-          
-          if (slug.isEmpty) {
-            slug = settings.name!.substring('/exercise/'.length).split('?').first.split('#').first.replaceAll('/', '');
-          }
-
-          builder = (context) => ExercisePage(
-            slug: slug, 
-            initialGender: gender, 
-            initialView: view, 
-            toggleTheme: _toggleTheme
-          );
-        } else if (settings.name != null && settings.name!.startsWith('/blog/')) {
-          final slug = settings.name!.substring('/blog/'.length);
-          // Find article by slug, or default to first if not found to avoid crash
-          final article = blogArticles.firstWhere(
-            (a) => a['slug'] == slug, 
-            orElse: () => blogArticles.first,
-          );
-          builder = (context) => BlogDetailPage(
-                title: article['title']!,
-                description: article['desc']!,
-                imagePath: article['image']!,
-                filePath: article['file']!,
-                category: article['category'] ?? 'EDITORIAL',
-                toggleTheme: _toggleTheme,
-              );
-        } else {
-          switch (settings.name) {
-            case '/':
-            builder = (context) => MainScaffold(
-                    key: MainScaffold.globalKey,
-                    initialIndex: 0,
-                    toggleTheme: _toggleTheme,
-                    isDarkMode: _themeMode == ThemeMode.dark,
-                  );
-            break;
-          case '/home':
-            builder = (context) => MainScaffold(
-                    initialIndex: 0,
-                    toggleTheme: _toggleTheme,
-                    isDarkMode: _themeMode == ThemeMode.dark,
-                  );
-            break;
-          case '/workout':
-            builder = (context) => MainScaffold(
-                    initialIndex: 1,
-                    toggleTheme: _toggleTheme,
-                    isDarkMode: _themeMode == ThemeMode.dark,
-                  );
-            break;
-          case '/meal-plan':
-            builder = (context) => MainScaffold(
-                    initialIndex: 2,
-                    toggleTheme: _toggleTheme,
-                    isDarkMode: _themeMode == ThemeMode.dark,
-                  );
-            break;
-          case '/progress':
-            builder = (context) => MainScaffold(
-                    initialIndex: 3,
-                    toggleTheme: _toggleTheme,
-                    isDarkMode: _themeMode == ThemeMode.dark,
-                  );
-            break;
-          case '/eula':
-            builder = (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
-            break;
-          case '/privacy':
-            builder = (context) => PrivacyPolicyPage(toggleTheme: _toggleTheme);
-            break;
-          case '/terms':
-            builder = (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
-            break;
-          case '/disclaimer':
-            builder = (context) => DisclaimerPage(toggleTheme: _toggleTheme);
-            break;
-          case '/subscription-terms':
-            builder = (context) => SubscriptionTermsPage(toggleTheme: _toggleTheme);
-            break;
-          case '/data-export':
-            builder = (context) => DataExportPage(toggleTheme: _toggleTheme);
-            break;
-          case '/ai-transparency':
-            builder = (context) => AITransparencyPage(toggleTheme: _toggleTheme);
-            break;
-          case '/delete-account':
-            builder = (context) => DeleteAccountPage(toggleTheme: _toggleTheme);
-            break;
-          case '/copyright':
-            builder = (context) => CopyrightPage(toggleTheme: _toggleTheme);
-            break;
-          case '/age-requirement':
-            builder = (context) => AgeRequirementPage(toggleTheme: _toggleTheme);
-            break;
-          case '/contact':
-            builder = (context) => ContactSupportPage(toggleTheme: _toggleTheme);
-            break;
-          case '/about':
-            builder = (context) => kIsWeb
-                ? AboutUsWebPage(toggleTheme: _toggleTheme)
-                : AboutAppPage(toggleTheme: _toggleTheme);
-            break;
-          case '/faq':
-            builder = (context) => FaqPage(toggleTheme: _toggleTheme);
-            break;
-          case '/sitemap':
-            builder = (context) => SitemapPage(toggleTheme: _toggleTheme);
-            break;
-          case '/Blog':
-            builder = (context) => BlogPage(toggleTheme: _toggleTheme);
-            break;
-          case '/download':
-            builder = (context) => DownloadPage(toggleTheme: _toggleTheme);
-            break;
-          case '/ai-transformation-simulator':
-            builder = (context) => AITransformationPage(isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/rate-your-body':
-            builder = (context) => PhysiqueScanPage(isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/calculators/bmi':
-            builder = (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/calculators/calorie':
-            builder = (context) => MainScaffold(initialIndex: 7, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/calculators/macro':
-            builder = (context) => MainScaffold(initialIndex: 8, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/calculators/body-fat':
-            builder = (context) => MainScaffold(initialIndex: 9, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/calculators/one-rm':
-            builder = (context) => MainScaffold(initialIndex: 10, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/profile':
-            builder = (context) => MainScaffold(initialIndex: 4, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          case '/settings':
-            builder = (context) => MainScaffold(initialIndex: 5, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
-            break;
-          }
-        }
+        WidgetBuilder? builder = _resolveBuilder(settings.name);
 
         // Main scaffold routes — instant (tab switching handled internally)
         if (builder != null && [
@@ -502,6 +350,147 @@ class _GymGuideAppState extends State<GymGuideApp> {
       ], // Stack children
       ), // Stack
     ); // Directionality
+  }
+
+  WidgetBuilder? _resolveBuilder(String? routeName) {
+    if (routeName == null) return null;
+
+    // Handle deep links for exercises
+    if (routeName.startsWith('/transformation/share/')) {
+      final token = routeName.substring('/transformation/share/'.length);
+      return (context) => AITransformationSharePage(shareToken: token);
+    } else if (routeName.startsWith('/exercise/')) {
+      var uri = Uri.tryParse('http://localhost$routeName');
+      var slug = '';
+      String? gender;
+      String? view;
+      
+      if (uri != null) {
+        final pathParts = uri.path.split('/');
+        if (pathParts.length > 2) {
+          slug = pathParts[2];
+        }
+        gender = uri.queryParameters['gender'];
+        view = uri.queryParameters['view'];
+      }
+      
+      if (slug.isEmpty) {
+        slug = routeName.substring('/exercise/'.length).split('?').first.split('#').first.replaceAll('/', '');
+      }
+
+      return (context) => ExercisePage(
+        slug: slug, 
+        initialGender: gender, 
+        initialView: view, 
+        toggleTheme: _toggleTheme
+      );
+    } else if (routeName.startsWith('/blog/')) {
+      final slug = routeName.substring('/blog/'.length);
+      // Find article by slug, or default to first if not found to avoid crash
+      final article = blogArticles.firstWhere(
+        (a) => a['slug'] == slug, 
+        orElse: () => blogArticles.first,
+      );
+      return (context) => BlogDetailPage(
+            title: article['title']!,
+            description: article['desc']!,
+            imagePath: article['image']!,
+            filePath: article['file']!,
+            category: article['category'] ?? 'EDITORIAL',
+            toggleTheme: _toggleTheme,
+          );
+    } else {
+      switch (routeName) {
+        case '/':
+        return (context) => MainScaffold(
+                key: MainScaffold.globalKey,
+                initialIndex: 0,
+                toggleTheme: _toggleTheme,
+                isDarkMode: _themeMode == ThemeMode.dark,
+              );
+      case '/home':
+        return (context) => MainScaffold(
+                initialIndex: 0,
+                toggleTheme: _toggleTheme,
+                isDarkMode: _themeMode == ThemeMode.dark,
+              );
+      case '/workout':
+        return (context) => MainScaffold(
+                initialIndex: 1,
+                toggleTheme: _toggleTheme,
+                isDarkMode: _themeMode == ThemeMode.dark,
+              );
+      case '/meal-plan':
+        return (context) => MainScaffold(
+                initialIndex: 2,
+                toggleTheme: _toggleTheme,
+                isDarkMode: _themeMode == ThemeMode.dark,
+              );
+      case '/progress':
+        return (context) => MainScaffold(
+                initialIndex: 3,
+                toggleTheme: _toggleTheme,
+                isDarkMode: _themeMode == ThemeMode.dark,
+              );
+      case '/eula':
+        return (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
+      case '/privacy':
+        return (context) => PrivacyPolicyPage(toggleTheme: _toggleTheme);
+      case '/terms':
+        return (context) => TermsOfServicePage(toggleTheme: _toggleTheme);
+      case '/disclaimer':
+        return (context) => DisclaimerPage(toggleTheme: _toggleTheme);
+      case '/subscription-terms':
+        return (context) => SubscriptionTermsPage(toggleTheme: _toggleTheme);
+      case '/data-export':
+        return (context) => DataExportPage(toggleTheme: _toggleTheme);
+      case '/ai-transparency':
+        return (context) => AITransparencyPage(toggleTheme: _toggleTheme);
+      case '/delete-account':
+        return (context) => DeleteAccountPage(toggleTheme: _toggleTheme);
+      case '/copyright':
+        return (context) => CopyrightPage(toggleTheme: _toggleTheme);
+      case '/age-requirement':
+        return (context) => AgeRequirementPage(toggleTheme: _toggleTheme);
+      case '/contact':
+        return (context) => ContactSupportPage(toggleTheme: _toggleTheme);
+      case '/about':
+        return (context) => kIsWeb
+            ? AboutUsWebPage(toggleTheme: _toggleTheme)
+            : AboutAppPage(toggleTheme: _toggleTheme);
+      case '/faq':
+        return (context) => FaqPage(toggleTheme: _toggleTheme);
+      case '/sitemap':
+        return (context) => SitemapPage(toggleTheme: _toggleTheme);
+      case '/blog':
+        return (context) => BlogPage(toggleTheme: _toggleTheme);
+      case '/Blog':
+        return (context) => BlogPage(toggleTheme: _toggleTheme);
+      case '/calculators':
+        return (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/download':
+        return (context) => DownloadPage(toggleTheme: _toggleTheme);
+      case '/ai-transformation-simulator':
+        return (context) => AITransformationPage(isDarkMode: _themeMode == ThemeMode.dark);
+      case '/rate-your-body':
+        return (context) => PhysiqueScanPage(isDarkMode: _themeMode == ThemeMode.dark);
+      case '/calculators/bmi':
+        return (context) => MainScaffold(initialIndex: 6, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/calculators/calorie':
+        return (context) => MainScaffold(initialIndex: 7, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/calculators/macro':
+        return (context) => MainScaffold(initialIndex: 8, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/calculators/body-fat':
+        return (context) => MainScaffold(initialIndex: 9, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/calculators/one-rm':
+        return (context) => MainScaffold(initialIndex: 10, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/profile':
+        return (context) => MainScaffold(initialIndex: 4, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      case '/settings':
+        return (context) => MainScaffold(initialIndex: 5, toggleTheme: _toggleTheme, isDarkMode: _themeMode == ThemeMode.dark);
+      }
+    }
+    return null;
   }
 }
 

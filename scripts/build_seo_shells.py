@@ -348,7 +348,6 @@ def main():
         
     print(f"✅ Generated {high_quality + low_quality} Exercise Shells ({high_quality} High Quality, {low_quality} Low Quality/NoIndex)")
     
-    # 4. Generate Static Legal and Trust Pages
     trust_pages = [
         {"slug": "about", "title": "About Gym Guide", "desc": "Gym Guide is your personalized workout and meal plan app."},
         {"slug": "contact", "title": "Contact Us – Gym Guide", "desc": "Get in touch with Gym Guide support and team."},
@@ -357,7 +356,10 @@ def main():
         {"slug": "disclaimer", "title": "Disclaimer – Gym Guide", "desc": "Educational fitness information only. Not medical advice."},
         {"slug": "faq", "title": "Frequently Asked Questions – Gym Guide", "desc": "Get answers to common questions about Gym Guide."},
         {"slug": "ai-transparency", "title": "AI Transparency – Gym Guide", "desc": "Learn how Gym Guide uses AI for personalized fitness plans."},
-        {"slug": "subscription", "title": "Subscription & Pricing – Gym Guide", "desc": "Gym Guide subscription options, premium features, and pricing."}
+        {"slug": "subscription", "title": "Subscription & Pricing – Gym Guide", "desc": "Gym Guide subscription options, premium features, and pricing."},
+        {"slug": "blog", "title": "Fitness Blog – Gym Guide", "desc": "Read the latest fitness tips, workout routines, and nutrition advice."},
+        {"slug": "calculators", "title": "Fitness Calculators – Gym Guide", "desc": "Free fitness calculators for BMI, calories, macros, body fat, and 1RM."},
+        {"slug": "download", "title": "Download Gym Guide", "desc": "Download Gym Guide to get your personalized workout and meal plan."}
     ]
     
     org_schema = {
