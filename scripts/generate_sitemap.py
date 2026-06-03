@@ -23,8 +23,19 @@ def generate_sitemap():
     logging.info("Fetching exercises...")
     
     # We fetch all active exercises
-    res = supabase.table('exercises').select('exercise_slug, updated_at').execute()
+    res = supabase.table('exercises').select('exercise_slug, exercise_name, is_male, updated_at').execute()
     exercises = res.data
+    
+    unique_exercises = {}
+    for ex in exercises:
+        name = (ex.get('exercise_name') or '').strip().lower()
+        if not name:
+            continue
+        if name not in unique_exercises:
+            unique_exercises[name] = ex
+        else:
+            if ex.get('is_male') and not unique_exercises[name].get('is_male'):
+                unique_exercises[name] = ex
     
     urls = []
     
@@ -53,7 +64,7 @@ def generate_sitemap():
 
     # Add all exercises
     today = datetime.utcnow().strftime('%Y-%m-%d')
-    for ex in exercises:
+    for ex in unique_exercises.values():
         slug = ex.get('exercise_slug')
         if slug:
             urls.append({

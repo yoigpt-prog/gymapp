@@ -8,11 +8,15 @@ import 'package:seo/seo.dart';
 
 class ExercisePage extends StatefulWidget {
   final String slug;
+  final String? initialGender;
+  final String? initialView;
   final VoidCallback? toggleTheme;
 
   const ExercisePage({
     Key? key,
     required this.slug,
+    this.initialGender,
+    this.initialView,
     this.toggleTheme,
   }) : super(key: key);
 
@@ -39,8 +43,30 @@ class _ExercisePageState extends State<ExercisePage> {
           .maybeSingle();
 
       if (response != null && mounted) {
+        var finalResponse = response;
+        
+        if (widget.initialGender != null) {
+          final isFemaleRequested = widget.initialGender!.toLowerCase() == 'female';
+          final baseIsFemale = response['is_female'] == true;
+          
+          if (isFemaleRequested != baseIsFemale) {
+            final baseName = response['exercise_name'].toString().trim();
+            final altResponse = await Supabase.instance.client
+                .from('exercises')
+                .select()
+                .eq('is_female', isFemaleRequested)
+                .ilike('exercise_name', '${baseName}%')
+                .maybeSingle();
+                
+            if (altResponse != null) {
+              finalResponse = altResponse;
+            }
+          }
+        }
+        
         setState(() {
-          _exercise = ExerciseDetail.fromJson(response);
+          _exercise = ExerciseDetail.fromJson(finalResponse);
+          _exercise = _exercise!.copyWith(slug: widget.slug);
           _isLoading = false;
         });
       } else if (mounted) {
@@ -135,6 +161,8 @@ class _ExercisePageState extends State<ExercisePage> {
       childWidget = MainScaffold(
         initialIndex: 0,
         initialExercise: _exercise,
+        initialGender: widget.initialGender,
+        initialView: widget.initialView,
         toggleTheme: widget.toggleTheme ?? () {},
         isDarkMode: isDarkMode,
       );

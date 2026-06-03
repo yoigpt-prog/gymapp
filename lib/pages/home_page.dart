@@ -22,12 +22,16 @@ class HomePage extends StatefulWidget {
   final VoidCallback toggleTheme;
   final bool isDarkMode;
   final ExerciseDetail? initialExercise;
+  final String? initialGender;
+  final String? initialView;
 
   const HomePage({
     Key? key,
     required this.toggleTheme,
     required this.isDarkMode,
     this.initialExercise,
+    this.initialGender,
+    this.initialView,
   }) : super(key: key);
 
   @override
@@ -35,8 +39,8 @@ class HomePage extends StatefulWidget {
 }
 
 class HomePageState extends State<HomePage> {
-  String _gender = 'male'; // 'male' or 'female'
-  String _side = 'front'; // 'front' or 'back'
+  late String _gender; // 'male' or 'female'
+  late String _side; // 'front' or 'back'
   String? _highlightedMuscle; // e.g. 'abs'
   String? _selectedMuscle; // For detail view
 
@@ -71,6 +75,8 @@ class HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _gender = widget.initialGender?.toLowerCase() == 'female' ? 'female' : 'male';
+    _side = widget.initialView?.toLowerCase() == 'back' ? 'back' : 'front';
     _scrollController.addListener(_onScroll);
     if (widget.initialExercise != null) {
       _exercises = [widget.initialExercise!];
@@ -561,6 +567,8 @@ class HomePageState extends State<HomePage> {
                                     exercise: displayedExercises[exerciseIndex],
                                     isDarkMode: isDark,
                                     shouldPlay: exerciseIndex == _playingIndex,
+                                    currentGender: _gender,
+                                    currentView: _side,
                                   ),
                                 );
                               },
@@ -1156,6 +1164,8 @@ class HomePageState extends State<HomePage> {
                       exercise: displayedExercises[index],
                       isDarkMode: widget.isDarkMode,
                       shouldPlay: false,
+                      currentGender: _gender,
+                      currentView: _side,
                     ),
                   );
                 },
@@ -2256,12 +2266,16 @@ class ExerciseDetailCard extends StatefulWidget {
   final ExerciseDetail exercise;
   final bool isDarkMode;
   final bool shouldPlay; // Added for autoplay support
+  final String? currentGender;
+  final String? currentView;
 
   const ExerciseDetailCard({
     Key? key,
     required this.exercise,
     required this.isDarkMode,
     this.shouldPlay = false,
+    this.currentGender,
+    this.currentView,
   }) : super(key: key);
 
   @override
@@ -2386,8 +2400,15 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                     size: 28,
                   ),
                   onPressed: () {
+                    String query = '';
+                    if (widget.currentGender != null || widget.currentView != null) {
+                      final params = <String>[];
+                      if (widget.currentGender != null) params.add('gender=${widget.currentGender}');
+                      if (widget.currentView != null) params.add('view=${widget.currentView}');
+                      query = '?${params.join('&')}';
+                    }
                     final shareUrl =
-                        'https://www.gymguide.co/exercise/${widget.exercise.slug}';
+                        'https://www.gymguide.co/exercise/${widget.exercise.slug}$query';
                     showDialog(
                       context: context,
                       builder: (context) => ShareDialog(

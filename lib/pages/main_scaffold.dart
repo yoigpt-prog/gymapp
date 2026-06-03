@@ -35,6 +35,8 @@ class MainScaffold extends StatefulWidget {
   final bool isDarkMode;
   final int initialIndex;
   final ExerciseDetail? initialExercise;
+  final String? initialGender;
+  final String? initialView;
 
   /// Global key so any widget can call [MainScaffoldState.changeTab] from
   /// outside the widget tree (e.g. from a legal page sidebar).
@@ -47,6 +49,8 @@ class MainScaffold extends StatefulWidget {
     required this.isDarkMode,
     this.initialIndex = 0,
     this.initialExercise,
+    this.initialGender,
+    this.initialView,
   }) : super(key: key);
 
   @override
@@ -122,6 +126,8 @@ class MainScaffoldState extends State<MainScaffold> {
         toggleTheme: widget.toggleTheme,
         isDarkMode: widget.isDarkMode,
         initialExercise: widget.initialExercise,
+        initialGender: widget.initialGender,
+        initialView: widget.initialView,
       ),
       WorkoutPage(
         key: _workoutKey,

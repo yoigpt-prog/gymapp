@@ -252,18 +252,35 @@ class _GymGuideAppState extends State<GymGuideApp> {
             ];
           }
           if (initialRoute.startsWith('/exercise/')) {
-            var slug = initialRoute.substring('/exercise/'.length);
-            if (slug.contains('?')) {
-              slug = slug.split('?').first;
+            var uri = Uri.tryParse('http://localhost$initialRoute');
+            var slug = '';
+            String? gender;
+            String? view;
+            
+            if (uri != null) {
+              final pathParts = uri.path.split('/');
+              // path is like /exercise/slug
+              if (pathParts.length > 2) {
+                slug = pathParts[2];
+              }
+              gender = uri.queryParameters['gender'];
+              view = uri.queryParameters['view'];
             }
-            if (slug.contains('#')) {
-              slug = slug.split('#').first;
+            
+            if (slug.isEmpty) {
+              // fallback
+              slug = initialRoute.substring('/exercise/'.length).split('?').first.split('#').first.replaceAll('/', '');
             }
-            slug = slug.replaceAll('/', '');
-            debugPrint('[Router] Initial route is exercise page. slug=$slug');
+
+            debugPrint('[Router] Initial route is exercise page. slug=$slug gender=$gender view=$view');
             return [
               MaterialPageRoute(
-                builder: (context) => ExercisePage(slug: slug, toggleTheme: _toggleTheme),
+                builder: (context) => ExercisePage(
+                  slug: slug, 
+                  initialGender: gender, 
+                  initialView: view, 
+                  toggleTheme: _toggleTheme
+                ),
                 settings: RouteSettings(name: initialRoute),
               ),
             ];
@@ -291,8 +308,30 @@ class _GymGuideAppState extends State<GymGuideApp> {
           final token = settings.name!.substring('/transformation/share/'.length);
           builder = (context) => AITransformationSharePage(shareToken: token);
         } else if (settings.name != null && settings.name!.startsWith('/exercise/')) {
-          final slug = settings.name!.substring('/exercise/'.length);
-          builder = (context) => ExercisePage(slug: slug, toggleTheme: _toggleTheme);
+          var uri = Uri.tryParse('http://localhost${settings.name!}');
+          var slug = '';
+          String? gender;
+          String? view;
+          
+          if (uri != null) {
+            final pathParts = uri.path.split('/');
+            if (pathParts.length > 2) {
+              slug = pathParts[2];
+            }
+            gender = uri.queryParameters['gender'];
+            view = uri.queryParameters['view'];
+          }
+          
+          if (slug.isEmpty) {
+            slug = settings.name!.substring('/exercise/'.length).split('?').first.split('#').first.replaceAll('/', '');
+          }
+
+          builder = (context) => ExercisePage(
+            slug: slug, 
+            initialGender: gender, 
+            initialView: view, 
+            toggleTheme: _toggleTheme
+          );
         } else if (settings.name != null && settings.name!.startsWith('/blog/')) {
           final slug = settings.name!.substring('/blog/'.length);
           // Find article by slug, or default to first if not found to avoid crash

@@ -192,16 +192,29 @@ def main():
     
     # 3. Generate Exercises
     print("Fetching exercises from Supabase...")
-    exercises = fetch_all('exercises', 'id,exercise_slug,exercise_name,target_muscle,equipment,exercise_type')
+    exercises = fetch_all('exercises', 'id,exercise_slug,exercise_name,target_muscle,equipment,exercise_type,is_male,is_female')
     exercise_seo = fetch_all('exercise_seo', 'exercise_id,overview,seo_title,seo_description')
     
     # Create lookup map
     seo_map = {row['exercise_id']: row for row in exercise_seo}
     
+    # Deduplicate by normalized name
+    unique_exercises = {}
+    for ex in exercises:
+        name = ex.get('exercise_name', '').strip().lower()
+        if not name:
+            continue
+        # If not in map, or if the current one is male (prioritize male as canonical base)
+        if name not in unique_exercises:
+            unique_exercises[name] = ex
+        else:
+            if ex.get('is_male') and not unique_exercises[name].get('is_male'):
+                unique_exercises[name] = ex
+
     high_quality = 0
     low_quality = 0
     
-    for ex in exercises:
+    for ex in unique_exercises.values():
         slug = ex.get('exercise_slug')
         if not slug:
             continue
