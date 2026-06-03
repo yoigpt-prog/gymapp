@@ -6,7 +6,11 @@ set -e
 
 echo "🚀 Starting Production VPS Deployment..."
 
-# 1. Sync compiled files to VPS web root
+# 1. Generate Static SEO Shells
+echo "🌐 Generating Static SEO Shells..."
+python3 scripts/build_seo_shells.py
+
+# 2. Sync compiled files to VPS web root
 echo "📦 Uploading assets to VPS via rsync..."
 rsync -avz --delete build/web/ root@72.61.195.109:/var/www/gymguide/web/
 

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://gymguide.co/sitemap.xml
+Sitemap: https://www.gymguide.co/sitemap.xml
