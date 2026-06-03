@@ -54,6 +54,11 @@ class WorkoutPageState extends State<WorkoutPage> {
   // Blocklist of users with missing user_preferences to prevent repeated RPC calls
   static final Set<String> _usersWithMissingPrefs = {};
 
+  /// Called by ProfilePage on plan reset so the new plan can be generated
+  static void clearMissingPrefsCache() {
+    _usersWithMissingPrefs.clear();
+  }
+
   // Scroll controller for hiding header
   final ScrollController _scrollController = ScrollController();
   bool _showHeader = true;
@@ -389,6 +394,7 @@ class WorkoutPageState extends State<WorkoutPage> {
 
   // Restore: Load plan from DB
   Future<void> _loadGeneratedPlan() async {
+    if (!mounted) return;
     setState(() {
       _isLoadingPlan = true;
       _generatedPlan = null; // FORCE CLEAR stale data

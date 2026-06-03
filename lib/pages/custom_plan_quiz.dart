@@ -1056,6 +1056,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     double verticalPadding = 12,
     double bottomMargin = 8,
     bool isGrid = false,
+    bool largeOverflowIcons = false,
   }) {
     final double hPad = isGrid ? 8 : 14;
     final double gap1 = isGrid ? 6 : 10;
@@ -1065,84 +1066,115 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
         ? (fontSize + 8).clamp(20.0, 32.0)
         : (verticalPadding * 1.6 + fontSize * 0.5).clamp(20.0, 34.0);
 
+    final Widget containerContent = Row(
+      children: [
+        SizedBox(
+          width: 20,
+          height: 20,
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
+              border: Border.all(
+                color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
+                width: 2,
+              ),
+            ),
+            child: isSelected
+                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                : null,
+          ),
+        ),
+        SizedBox(width: gap1),
+        Expanded(
+          child: isGrid 
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w500,
+                      color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                    ),
+                  ),
+                )
+              : Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: FontWeight.w500,
+                    color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
+                  ),
+                ),
+        ),
+        if (trailingText != null) ...[
+          SizedBox(width: gap1),
+          Text(
+            trailingText,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w500,
+              color: isDarkMode ? Colors.white70 : const Color(0xFF444444),
+            ),
+          ),
+        ],
+        if (iconPath != null && !largeOverflowIcons) ...[
+          SizedBox(width: gap2),
+          Image.asset(iconPath, width: iconSize, height: iconSize),
+        ],
+        if (iconPath != null && largeOverflowIcons)
+          // Add empty space so text doesn't overlap the right-aligned image
+          const SizedBox(width: 100),
+      ],
+    );
+
+    Widget finalContainer = Container(
+      margin: EdgeInsets.only(bottom: bottomMargin),
+      constraints: largeOverflowIcons ? const BoxConstraints(minHeight: 100) : null,
+      decoration: BoxDecoration(
+        color: isSelected 
+            ? (isDarkMode ? const Color(0xFF8B0000) : const Color(0xFFFFE5E5))
+            : (isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF8F8F8)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
+          width: 2,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias, // ensure image doesn't overflow borders
+      child: Stack(
+        children: [
+          // Padding is applied here instead of the outer container so the image can touch the edges
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: hPad, vertical: verticalPadding),
+            child: containerContent,
+          ),
+          if (iconPath != null && largeOverflowIcons)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Image.asset(
+                    iconPath, 
+                    fit: BoxFit.contain, // Fit fully inside without overflowing
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
     return _buildAnimatedWidget(
       delay: 100 + (index * 50),
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          margin: EdgeInsets.only(bottom: bottomMargin),
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: verticalPadding),
-          decoration: BoxDecoration(
-            color: isSelected 
-                ? (isDarkMode ? const Color(0xFF8B0000) : const Color(0xFFFFE5E5))
-                : (isDarkMode ? const Color(0xFF2C2C2C) : const Color(0xFFF8F8F8)),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-              width: 2,
-            ),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? const Color(0xFFFF0000) : Colors.transparent,
-                    border: Border.all(
-                      color: isSelected ? const Color(0xFFFF0000) : (isDarkMode ? Colors.grey : const Color(0xFFCCCCCC)),
-                      width: 2,
-                    ),
-                  ),
-                  child: isSelected
-                      ? const Icon(Icons.check, size: 14, color: Colors.white)
-                      : null,
-                ),
-              ),
-              SizedBox(width: gap1),
-              Expanded(
-                child: isGrid 
-                    ? FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            fontSize: fontSize,
-                            fontWeight: FontWeight.w500,
-                            color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                          ),
-                        ),
-                      )
-                    : Text(
-                        text,
-                        style: TextStyle(
-                          fontSize: fontSize,
-                          fontWeight: FontWeight.w500,
-                          color: isDarkMode ? Colors.white : const Color(0xFF1A1A1A),
-                        ),
-                      ),
-              ),
-              if (trailingText != null) ...[
-                SizedBox(width: gap1),
-                Text(
-                  trailingText,
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: FontWeight.w500,
-                    color: isDarkMode ? Colors.white70 : const Color(0xFF444444),
-                  ),
-                ),
-              ],
-              if (iconPath != null) ...[
-                SizedBox(width: gap2),
-                Image.asset(iconPath, width: iconSize, height: iconSize),
-              ],
-            ],
-          ),
-        ),
+        child: finalContainer,
       ),
     );
   }
@@ -1215,6 +1247,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
     required bool isDarkMode,
     Map<String, String> optionIcons = const {},
     Map<String, String> optionSubtitles = const {},
+    bool largeOverflowIcons = false,
   }) {
     final bool hasSelection = selectedValue.isNotEmpty;
     return LayoutBuilder(
@@ -1268,6 +1301,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
                               fontSize: optionFont,
                               verticalPadding: optionVPad,
                               bottomMargin: optionMargin,
+                              largeOverflowIcons: largeOverflowIcons,
                             );
                           }).toList(),
                         ),
@@ -1878,6 +1912,7 @@ class _CustomPlanQuizPageState extends State<CustomPlanQuizPage> with TickerProv
       selectedValue: mainGoal,
       onSelect: (val) => setState(() => mainGoal = val),
       isDarkMode: isDarkMode,
+      largeOverflowIcons: true,
       optionIcons: {
         'Lose Fat & Stay Lean': 'assets/quizemojis/Lose Fat & Stay Lean.png',
         'Build Muscle & Gain Strength': 'assets/quizemojis/Build Muscle.png',

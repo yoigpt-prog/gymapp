@@ -195,6 +195,7 @@ class MealPlanPageState extends State<MealPlanPage> {
 
   // Restore organised meals from cache payload
   void _applyCachedData(Map<String, dynamic> cached) {
+    if (!mounted) return;
     try {
       final rawDays = cached['days'] as Map<String, dynamic>?;
       if (rawDays == null) return;
@@ -209,10 +210,12 @@ class MealPlanPageState extends State<MealPlanPage> {
       });
       // We DO NOT override _planDurationWeeks from cache because it can conflict
       // with the _loadPrefDuration which runs concurrently. Rely solely on the DB.
-      setState(() {
-        _mealsByDay = restored;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _mealsByDay = restored;
+          _isLoading = false;
+        });
+      }
       print('DEBUG: [Cache] Applied cached data: ${restored.length} days');
     } catch (e) {
       print('DEBUG: [Cache] Failed to apply cached data: $e');
@@ -268,6 +271,7 @@ class MealPlanPageState extends State<MealPlanPage> {
 
       // Always fire a DB fetch to get the latest state
       if (!usedCache) {
+        if (!mounted) return;
         setState(() {
           _isLoading = true;
           _errorMessage = null;
@@ -448,6 +452,7 @@ class MealPlanPageState extends State<MealPlanPage> {
           print('DEBUG: [MealPlanPage]   $date: ${meals.length} meals');
       });
 
+      if (!mounted) return;
       setState(() {
         if (week != null || day != null) {
             // Merging specific day fetch: override existing keys

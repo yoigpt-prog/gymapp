@@ -11,6 +11,7 @@ import '../services/supabase_service.dart';
 import '../services/subscription_state.dart';
 import '../services/video_cache_service.dart';
 import 'package:seo/seo.dart';
+import '../services/seo_cache_service.dart';
 import '../widgets/seo_footer_cta.dart';
 import '../widgets/share_dialog.dart';
 import '../widgets/desktop_side_panel.dart';
@@ -30,10 +31,10 @@ class HomePage extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<HomePage> createState() => HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class HomePageState extends State<HomePage> {
   String _gender = 'male'; // 'male' or 'female'
   String _side = 'front'; // 'front' or 'back'
   String? _highlightedMuscle; // e.g. 'abs'
@@ -252,7 +253,7 @@ class _HomePageState extends State<HomePage> {
             .select(
                 'id, exercise_name, target_muscle, synergist, difficulty_level, '
                 'instruction_1, instruction_2, instruction_3, instruction_4, '
-                'urls, exercise_type, equipment, is_male, is_female, group_path')
+                'urls, exercise_type, equipment, is_male, is_female, group_path, param_calories')
             .or('exercise_name.ilike.%${q}%,'
                 'target_muscle.ilike.%${q}%,'
                 'equipment.ilike.%${q}%,'
@@ -320,6 +321,29 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  void resetState() {
+    setState(() {
+      _selectedMuscle = null;
+      _selectedDifficulties.clear();
+      _selectedWorkoutTypes.clear();
+      _selectedEquipment.clear();
+      _filterFavorites = false;
+      _searchQuery = '';
+      _searchController.clear();
+      _exercises.clear();
+      _currentPage = 0;
+      _hasMore = true;
+      _isLoading = false;
+    });
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Seo.head(
@@ -327,7 +351,7 @@ class _HomePageState extends State<HomePage> {
         MetaTag(
             name: 'title',
             content:
-                'Gym Guide – Personalized Workout & Meal Plan App (1800+ Exercises)'),
+                'Gym Guide – Personalized Workout & Meal Plan App'),
         MetaTag(
             name: 'description',
             content:
@@ -2110,6 +2134,7 @@ class ExerciseDetail {
   final String? equipment;
   final int? sets;
   final int? reps;
+  final String? paramCalories;
 
   ExerciseDetail({
     required this.id, // Required
@@ -2126,6 +2151,7 @@ class ExerciseDetail {
     this.equipment,
     this.sets,
     this.reps,
+    this.paramCalories,
   });
 
   ExerciseDetail copyWith({
@@ -2143,6 +2169,7 @@ class ExerciseDetail {
     String? equipment,
     int? sets,
     int? reps,
+    String? paramCalories,
   }) {
     return ExerciseDetail(
       id: id ?? this.id,
@@ -2159,6 +2186,7 @@ class ExerciseDetail {
       equipment: equipment ?? this.equipment,
       sets: sets ?? this.sets,
       reps: reps ?? this.reps,
+      paramCalories: paramCalories ?? this.paramCalories,
     );
   }
 
@@ -2219,6 +2247,7 @@ class ExerciseDetail {
       equipment: getString('equipment'),
       sets: json['sets'] is int ? json['sets'] as int : int.tryParse(json['sets']?.toString() ?? ''),
       reps: json['reps'] is int ? json['reps'] as int : int.tryParse(json['reps']?.toString() ?? ''),
+      paramCalories: json['param_calories']?.toString(),
     );
   }
 }
@@ -2241,11 +2270,45 @@ class ExerciseDetailCard extends StatefulWidget {
 
 class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
   bool _isFavorite = false;
+  
+  ExerciseSeoData? _seoData;
+  List<Map<String, dynamic>> _relatedExercises = [];
+  bool _isSeoLoading = false;
 
   @override
   void initState() {
     super.initState();
     _loadFavoriteStatus();
+    if (kIsWeb) {
+      _loadSeoData();
+    }
+  }
+
+  @override
+  void didUpdateWidget(ExerciseDetailCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.exercise.id != widget.exercise.id) {
+      _loadFavoriteStatus();
+      if (kIsWeb) {
+        _loadSeoData();
+      }
+    }
+  }
+
+  Future<void> _loadSeoData() async {
+    setState(() => _isSeoLoading = true);
+    
+    final seo = await SeoCacheService.fetchSeoData(widget.exercise.id);
+    final related = await SeoCacheService.fetchRelatedExercises(
+        widget.exercise.id, widget.exercise.target, widget.exercise.equipment ?? '');
+        
+    if (mounted) {
+      setState(() {
+        _seoData = seo;
+        _relatedExercises = related;
+        _isSeoLoading = false;
+      });
+    }
   }
 
   Future<void> _loadFavoriteStatus() async {
@@ -2408,14 +2471,38 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
                   child: Column(
                     children: [
                       if (widget.exercise.target.isNotEmpty)
-                        _buildInfoRow('Target muscle:', widget.exercise.target,
-                            textColor, subTextColor),
+                        _buildInfoRow('Primary Muscle', widget.exercise.target, textColor, subTextColor),
                       if (widget.exercise.synergist.isNotEmpty)
-                        _buildInfoRow('Synergist:', widget.exercise.synergist,
-                            textColor, subTextColor),
+                        _buildInfoRow('Secondary Muscles', widget.exercise.synergist, textColor, subTextColor),
+                      if (kIsWeb && _seoData?.stabilizerMuscles != null && _seoData!.stabilizerMuscles!.isNotEmpty)
+                        _buildInfoRow('Stabilizer Muscles', _seoData!.stabilizerMuscles!, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.equipmentType != null && _seoData!.equipmentType!.isNotEmpty)
+                        _buildInfoRow('Equipment', _seoData!.equipmentType!, textColor, subTextColor)
+                      else if ((widget.exercise.equipment ?? '').isNotEmpty)
+                        _buildInfoRow('Equipment', widget.exercise.equipment!, textColor, subTextColor),
+                      
                       if (widget.exercise.difficulty.isNotEmpty)
-                        _buildInfoRow('Difficulty:', widget.exercise.difficulty,
-                            textColor, subTextColor),
+                        _buildInfoRow('Difficulty', widget.exercise.difficulty, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.workoutCategory != null && _seoData!.workoutCategory!.isNotEmpty)
+                        _buildInfoRow('Exercise Type', _seoData!.workoutCategory!, textColor, subTextColor)
+                      else if ((widget.exercise.exerciseType ?? '').isNotEmpty)
+                        _buildInfoRow('Exercise Type', widget.exercise.exerciseType!, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.movementPattern != null && _seoData!.movementPattern!.isNotEmpty)
+                        _buildInfoRow('Movement Pattern', _seoData!.movementPattern!, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.mechanicsType != null && _seoData!.mechanicsType!.isNotEmpty)
+                        _buildInfoRow('Mechanics Type', _seoData!.mechanicsType!, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.forceType != null && _seoData!.forceType!.isNotEmpty)
+                        _buildInfoRow('Force Type', _seoData!.forceType!, textColor, subTextColor),
+                      
+                      if (kIsWeb && _seoData?.estimatedCaloriesBurned != null && _seoData!.estimatedCaloriesBurned!.isNotEmpty)
+                        _buildInfoRow('Calories Burned', '${_seoData!.estimatedCaloriesBurned!.replaceAll(' kcal', '')} kcal', textColor, subTextColor)
+                      else if (widget.exercise.paramCalories != null && widget.exercise.paramCalories!.isNotEmpty && widget.exercise.paramCalories != '0')
+                        _buildInfoRow('Calories Burned', '${widget.exercise.paramCalories!.replaceAll(' kcal', '')} kcal', textColor, subTextColor),
                     ],
                   ),
                 ),
@@ -2424,52 +2511,104 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
 
                 // Instructions
                 if (widget.exercise.steps.isNotEmpty) ...[
-                  Text(
-                    'Instructions',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: textColor,
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: isDarkMode ? Colors.white24 : Colors.black12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(isDarkMode ? 0.2 : 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: const BoxDecoration(
+                            color: const Color(0xFFFF0000),
+                            borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+                          ),
+                          child: Row(
+                            children: [
+                              Image.asset(
+                                'assets/seocard/Instructions.png',
+                                width: 20,
+                                height: 20,
+                                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                              ),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Instructions',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: widget.exercise.steps.asMap().entries.map((entry) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFFFF0000),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        '${entry.key + 1}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        entry.value,
+                                        style: TextStyle(
+                                          color: textColor,
+                                          fontSize: 15,
+                                          height: 1.6,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  ...widget.exercise.steps.asMap().entries.map((entry) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 28,
-                            height: 28,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFFF0000),
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '${entry.key + 1}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              entry.value,
-                              style: TextStyle(
-                                color: subTextColor,
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
+                ],
+                
+                if (kIsWeb) ...[
+                  const SizedBox(height: 24),
+                  _buildSeoSection(isDarkMode, textColor),
                 ],
               ],
             ),
@@ -2478,6 +2617,189 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
       ),
     );
   }
+
+  Widget _buildSeoSection(bool isDark, Color textPrimary) {
+    if (_isSeoLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Column(
+            children: [
+              const CircularProgressIndicator(color: Color(0xFFFF0000)),
+              const SizedBox(height: 16),
+              Text("Loading expert guide...", style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    if (_seoData == null) return const SizedBox.shrink();
+    
+    final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_seoData!.overview != null)
+          _buildSeoCard('Overview', _seoData!.overview!, isDark, cardBg, textPrimary),
+        if (_seoData!.benefits != null)
+          _buildSeoCard('Benefits', _seoData!.benefits!, isDark, cardBg, textPrimary),
+        if (_seoData!.commonMistakes != null)
+          _buildSeoCard('Common Mistakes', _seoData!.commonMistakes!, isDark, cardBg, textPrimary),
+        if (_seoData!.proTips != null)
+          _buildSeoCard('Pro Tips', _seoData!.proTips!, isDark, cardBg, textPrimary),
+        if (_seoData!.muscleAnatomy != null)
+          _buildSeoCard('Muscle Anatomy', _seoData!.muscleAnatomy!, isDark, cardBg, textPrimary),
+        if (_seoData!.bestWorkoutSplits != null)
+          _buildSeoCard('Best Workout Splits', _seoData!.bestWorkoutSplits!, isDark, cardBg, textPrimary),
+        if (_seoData!.exerciseVariations != null)
+          _buildSeoCard('Exercise Variations', _seoData!.exerciseVariations!, isDark, cardBg, textPrimary),
+        if (_seoData!.beginnerTips != null)
+          _buildSeoCard('Beginner Tips', _seoData!.beginnerTips!, isDark, cardBg, textPrimary),
+        if (_seoData!.advancedTips != null)
+          _buildSeoCard('Advanced Tips', _seoData!.advancedTips!, isDark, cardBg, textPrimary),
+        
+        // FAQ Accordion Style Card
+        if (_seoData!.faq1Question != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 24),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF0000),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+                  ),
+                  child: Row(
+                    children: [
+                      Image.asset(
+                        'assets/seocard/Frequently Asked Questions.png',
+                        width: 20,
+                        height: 20,
+                        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Frequently Asked Questions',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _buildFaqItem(_seoData!.faq1Question, _seoData!.faq1Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq2Question, _seoData!.faq2Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq3Question, _seoData!.faq3Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq4Question, _seoData!.faq4Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq5Question, _seoData!.faq5Answer, isDark, textPrimary, isLast: true),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSeoCard(String title, String content, bool isDark, Color cardBg, Color textPrimary) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFF0000), // GymGuide Red
+              borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+            ),
+            child: Row(
+              children: [
+                Image.asset(
+                  title == 'Beginner Tips' ? 'assets/seocard/Pro Tips.png' : 'assets/seocard/$title.png',
+                  width: 20,
+                  height: 20,
+                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              content
+                  .replaceAll('<ul>\n', '')
+                  .replaceAll('<ul>', '')
+                  .replaceAll('</ul>\n', '')
+                  .replaceAll('</ul>', '')
+                  .replaceAll('<li>', '• ')
+                  .replaceAll('</li>', ''),
+              style: TextStyle(color: textPrimary, fontSize: 15, height: 1.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFaqItem(String? q, String? a, bool isDark, Color textPrimary, {bool isLast = false}) {
+    if (q == null || a == null) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(bottom: BorderSide(color: isDark ? Colors.white24 : Colors.black12)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          iconColor: const Color(0xFFFF0000),
+          collapsedIconColor: isDark ? Colors.white54 : Colors.black54,
+          title: Text(
+            q,
+            style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 15),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                a,
+                style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 14, height: 1.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
 
   Widget _buildInfoRow(
       String label, String value, Color textColor, Color subTextColor) {
@@ -2495,20 +2817,41 @@ class _ExerciseDetailCardState extends State<ExerciseDetailCard> {
           children: [
             // Label cell
             Container(
-              width: 120,
+              width: 160,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 border: Border(
                   right: BorderSide(color: borderColor, width: 1),
                 ),
               ),
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFFF0000),
-                ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF0000).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Image.asset(
+                      'assets/seocard/$label.png',
+                      width: 18,
+                      height: 18,
+                      // removed color tint so the native colors (like white "kcal" text) show up
+                      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFFFF0000),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             // Value cell

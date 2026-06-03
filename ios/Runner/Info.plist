@@ -51,6 +51,8 @@
 	<string>GymGuide needs photo library access so you can choose custom photos for your meals.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>GymGuide needs permission to save your AI transformation result to your Photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Gym Guide uses location only to improve app functionality and user experience.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

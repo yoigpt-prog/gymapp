@@ -21,6 +21,7 @@ import '../main.dart';
 import '../widgets/red_header.dart';
 import '../widgets/promo_banner.dart';
 import '../widgets/auth/auth_modal.dart';
+import 'workout_page.dart';
 import 'legal/privacy_policy_page.dart';
 import 'legal/terms_of_service_page.dart';
 import 'legal/disclaimer_page.dart';
@@ -82,6 +83,8 @@ class ProfilePageState extends State<ProfilePage> {
   // Subscription state for Upgrade card
   bool _isPro = false;
   bool _isTrial = false;
+
+  bool _isResetting = false;
 
   final ScrollController _scrollController = ScrollController();
 
@@ -1705,100 +1708,7 @@ class ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             ],
-            if (!_isPro) ...[
-              const SizedBox(height: 20),
-              Divider(color: borderColor),
-              const SizedBox(height: 16),
-              // Inner Unlock Banner
-              GestureDetector(
-                onTap: () {
-                  final user = Supabase.instance.client.auth.currentUser;
-                  if (user == null) {
-                    AuthModal.show(context);
-                  } else {
-                    AnalyticsService().trackPaywallViewed(source: 'profile_page_card');
-                    RevenueCatService().showPaywall();
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF0000),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF0000),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
-                        ),
-                        child: Center(
-                          child: Image.asset(
-                            'assets/progress/program completion.png',
-                            width: 24,
-                            height: 24,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Unlock Full Program',
-                                maxLines: 1,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Continue your transformation without limits',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white.withOpacity(0.85),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Unlock',
-                          style: TextStyle(
-                            color: Color(0xFFFF0000),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+
           ],
         ),
       );
@@ -2093,13 +2003,20 @@ class ProfilePageState extends State<ProfilePage> {
           );
 
           final buttonWidget = ElevatedButton(
-            onPressed: _showResetConfirmationDialog,
+            onPressed: _isResetting ? null : _showResetConfirmationDialog,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF0000),
               foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.grey.shade400,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             ),
-            child: const Text('Create New Plan', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: _isResetting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  )
+                : const Text('Create New Plan', style: TextStyle(fontWeight: FontWeight.bold)),
           );
 
           return Column(
@@ -2337,34 +2254,57 @@ class ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _resetUserPlan() async {
+    if (_isResetting) return;
+    if (!mounted) return;
+
+    setState(() => _isResetting = true);
+
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() => _isResetting = false);
+      return;
+    }
+
+    String? _resetError;
 
     try {
-      // 1. Delete user plan data from Supabase in the correct cascade order
-      // Fetch the user's plan IDs first, then delete pivot rows
+      debugPrint('[RESET] ① Starting plan reset for user=${user.id}');
+
+      // 1. Delete pivot rows first (FK constraint order)
       final planRows = await Supabase.instance.client
           .from('user_meal_plans')
           .select('id')
           .eq('user_id', user.id);
+      debugPrint('[RESET] ② Got ${(planRows as List).length} meal plan rows');
+
       final planIds = (planRows as List).map<String>((r) => r['id'].toString()).toList();
       if (planIds.isNotEmpty) {
         await Supabase.instance.client
             .from('user_meal_plan_meals')
             .delete()
             .inFilter('plan_id', planIds);
+        debugPrint('[RESET] ③ Deleted meal_plan_meals');
       }
 
       await Supabase.instance.client.from('user_meal_plans').delete().eq('user_id', user.id);
-      await Supabase.instance.client.from('user_meal_plan_v2').delete().eq('user_id', user.id);
-      await Supabase.instance.client.from('user_workout_progress').delete().eq('user_id', user.id);
-      await Supabase.instance.client.from('user_weekly_weights').delete().eq('user_id', user.id);
-      // Delete generated workout plans so the engine creates a fresh one
-      await Supabase.instance.client.from('ai_plans').delete().eq('user_id', user.id);
-      // Also clear the user_preferences row so the app treats them as a new user
-      await Supabase.instance.client.from('user_preferences').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ④ Deleted user_meal_plans');
 
-      // 2. Clear local auth flags
+      await Supabase.instance.client.from('user_meal_plan_v2').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ⑤ Deleted user_meal_plan_v2');
+
+      await Supabase.instance.client.from('user_workout_progress').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ⑥ Deleted user_workout_progress');
+
+      await Supabase.instance.client.from('user_weekly_weights').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ⑦ Deleted user_weekly_weights');
+
+      await Supabase.instance.client.from('ai_plans').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ⑧ Deleted ai_plans');
+
+      await Supabase.instance.client.from('user_preferences').delete().eq('user_id', user.id);
+      debugPrint('[RESET] ⑨ Deleted user_preferences');
+
+      // 2. Clear local prefs
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('has_workout_plan');
       await prefs.remove('has_meal_plan');
@@ -2372,22 +2312,39 @@ class ProfilePageState extends State<ProfilePage> {
       await prefs.remove('plan_duration');
       await prefs.remove('duration_weeks_int');
       await prefs.remove('weight_unit');
+      await prefs.remove('hasCompletedQuiz');
+      debugPrint('[RESET] ⑩ Cleared local prefs');
 
-      if (mounted) {
-        // 3. Navigate back to root (GymGuideApp will restart the full auth/onboarding flow)
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const GymGuideApp()),
-          (route) => false,
-        );
-      }
-    } catch (e) {
-      debugPrint('[PROFILE] Error resetting plan: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to reset plan: $e')),
-        );
-      }
+      // 3. Clear static WorkoutPage blocklist
+      WorkoutPageState.clearMissingPrefsCache();
+      debugPrint('[RESET] ⑪ Cleared WorkoutPage blocklist');
+
+    } catch (e, stack) {
+      debugPrint('[RESET] ❌ Error during reset: $e\n$stack');
+      _resetError = e.toString();
+    } finally {
+      // Always reset the spinner — whether we succeeded, failed, or are about to runApp
+      if (mounted) setState(() => _isResetting = false);
     }
+
+    if (_resetError != null) {
+      // Show error without risking a secondary exception
+      try {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Reset failed: $_resetError')),
+          );
+        }
+      } catch (_) {}
+      return;
+    }
+
+    // 4. Schedule root widget replacement on the next frame so Flutter
+    //    is not in the middle of a build/layout cycle.
+    debugPrint('[RESET] ⑫ Scheduling runApp on next frame');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      debugPrint('[RESET] ⑬ Calling runApp — app will restart now');
+      runApp(GymGuideApp(key: UniqueKey()));
+    });
   }
 }

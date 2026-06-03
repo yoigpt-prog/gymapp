@@ -3,8 +3,11 @@ import 'package:video_player/video_player.dart';
 import 'home_page.dart';
 import '../services/video_cache_service.dart';
 import '../services/set_progress_service.dart';
+import '../services/seo_cache_service.dart';
 import '../config/env_config.dart';
 import '../widgets/ai_coach_button.dart';
+import 'package:flutter/foundation.dart';
+import '../utils/seo_interop_stub.dart' if (dart.library.js_interop) '../utils/seo_interop_web.dart';
 
 class ExerciseDetailPage extends StatefulWidget {
   final ExerciseDetail exercise;
@@ -40,7 +43,10 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
   bool _hasSaveError = false;
 
   final SetProgressService _svc = SetProgressService();
-
+  
+  ExerciseSeoData? _seoData;
+  List<Map<String, dynamic>> _relatedExercises = [];
+  bool _isSeoLoading = false;
   // Stable exercise key: always prefer exercise_id; fall back to a positional key.
   String get _exerciseId {
     final id = widget.exercise.id.trim();
@@ -67,6 +73,59 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
       _completedSets = List.generate(totalSets, (_) => false);
       _repsPerSet = List.generate(totalSets, (_) => baseReps);
       _loadProgress();
+    }
+    
+    if (kIsWeb) {
+      _loadSeoData();
+    }
+  }
+
+  Future<void> _loadSeoData() async {
+    setState(() => _isSeoLoading = true);
+    
+    final seo = await SeoCacheService.fetchSeoData(widget.exercise.id);
+    final related = await SeoCacheService.fetchRelatedExercises(
+        widget.exercise.id, widget.exercise.target, widget.exercise.equipment ?? '');
+        
+    if (mounted) {
+      setState(() {
+        _seoData = seo;
+        _relatedExercises = related;
+        _isSeoLoading = false;
+      });
+      _injectSeoMetadata();
+    }
+  }
+  
+  void _injectSeoMetadata() {
+    if (!kIsWeb) return;
+    
+    final title = _seoData?.seoTitle ?? '${widget.exercise.name} - How to, Benefits, and Muscles Worked';
+    final desc = _seoData?.seoDescription ?? 'Learn how to perform the ${widget.exercise.name}. Detailed instructions, muscles worked, and expert tips for better results.';
+    final url = 'https://www.gymguide.co/exercise/${widget.exercise.slug}';
+    
+    // Build JSON-LD FAQ Schema dynamically if data exists
+    String schemaJson = '';
+    if (_seoData?.faq1Question != null) {
+      schemaJson = '''
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "${_seoData!.faq1Question}",
+            "acceptedAnswer": { "@type": "Answer", "text": "${_seoData!.faq1Answer}" }
+          }
+        ]
+      }
+      ''';
+    }
+    
+    try {
+      setExerciseSEO(title, desc, url, schemaJson);
+    } catch (e) {
+      debugPrint('Error injecting SEO via JS: $e');
     }
   }
 
@@ -448,10 +507,32 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
                         child: Column(children: [
                           _buildTableRow('Body Part', widget.exercise.target, isDark, isFirst: true),
                           _buildTableRow('Synergist', widget.exercise.synergist, isDark),
+                          
+                          if (kIsWeb && _seoData != null) ...[
+                            if (_seoData!.workoutCategory != null)
+                              _buildTableRow('Category', _seoData!.workoutCategory!, isDark),
+                            if (_seoData!.equipmentType != null)
+                              _buildTableRow('Equip. Type', _seoData!.equipmentType!, isDark),
+                            if (_seoData!.movementPattern != null)
+                              _buildTableRow('Movement', _seoData!.movementPattern!, isDark),
+                            if (_seoData!.forceType != null)
+                              _buildTableRow('Force Type', _seoData!.forceType!, isDark),
+                            if (_seoData!.mechanicsType != null)
+                              _buildTableRow('Mechanics', _seoData!.mechanicsType!, isDark),
+                            if (_seoData!.stabilizerMuscles != null)
+                              _buildTableRow('Stabilizers', _seoData!.stabilizerMuscles!, isDark),
+                            if (_seoData!.estimatedCaloriesBurned != null)
+                              _buildTableRow('Calories', '${_seoData!.estimatedCaloriesBurned} kcal', isDark),
+                          ],
+                          
                           _buildTableRow('Difficulty', widget.exercise.difficulty, isDark, isLast: true),
                         ]),
                       ),
                       const SizedBox(height: 24),
+                      
+                      // ── SEO Content (Web Only) ──────────────────────────────
+                      if (kIsWeb) _buildSeoSection(isDark, cardBg, textPrimary),
+                      
                     ],
                   ),
                 ),
@@ -642,6 +723,178 @@ class _ExerciseDetailPageState extends State<ExerciseDetailPage> {
             child: Text(value,
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 14)),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ── SEO Section Builder ──────────────────────────────────────────────────────
+  Widget _buildSeoSection(bool isDark, Color cardBg, Color textPrimary) {
+    if (_isSeoLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Column(
+            children: [
+              const CircularProgressIndicator(color: Color(0xFFFF0000)),
+              const SizedBox(height: 16),
+              Text("Loading expert guide...", style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    if (_seoData == null) return const SizedBox.shrink();
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_seoData!.overview != null)
+          _buildSeoCard('Overview', _seoData!.overview!, isDark, cardBg, textPrimary),
+        if (_seoData!.benefits != null)
+          _buildSeoCard('Benefits', _seoData!.benefits!, isDark, cardBg, textPrimary),
+        if (_seoData!.commonMistakes != null)
+          _buildSeoCard('Common Mistakes', _seoData!.commonMistakes!, isDark, cardBg, textPrimary),
+        if (_seoData!.proTips != null)
+          _buildSeoCard('Pro Tips', _seoData!.proTips!, isDark, cardBg, textPrimary),
+        if (_seoData!.muscleAnatomy != null)
+          _buildSeoCard('Muscle Anatomy', _seoData!.muscleAnatomy!, isDark, cardBg, textPrimary),
+        if (_seoData!.bestWorkoutSplits != null)
+          _buildSeoCard('Best Workout Splits', _seoData!.bestWorkoutSplits!, isDark, cardBg, textPrimary),
+        if (_seoData!.exerciseVariations != null)
+          _buildSeoCard('Exercise Variations', _seoData!.exerciseVariations!, isDark, cardBg, textPrimary),
+        if (_seoData!.beginnerTips != null)
+          _buildSeoCard('Beginner Tips', _seoData!.beginnerTips!, isDark, cardBg, textPrimary),
+        if (_seoData!.advancedTips != null)
+          _buildSeoCard('Advanced Tips', _seoData!.advancedTips!, isDark, cardBg, textPrimary),
+        
+        // FAQ Accordion Style Card
+        if (_seoData!.faq1Question != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 24),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF0000),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+                  ),
+                  child: const Text(
+                    'Frequently Asked Questions',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                _buildFaqItem(_seoData!.faq1Question, _seoData!.faq1Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq2Question, _seoData!.faq2Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq3Question, _seoData!.faq3Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq4Question, _seoData!.faq4Answer, isDark, textPrimary),
+                _buildFaqItem(_seoData!.faq5Question, _seoData!.faq5Answer, isDark, textPrimary, isLast: true),
+              ],
+            ),
+          ),
+          
+        if (_relatedExercises.isNotEmpty)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '• Related Exercises',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textPrimary, letterSpacing: 1.0),
+              ),
+              const SizedBox(height: 16),
+              ..._relatedExercises.map((e) => InkWell(
+                onTap: () {
+                  // Basic web navigation refresh (in a real scenario, use GoRouter or Navigator.push)
+                  // For SEO compliance, we allow the URL to change naturally.
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.fitness_center, color: Color(0xFFFF0000), size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          e['exercise_name'] ?? 'Exercise',
+                          style: TextStyle(color: textPrimary, fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              )).toList(),
+              const SizedBox(height: 32),
+            ],
+          ),
+      ],
+    );
+  }
+  
+  Widget _buildSeoCard(String title, String content, bool isDark, Color cardBg, Color textPrimary) {
+    if (content.trim().isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFF0000),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+            ),
+            child: Text(
+              title,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              content,
+              style: TextStyle(color: textPrimary, fontSize: 15, height: 1.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFaqItem(String? q, String? a, bool isDark, Color textPrimary, {bool isLast = false}) {
+    if (q == null || q.isEmpty || a == null || a.isEmpty) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(bottom: BorderSide(color: isDark ? Colors.white24 : Colors.black12)),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(q, style: TextStyle(color: textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(a, style: TextStyle(color: textPrimary.withOpacity(0.8), fontSize: 14, height: 1.4)),
         ],
       ),
     );

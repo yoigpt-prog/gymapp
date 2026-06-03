@@ -38,6 +38,16 @@ bool isIOS() {
   }
 }
 
+bool isIOSSafari() {
+  if (!isIOS()) return false;
+  try {
+    final ua = web.window.navigator.userAgent.toLowerCase();
+    return !ua.contains('crios') && !ua.contains('fxios') && !ua.contains('edgios');
+  } catch (_) {
+    return false;
+  }
+}
+
 bool isInAppBrowser() {
   try {
     final ua = web.window.navigator.userAgent.toLowerCase();

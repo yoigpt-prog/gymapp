@@ -16,9 +16,9 @@ class NotificationPermissionService {
 
   /// Request push permission safely
   /// Only call this after onboarding quiz started or completed
-  Future<void> requestPermission([BuildContext? context]) async {
+  Future<void> requestPermission([BuildContext? context, bool isManual = false]) async {
     if (kIsWeb) {
-      _handleWebPermission(context);
+      _handleWebPermission(context, isManual);
       return;
     }
 
@@ -56,17 +56,17 @@ class NotificationPermissionService {
     return OneSignal.Notifications.permission;
   }
 
-  void _handleWebPermission(BuildContext? context) {
+  void _handleWebPermission(BuildContext? context, bool isManual) {
     if (context == null) {
       if (isDesktopWeb()) {
         requestWebNotificationPermission();
       }
       return;
     }
-    maybeShowWebPushBrandedPrompt(context);
+    maybeShowWebPushBrandedPrompt(context, isManual: isManual);
   }
 
-  Future<void> maybeShowWebPushBrandedPrompt(BuildContext context) async {
+  Future<void> maybeShowWebPushBrandedPrompt(BuildContext context, {bool isManual = false}) async {
     if (!kIsWeb) return;
 
     if (isInAppBrowser()) {
@@ -80,6 +80,8 @@ class NotificationPermissionService {
     }
 
     if (isIOS()) {
+      if (!isManual && isIOSSafari()) return;
+      
       _showInstallAppDialog(
         context,
         title: "Install Gym Guide App",

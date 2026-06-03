@@ -60,7 +60,14 @@ serve(async (req: Request) => {
   }
 
   const name = data.exercise_name || 'Exercise';
-  const thumbnailUrl = data.thumbnail_url || 'https://www.gymguide.co/assets/logo.png';
+  let thumbnailUrl = data.thumbnail_url || 'https://www.gymguide.co/assets/logo.png';
+  if (!thumbnailUrl.startsWith('http')) {
+    if (thumbnailUrl.startsWith('/')) {
+      thumbnailUrl = `https://www.gymguide.co${thumbnailUrl}`;
+    } else {
+      thumbnailUrl = `https://www.gymguide.co/exercise/${thumbnailUrl}`;
+    }
+  }
   const target = data.target_muscle || data.body_part || 'General';
   const parentMuscle = data.parent_muscle || '';
   const difficulty = data.difficulty_level || 'Intermediate';

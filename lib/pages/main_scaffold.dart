@@ -63,7 +63,7 @@ class MainScaffoldState extends State<MainScaffold> {
   final GlobalKey<ProfilePageState> _profileKey = GlobalKey<ProfilePageState>();
 
   // Keys to prevent unnecessary state destruction on theme toggle
-  final GlobalKey _homeKey = GlobalKey();
+  final GlobalKey<HomePageState> _homeKey = GlobalKey<HomePageState>();
   final GlobalKey _settingsKey = GlobalKey();
   final GlobalKey _bmiKey = GlobalKey();
   final GlobalKey _calorieKey = GlobalKey();
@@ -466,6 +466,11 @@ class MainScaffoldState extends State<MainScaffold> {
     }
     
     // Refresh Logic when tapping specifically on Tabs
+    if (index == 0) {
+      if (_currentIndex == 0) {
+        _homeKey.currentState?.resetState();
+      }
+    }
     if (index == 1) {
       if (_currentIndex == 1) {
         // Only refresh if tapping the tab while already on it

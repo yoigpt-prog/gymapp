@@ -45,21 +45,14 @@ class _RedHeaderState extends State<RedHeader> {
 
   // ── Search bar state ────────────────────────────────────────────────────────
   final FocusNode _searchFocusNode = FocusNode();
-  bool _isSearchExpanded = false;
+  bool _isSearchExpanded = true;
 
   @override
   void initState() {
     super.initState();
     _searchFocusNode.addListener(() {
       setState(() {
-        if (_searchFocusNode.hasFocus) {
-          _isSearchExpanded = true;
-        } else {
-          // Collapse if empty
-          if (widget.searchController?.text.isEmpty ?? true) {
-            _isSearchExpanded = false;
-          }
-        }
+        _isSearchExpanded = true;
       });
     });
   }
@@ -98,7 +91,7 @@ class _RedHeaderState extends State<RedHeader> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth;
-        final showStores = availableWidth > 1050;
+        final showStores = availableWidth > 1250;
         final reducedSpacing = availableWidth < 1150;
 
         return Row(
@@ -161,23 +154,17 @@ class _RedHeaderState extends State<RedHeader> {
             const SizedBox(width: 20),
 
             // Search bar
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-              width: _isSearchExpanded ? 280 : 36,
-              height: 36,
-              clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: 280,
+            Flexible(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                width: _isSearchExpanded ? 280 : 36,
+                height: 36,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                ),
                 child: Row(
                   children: [
                     GestureDetector(
@@ -202,16 +189,19 @@ class _RedHeaderState extends State<RedHeader> {
                         controller: widget.searchController,
                         focusNode: _searchFocusNode,
                         onChanged: widget.onSearch,
+                        textAlignVertical: TextAlignVertical.center,
                         decoration: InputDecoration(
-                          hintText: 'Explore 1800+ Free Exercises...  ',
+                          isDense: true,
+                          hintText: 'Explore 1800+ Free Exercises...',
                           hintStyle: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 14,
                           ),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.only(
+                            left: 4,
                             right: 16,
-                            bottom: 12, // Adjusted vertically
+                            bottom: 4,
                           ),
                         ),
                         style: const TextStyle(
@@ -223,10 +213,8 @@ class _RedHeaderState extends State<RedHeader> {
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
+            ),
+            const SizedBox(width: 12),
 
         // Dark mode toggle
         InkWell(

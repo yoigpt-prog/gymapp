@@ -389,9 +389,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 SizedBox(
-                                  width: 72,
+                                  width: 74,
                                   height: 34,
                                   child: Stack(
+                                    clipBehavior: Clip.none,
                                     children: [
                                       Positioned(left: 0, child: _buildAvatar('assets/avatar1.png', 34)),
                                       Positioned(left: 20, child: _buildAvatar('assets/avatar2.png', 34)),
@@ -635,7 +636,10 @@ Widget _buildAvatar(String asset, double size) {
       boxShadow: [
         BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4)
       ],
+      image: DecorationImage(
+        image: AssetImage(asset),
+        fit: BoxFit.cover,
+      ),
     ),
-    child: ClipOval(child: Image.asset(asset, fit: BoxFit.cover)),
   );
 }

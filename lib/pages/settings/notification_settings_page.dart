@@ -54,7 +54,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
     if (value) {
       // Ensure we have push permissions if they are turning something ON
-      await NotificationPermissionService().requestPermission(context);
+      await NotificationPermissionService().requestPermission(context, true);
     }
 
     await NotificationSyncService().updateNotificationPreferences({key: value});

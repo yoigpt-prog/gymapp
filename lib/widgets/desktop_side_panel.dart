@@ -17,12 +17,8 @@ class DesktopSidePanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 1. Hoverable Square Ad Banner
-        HoverableAdBanner(
-          onTap: () {
-            Navigator.pushNamed(context, '/download');
-          },
-        ),
+        // 1. AdSense Placeholder Banner
+        const AdSensePlaceholderBanner(),
         const SizedBox(height: 16),
 
         // 2. Featured Content Card
@@ -30,17 +26,9 @@ class DesktopSidePanel extends StatelessWidget {
           decoration: BoxDecoration(
             color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
             border: Border.all(
-              color: isDarkMode ? Colors.white12 : Colors.black12,
+              color: isDarkMode ? Colors.white : Colors.black,
               width: 1.0,
             ),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(isDarkMode ? 0.4 : 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -143,59 +131,31 @@ class DesktopSidePanel extends StatelessWidget {
   }
 }
 
-class HoverableAdBanner extends StatefulWidget {
-  final VoidCallback onTap;
-
-  const HoverableAdBanner({Key? key, required this.onTap}) : super(key: key);
-
-  @override
-  State<HoverableAdBanner> createState() => _HoverableAdBannerState();
-}
-
-class _HoverableAdBannerState extends State<HoverableAdBanner> {
-  bool _isHovered = false;
+class AdSensePlaceholderBanner extends StatelessWidget {
+  const AdSensePlaceholderBanner({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _isHovered ? 1.02 : 1.0,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: _isHovered
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.25),
-                        blurRadius: 15,
-                        offset: const Offset(0, 8),
-                      )
-                    ]
-                  : [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      )
-                    ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: AspectRatio(
-                aspectRatio: 1.0,
-                child: Image.asset(
-                  'assets/banner/adgymguide.png',
-                  fit: BoxFit.cover,
-                ),
-              ),
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
+    return AspectRatio(
+      aspectRatio: 1.0,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          border: Border.all(
+            color: isDarkMode ? Colors.white : Colors.black,
+            width: 1.0,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            'Advertisement Space',
+            style: GoogleFonts.outfit(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDarkMode ? Colors.white38 : Colors.black38,
+              letterSpacing: 1.2,
             ),
           ),
         ),

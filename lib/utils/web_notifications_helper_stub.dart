@@ -2,6 +2,7 @@
 bool isDesktopWeb() => false;
 bool isAndroidChrome() => false;
 bool isIOS() => false;
+bool isIOSSafari() => false;
 bool isInAppBrowser() => false;
 bool supportsWebPush() => false;
 bool isWebSubscribed() => false;
