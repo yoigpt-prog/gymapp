@@ -6,6 +6,11 @@ set -e
 
 echo "🚀 Starting Production VPS Deployment..."
 
+if [ ! -f "build/web/flutter_bootstrap.js" ]; then
+    echo "❌ Error: Flutter web build not found in build/web/. Please run 'flutter build web' first to prevent wiping production!"
+    exit 1
+fi
+
 # 1. Generate Static SEO Shells
 echo "🌐 Generating Static SEO Shells..."
 python3 scripts/build_seo_shells.py
