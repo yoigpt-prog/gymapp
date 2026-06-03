@@ -76,8 +76,9 @@ def generate_html(title, desc, path, schema=None, image=None, noindex=False, h1=
         
     h1_tag = f'<h1 style="display:none;">{h1}</h1>' if h1 else ''
     
-    # Read base index.html template
-    with open("web/index.html", "r", encoding="utf-8") as f:
+    # Read base index.html template from the COMPILED build directory
+    # so that $FLUTTER_BASE_HREF and other variables are already resolved by Flutter.
+    with open("build/web/index.html", "r", encoding="utf-8") as f:
         base_html = f.read()
         
     # Strip existing default SEO tags to avoid duplicates
