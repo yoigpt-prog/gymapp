@@ -44,6 +44,21 @@ class _ExercisePageState extends State<ExercisePage> {
 
       if (response != null && mounted) {
         var finalResponse = response;
+        var canonicalSlug = widget.slug;
+
+        // If duplicate record (i.e. female variant), dynamically fetch base slug
+        if (response['is_male'] != true) {
+           final baseName = response['exercise_name'].toString().trim().toLowerCase();
+           final canonicalRes = await Supabase.instance.client
+                .from('exercises')
+                .select('exercise_slug')
+                .eq('is_male', true)
+                .ilike('exercise_name', '${baseName}%')
+                .maybeSingle();
+           if (canonicalRes != null && canonicalRes['exercise_slug'] != null) {
+               canonicalSlug = canonicalRes['exercise_slug'] as String;
+           }
+        }
         
         if (widget.initialGender != null) {
           final isFemaleRequested = widget.initialGender!.toLowerCase() == 'female';
@@ -66,7 +81,7 @@ class _ExercisePageState extends State<ExercisePage> {
         
         setState(() {
           _exercise = ExerciseDetail.fromJson(finalResponse);
-          _exercise = _exercise!.copyWith(slug: widget.slug);
+          _exercise = _exercise!.copyWith(slug: canonicalSlug);
           _isLoading = false;
         });
       } else if (mounted) {
@@ -168,6 +183,21 @@ class _ExercisePageState extends State<ExercisePage> {
       );
     }
 
+    String absoluteImageUrl = 'https://www.gymguide.co/icons/Icon-512.png';
+    if (_exercise != null && _exercise!.imagePath.isNotEmpty) {
+      if (_exercise!.imagePath.toLowerCase().endsWith('.mp4')) {
+        final uri = Uri.tryParse(_exercise!.imagePath);
+        if (uri != null && uri.pathSegments.isNotEmpty) {
+           String filename = uri.pathSegments.last.replaceAll(RegExp(r'\.mp4$', caseSensitive: false), '.jpg');
+           filename = filename.replaceAllMapped(RegExp(r'^(\d{6})05'), (match) => match.group(1)!);
+           filename = filename.replaceAll(RegExp(r'_GREEN', caseSensitive: false), '');
+           absoluteImageUrl = 'https://www.gymguide.co/exercise/$filename';
+        }
+      } else if (_exercise!.imagePath.startsWith('http')) {
+        absoluteImageUrl = _exercise!.imagePath;
+      }
+    }
+
     return Seo.head(
       tags: [
         if (_exercise != null) ...[
@@ -175,9 +205,11 @@ class _ExercisePageState extends State<ExercisePage> {
           MetaTag(name: 'description', content: 'Learn how to do ${_exercise!.name}, including target muscles, synergists, difficulty level, and step-by-step instructions.'),
           MetaTag(name: 'og:title', content: '${_exercise!.name} - Muscles Worked, Instructions & Form | GymGuide'),
           MetaTag(name: 'og:description', content: 'Learn how to do ${_exercise!.name}, including target muscles, synergists, difficulty level, and step-by-step instructions.'),
+          MetaTag(name: 'og:type', content: 'website'),
           MetaTag(name: 'og:url', content: 'https://www.gymguide.co/exercise/${_exercise!.slug}'),
-          if (_exercise!.imagePath.isNotEmpty && !_exercise!.imagePath.toLowerCase().endsWith('.mp4'))
-            MetaTag(name: 'og:image', content: _exercise!.imagePath),
+          MetaTag(name: 'og:image', content: absoluteImageUrl),
+          MetaTag(name: 'twitter:card', content: 'summary_large_image'),
+          MetaTag(name: 'twitter:image', content: absoluteImageUrl),
         ],
       ],
       child: childWidget,

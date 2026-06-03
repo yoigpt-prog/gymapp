@@ -62,7 +62,7 @@ def get_blogs():
         print(f"Error parsing blogs: {e}")
         return []
 
-def generate_html(title, desc, path, canonical_url=None, schema=None, image=None, noindex=False, body_content=None):
+def generate_html(title, desc, path, canonical_url=None, schema=None, image=None, noindex=False, h1=None):
     canonical = canonical_url if canonical_url else f"{BASE_URL}/{path}"
     robots = '<meta name="robots" content="noindex">' if noindex else '<meta name="robots" content="index, follow">'
     schema_script = f'<script type="application/ld+json">\n{json.dumps(schema, indent=2)}\n</script>' if schema else ''
@@ -74,7 +74,7 @@ def generate_html(title, desc, path, canonical_url=None, schema=None, image=None
     else:
         og_image = f'<meta property="og:image" content="{BASE_URL}/icons/Icon-512.png">'
         
-    body_injection = body_content if body_content else ''
+    h1_tag = f'<h1 style="display:none;">{h1}</h1>' if h1 else ''
     
     # Read base index.html template from the COMPILED build directory
     # so that $FLUTTER_BASE_HREF and other variables are already resolved by Flutter.
@@ -107,9 +107,9 @@ def generate_html(title, desc, path, canonical_url=None, schema=None, image=None
     # Inject before </head>
     final_html = base_html.replace('</head>', f'{seo_tags}</head>')
     
-    # Inject static HTML right after <body>
-    if body_injection:
-        final_html = final_html.replace('<body>', f'<body>\n  <div id="seo-static-content">\n{body_injection}\n  </div>')
+    # Inject H1 right after <body>
+    if h1_tag:
+        final_html = final_html.replace('<body>', f'<body>\n  {h1_tag}')
     
     clean_path = path.strip('/')
     full_path = os.path.join("build/web", clean_path)
@@ -143,7 +143,7 @@ def main():
             path=f"blog/{blog['slug']}",
             schema=schema,
             image=blog.get('image'),
-            body_content=f"<h1>{blog['title']}</h1>\n<p>{blog['desc']}</p>"
+            h1=blog['title']
         )
     print(f"✅ Generated {len(blogs)} Blog Shells")
     
@@ -190,14 +190,14 @@ def main():
             desc=calc['desc'],
             path=f"calculators/{calc['slug']}",
             schema=schema,
-            body_content=f"<h1>{calc['title']}</h1>\n<p>{calc['desc']}</p>"
+            h1=calc['title']
         )
     print(f"✅ Generated {len(calculators)} Calculator Shells")
     
     # 3. Generate Exercises
     print("Fetching exercises from Supabase...")
-    exercises = fetch_all('exercises', 'id,exercise_slug,exercise_name,target_muscle,equipment,exercise_type,is_male,is_female,urls,instruction_1,instruction_2,instruction_3,instruction_4,difficulty_level')
-    exercise_seo = fetch_all('exercise_seo', 'exercise_id,overview,seo_title,seo_description,benefits,common_mistakes,faq_1_question,faq_1_answer,faq_2_question,faq_2_answer,faq_3_question,faq_3_answer,faq_4_question,faq_4_answer,faq_5_question,faq_5_answer')
+    exercises = fetch_all('exercises', 'id,exercise_slug,exercise_name,target_muscle,equipment,exercise_type,is_male,is_female,urls')
+    exercise_seo = fetch_all('exercise_seo', 'exercise_id,overview,seo_title,seo_description')
     
     # Create lookup map
     seo_map = {row['exercise_id']: row for row in exercise_seo}
@@ -239,85 +239,17 @@ def main():
         desc = seo_data.get('seo_description') or f"Learn how to perform the {name}. Discover the benefits, muscles worked, and common mistakes."
         
         schema = None
-        body_html = ""
         if is_high_quality:
             high_quality += 1
-            
-            # Build body_content
-            body_parts = [f"<h1>{name}</h1>", f"<p>{overview}</p>"]
-            
-            target = ex.get('target_muscle', '')
-            if target: body_parts.append(f"<h2>Muscles Worked</h2>\n<p>{target}</p>")
-            
-            equip = ex.get('equipment', '')
-            if equip: body_parts.append(f"<h2>Equipment</h2>\n<p>{equip}</p>")
-            
-            diff = ex.get('difficulty_level', '')
-            if diff: body_parts.append(f"<h2>Difficulty</h2>\n<p>{diff}</p>")
-            
-            ex_type = ex.get('exercise_type', 'Strength')
-            if ex_type: body_parts.append(f"<h2>Exercise Type</h2>\n<p>{ex_type}</p>")
-            
-            steps = []
-            for i in range(1, 5):
-                step = ex.get(f'instruction_{i}')
-                if step and step.strip(): steps.append(step.strip())
-            
-            how_to_schema = []
-            if steps:
-                body_parts.append("<h2>How to Do...</h2>\n<ol>")
-                for step in steps:
-                    body_parts.append(f"<li>{step}</li>")
-                    how_to_schema.append({"@type": "HowToStep", "text": step})
-                body_parts.append("</ol>")
-                
-            benefits = seo_data.get('benefits', '')
-            if benefits: body_parts.append(f"<h2>Benefits</h2>\n{benefits}")
-            
-            mistakes = seo_data.get('common_mistakes', '')
-            if mistakes: body_parts.append(f"<h2>Common Mistakes</h2>\n{mistakes}")
-            
-            faq_schema = []
-            faq_html = []
-            for i in range(1, 6):
-                q = seo_data.get(f'faq_{i}_question')
-                a = seo_data.get(f'faq_{i}_answer')
-                if q and a:
-                    faq_html.append(f"<h3>{q}</h3>\n<p>{a}</p>")
-                    faq_schema.append({
-                        "@type": "Question",
-                        "name": q,
-                        "acceptedAnswer": {"@type": "Answer", "text": a}
-                    })
-            if faq_html:
-                body_parts.append("<h2>Frequently Asked Questions</h2>\n" + "\n".join(faq_html))
-                
-            body_html = "\n".join(body_parts)
-
             schema = {
                 "@context": "https://schema.org",
-                "@graph": [
-                    {
-                        "@type": "ExerciseAction",
-                        "name": name,
-                        "description": desc,
-                        "exerciseType": ex_type,
-                        "muscleAction": target,
-                        "equipment": equip
-                    }
-                ]
+                "@type": "ExerciseAction",
+                "name": name,
+                "description": desc,
+                "exerciseType": ex.get('exercise_type', 'Strength'),
+                "muscleAction": ex.get('target_muscle', ''),
+                "equipment": ex.get('equipment', '')
             }
-            if how_to_schema:
-                schema["@graph"].append({
-                    "@type": "HowTo",
-                    "name": f"How to do {name}",
-                    "step": how_to_schema
-                })
-            if faq_schema:
-                schema["@graph"].append({
-                    "@type": "FAQPage",
-                    "mainEntity": faq_schema
-                })
         else:
             low_quality += 1
             
@@ -342,70 +274,11 @@ def main():
             canonical_url=canonical_url,
             schema=schema,
             noindex=not is_high_quality,
-            body_content=body_html,
+            h1=name,
             image=thumbnail_url
         )
         
     print(f"✅ Generated {high_quality + low_quality} Exercise Shells ({high_quality} High Quality, {low_quality} Low Quality/NoIndex)")
-    
-    # 4. Generate Static Legal and Trust Pages
-    trust_pages = [
-        {"slug": "about", "title": "About Gym Guide", "desc": "Gym Guide is your personalized workout and meal plan app."},
-        {"slug": "contact", "title": "Contact Us – Gym Guide", "desc": "Get in touch with Gym Guide support and team."},
-        {"slug": "privacy", "title": "Privacy Policy – Gym Guide", "desc": "Read our privacy policy to understand how we protect your data."},
-        {"slug": "terms", "title": "Terms of Service – Gym Guide", "desc": "Gym Guide terms of service and usage conditions."},
-        {"slug": "disclaimer", "title": "Disclaimer – Gym Guide", "desc": "Educational fitness information only. Not medical advice."},
-        {"slug": "faq", "title": "Frequently Asked Questions – Gym Guide", "desc": "Get answers to common questions about Gym Guide."},
-        {"slug": "ai-transparency", "title": "AI Transparency – Gym Guide", "desc": "Learn how Gym Guide uses AI for personalized fitness plans."},
-        {"slug": "subscription", "title": "Subscription & Pricing – Gym Guide", "desc": "Gym Guide subscription options, premium features, and pricing."}
-    ]
-    
-    org_schema = {
-        "@context": "https://schema.org",
-        "@type": "Organization",
-        "name": "GGUIDE Apps Solutions LLC",
-        "brand": "GymGuide",
-        "url": "https://www.gymguide.co",
-        "logo": "https://www.gymguide.co/icons/Icon-512.png"
-    }
-
-    for tp in trust_pages:
-        generate_html(
-            title=tp['title'],
-            desc=tp['desc'],
-            path=tp['slug'],
-            schema=org_schema,
-            body_content=f"<h1>{tp['title']}</h1>\n<p>{tp['desc']}</p>\n<p>Educational fitness information only. Not medical advice.</p>"
-        )
-    print(f"✅ Generated {len(trust_pages)} Static Trust Pages")
-
-    # Generate Homepage with schemas
-    generate_html(
-        title="Gym Guide – Personalized Workout & Meal Plan App",
-        desc="Get your custom workout and meal plan in seconds. 1800+ exercises, fat loss & muscle gain programs. Download Gym Guide now.",
-        path="",
-        canonical_url="https://www.gymguide.co/",
-        schema={
-            "@context": "https://schema.org",
-            "@graph": [
-                org_schema,
-                {
-                    "@type": "WebSite",
-                    "url": "https://www.gymguide.co",
-                    "name": "Gym Guide"
-                },
-                {
-                    "@type": "SoftwareApplication",
-                    "name": "Gym Guide",
-                    "operatingSystem": "iOS, Android",
-                    "applicationCategory": "HealthApplication"
-                }
-            ]
-        },
-        body_content="<h1>Gym Guide – Personalized Workout & Meal Plan App</h1>\n<p>Get your custom workout and meal plan in seconds. Educational fitness information only. Not medical advice.</p>"
-    )
-    print("✅ Generated Homepage Shell")
-    
     print("🎉 SEO Shell Generation Complete!")
 
 if __name__ == "__main__":

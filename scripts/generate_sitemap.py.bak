@@ -68,7 +68,7 @@ def generate_sitemap():
     urls.append({"loc": f"{BASE_URL}/calculators", "priority": "0.8", "changefreq": "monthly"})
     
     # Static Legal & Footer Pages
-    static_pages = ['privacy', 'terms', 'subscription', 'ai-transparency', 'contact', 'faq', 'about', 'disclaimer']
+    static_pages = ['privacy', 'terms', 'subscription', 'ai-transparency', 'contact', 'faq', 'about']
     for page in static_pages:
         urls.append({"loc": f"{BASE_URL}/{page}", "priority": "0.6", "changefreq": "monthly"})
         

@@ -67,12 +67,7 @@ OVERVIEW_TEMPLATES = [
     "When programming for {target} growth, the {name} stands out as a highly efficient {type} choice. Performing this movement with {equip} forces your stabilizer muscles to work in tandem with the primary movers, translating to functional strength and enhanced muscular endurance.",
     "If you want to isolate and overload the {target}, the {name} is an excellent addition to your routine. The mechanics of this {type} exercise specifically bias the {body_part}, while the use of {equip} allows for a smooth, natural resistance curve.",
     "Athletic trainers and bodybuilding coaches frequently recommend the {name} because it challenges the {target} through a dynamic range of motion. By relying on {equip}, it reinforces proper movement patterns and builds robust strength in the {body_part} region.",
-    "Focusing on the {name} allows you to target the {target} with precision. As a foundational {type} exercise, the integration of {equip} provides the necessary tension to trigger hypertrophy, while avoiding excessive joint strain.",
-    "To effectively build the {target}, the {name} provides a robust movement path. This {type} exercise requires minimal setup and uses {equip} to place direct mechanical tension exactly where it is needed on the {body_part}.",
-    "Mastering the {name} is essential for unlocking advanced {target} strength. This popular {type} exercise can easily be scaled to any fitness level by adjusting the {equip}, making it a staple for comprehensive {body_part} training.",
-    "Integrating the {name} into your routine guarantees targeted stress on the {target}. Whether you are a beginner or advanced, this {type} movement uses {equip} to drive measurable gains and improve overall {body_part} stability.",
-    "A well-rounded program often relies on the {name} to stimulate the {target}. The controlled execution of this {type} exercise via {equip} is highly beneficial for sustained muscular progression in the {body_part}.",
-    "The {name} is widely recognized for its ability to isolate the {target}. By carefully adjusting the {equip}, you can ensure that this {type} exercise continually challenges your {body_part} for steady adaptations."
+    "Focusing on the {name} allows you to target the {target} with precision. As a foundational {type} exercise, the integration of {equip} provides the necessary tension to trigger hypertrophy, while avoiding excessive joint strain."
 ]
 
 BENEFIT_TEMPLATES = [
@@ -82,13 +77,7 @@ BENEFIT_TEMPLATES = [
     "<li>Acts as a highly scalable {type} movement, perfect for both beginners and elite athletes.</li>",
     "<li>Promotes balanced muscular development by effectively recruiting the {target} and associated synergists.</li>",
     "<li>Reduces the likelihood of {body_part} injuries by reinforcing connective tissue strength.</li>",
-    "<li>Allows for a natural movement path that closely mimics functional daily activities.</li>",
-    "<li>Builds formidable endurance and work capacity within the {target}.</li>",
-    "<li>Improves mind-muscle connection when focusing heavily on the {body_part}.</li>",
-    "<li>Can easily be modified with different {equip} grips or stances to target specific muscle fibers.</li>",
-    "<li>Helps correct muscular imbalances by directly stimulating the {target}.</li>",
-    "<li>Provides a strong foundational base for more complex {type} movements.</li>",
-    "<li>Generates an excellent muscle pump by forcing sustained blood flow into the {body_part}.</li>"
+    "<li>Allows for a natural movement path that closely mimics functional daily activities.</li>"
 ]
 
 MISTAKE_TEMPLATES = [
@@ -96,11 +85,7 @@ MISTAKE_TEMPLATES = [
     "<li>Failing to achieve a full range of motion, which drastically limits {target} engagement.</li>",
     "<li>Losing core tension, leading to poor spinal alignment and reduced power output.</li>",
     "<li>Rushing the repetition tempo instead of focusing on the mind-muscle connection with the {body_part}.</li>",
-    "<li>Shrugging the shoulders or compensating with secondary muscles rather than isolating the {target}.</li>",
-    "<li>Overloading the {equip} beyond your capacity, which sacrifices proper form and risks injury.</li>",
-    "<li>Allowing the elbows or knees to flare excessively, placing undue stress on joints rather than the {target}.</li>",
-    "<li>Holding your breath during the entire repetition instead of breathing rhythmically.</li>",
-    "<li>Ignoring the negative phase of the lift, missing out on crucial {body_part} muscle damage.</li>"
+    "<li>Shrugging the shoulders or compensating with secondary muscles rather than isolating the {target}.</li>"
 ]
 
 PRO_TIPS_TEMPLATES = [
@@ -108,10 +93,7 @@ PRO_TIPS_TEMPLATES = [
     "Control the eccentric (lowering) phase of the {name} for 3-4 seconds to drastically increase time under tension.",
     "Think about pulling from your elbows rather than your hands to better isolate the {target} and minimize bicep/forearm takeover.",
     "Keep your breathing rhythmic: exhale sharply on the concentric push/pull, and inhale smoothly on the way down.",
-    "If you feel this primarily in your joints rather than the {target}, instantly lower the weight and readjust your {equip} setup.",
-    "Try slightly pausing at the bottom of the movement to eliminate the stretch reflex.",
-    "Focus your gaze straight ahead to maintain a neutral spine position during the {name}.",
-    "Warm up the {body_part} thoroughly before jumping into your heavy working sets with the {equip}."
+    "If you feel this primarily in your joints rather than the {target}, instantly lower the weight and readjust your {equip} setup."
 ]
 
 FAQ_TEMPLATES = [
@@ -134,18 +116,6 @@ FAQ_TEMPLATES = [
     (
         "What is the optimal rep range for the {name}?",
         "For pure hypertrophy of the {target}, aim for 8-15 controlled repetitions. For strength, 4-6 reps with heavier {equip} is ideal."
-    ),
-    (
-        "Can beginners do the {name}?",
-        "Yes, the {name} is excellent for beginners. Focus on mastering the technique and keeping the {equip} light until you feel a strong activation in the {target}."
-    ),
-    (
-        "Should I lock out my joints during the {name}?",
-        "To keep continuous tension on the {target}, it is generally better to stop just short of a full joint lockout during the movement."
-    ),
-    (
-        "How do I improve my mind-muscle connection during the {name}?",
-        "Lighten the {equip} and close your eyes. Actively visualize the {target} stretching and contracting with every single repetition."
     )
 ]
 
